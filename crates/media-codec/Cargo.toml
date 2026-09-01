@@ -1,0 +1,13 @@
+[package]
+name = "removent-media-codec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+removent-proto = { workspace = true }
+videotoolbox = "0.18"
+apple-cf = "0.9"
+opus = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

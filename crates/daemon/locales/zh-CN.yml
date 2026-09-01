@@ -1,0 +1,13 @@
+# removentd 的简体中文文案。
+_version: 1
+
+daemon.name: removentd
+
+error.init_data_dir: "初始化数据目录失败"
+error.already_running: "removentd 已在运行（%{path} 被锁定），退出"
+error.create_runtime: "创建 tokio runtime 失败"
+error.load_identity: "加载本机身份失败"
+error.register_sigterm: "注册 SIGTERM 失败"
+error.reload_settings: "设置重载失败：%{err}"
+error.unknown_request_id: "未知或已超时的 request_id: %{id}"
+error.kick_unimplemented: "未实现（session_id=%{id}）"

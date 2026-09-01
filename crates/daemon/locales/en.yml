@@ -1,0 +1,13 @@
+# English (source locale) strings for removentd.
+_version: 1
+
+daemon.name: removentd
+
+error.init_data_dir: "Failed to initialize data directory"
+error.already_running: "removentd is already running (%{path} is locked); exiting"
+error.create_runtime: "Failed to create tokio runtime"
+error.load_identity: "Failed to load local identity"
+error.register_sigterm: "Failed to register SIGTERM handler"
+error.reload_settings: "Failed to reload settings: %{err}"
+error.unknown_request_id: "Unknown or expired request_id: %{id}"
+error.kick_unimplemented: "Not implemented (session_id=%{id})"

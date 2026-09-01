@@ -1,0 +1,79 @@
+# English (source locale) strings for removent-cli.
+_version: 1
+
+cli.name: removent-cli
+
+usage: |
+  removent-cli — Removent smoke-test tool
+
+  Usage:
+    removent-cli ping <addr|name|short-fingerprint> [options]
+    removent-cli daemon <status|enable|disable>
+
+  Options:
+    --pin <code>       Pairing PIN (read from stdin when pairing is required and omitted)
+    --count <n>        Number of pings (default 4)
+    --timeout <secs>   mDNS discovery timeout (default 10)
+    --name <device>    Local display name (default RemoventCLI)
+
+daemon.unknown_action: "Unknown daemon action: %{action} (supported: status|enable|disable)"
+daemon.connect_failed: "Failed to connect to daemon (is removentd running?)"
+daemon.send_failed: "Failed to send request"
+daemon.wait_timeout: "Timed out waiting for daemon response"
+daemon.read_failed: "Failed to read response"
+daemon.disconnected: "Daemon disconnected without responding"
+daemon.serialize_failed: "Failed to serialize response"
+
+args.missing_value: "%{arg} requires a value"
+args.count_invalid: "--count requires a positive integer"
+args.timeout_invalid: "--timeout requires a number of seconds"
+args.unrecognized: "Unrecognized argument: %{arg}"
+args.missing_target: "Missing target (address, device name, or short fingerprint)"
+
+resolve.mdns_failed: "mDNS browse failed: %{err}"
+resolve.discovered: "Discovered %{name}: %{fp} @ %{addr}"
+resolve.ambiguous: "Target `%{target}` matched %{count} devices; use a more precise name or short fingerprint: %{list}"
+resolve.timeout_none: "Timeout: no Removent devices found on the LAN"
+resolve.timeout_unmatched: "Timeout: no match for `%{target}`; currently online: %{seen}"
+
+pin.prompt: "Enter the PIN shown on the host: "
+
+pairing.open_stream: "open pairing stream: %{err}"
+pairing.challenge_timeout: "Timed out waiting for Challenge"
+pairing.stream_closed: "Pairing stream closed by peer"
+pairing.expected_challenge: "Expected Challenge, received another message"
+pairing.no_pin: "No PIN entered"
+pairing.spake2_verify: "SPAKE2 verify: %{err}"
+pairing.confirm_timeout: "Timed out waiting for Confirm"
+pairing.no_peer_key: "Failed to extract public key from peer certificate"
+pairing.confirm_failed: "Confirm check failed: %{err}"
+pairing.done: "Pairing complete"
+pairing.failed: "Pairing skipped/failed: %{err}"
+
+control.wait_timeout: "Timed out waiting for %{what}"
+control.stream_error: "Control stream error: %{err}"
+control.stream_closed: "Control stream closed by peer"
+control.unexpected: "Received an unrecognized control message; expected %{what}"
+control.what.session_accept: "SessionAccept"
+control.what.negotiate_offer: "NegotiateOffer"
+control.what.final_negotiate_reply: "final NegotiateReply"
+control.what.pong: "Pong"
+
+session.connecting: "Connecting to %{addr} …"
+session.ready: "Session ready (%{codec} @%{fps}fps, audio %{rate}Hz), starting ping ×%{count}"
+
+ping.line: "ping #%{n}: %{ms} ms"
+ping.stats: "--- stats: %{samples} samples min %{min} / avg %{avg} / max %{max} ms (quinn estimate %{est} ms) ---"
+
+error.load_identity: "Failed to load local identity"
+error.create_endpoint: "Failed to create endpoint: %{err}"
+error.quic_connect: "QUIC connection failed: %{err}"
+error.no_peer_fp: "Peer certificate fingerprint missing"
+error.handshake: "Handshake failed: %{err}"
+error.send_session_request: "Failed to send SessionRequest: %{err}"
+error.session_rejected: "Host rejected the session: %{reason}"
+error.expected_session_accept: "Expected SessionAccept, received %{msg}"
+error.expected_negotiate_offer: "Expected NegotiateOffer"
+error.send_negotiate_reply: "Failed to send NegotiateReply: %{err}"
+error.send_ping: "Failed to send Ping: %{err}"
+error.unknown_subcommand: "Unknown subcommand: %{cmd}"

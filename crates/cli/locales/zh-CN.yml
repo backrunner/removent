@@ -1,0 +1,79 @@
+# removent-cli 的简体中文文案。
+_version: 1
+
+cli.name: removent-cli
+
+usage: |
+  removent-cli — Removent 冒烟测试工具
+
+  用法:
+    removent-cli ping <addr|名称|短指纹> [选项]
+    removent-cli daemon <status|enable|disable>
+
+  选项:
+    --pin <码>       配对 PIN（缺省时在需要配对时从标准输入读取）
+    --count <次>     Ping 次数（默认 4）
+    --timeout <秒>   mDNS 发现超时（默认 10）
+    --name <设备名>  本端展示名（默认 RemoventCLI）
+
+daemon.unknown_action: "未知 daemon 操作: %{action}（支持 status|enable|disable）"
+daemon.connect_failed: "连接 daemon 失败（removentd 未运行？）"
+daemon.send_failed: "发送请求失败"
+daemon.wait_timeout: "等待 daemon 响应超时"
+daemon.read_failed: "读取响应失败"
+daemon.disconnected: "daemon 未响应即断开"
+daemon.serialize_failed: "序列化响应失败"
+
+args.missing_value: "%{arg} 缺少参数"
+args.count_invalid: "--count 需要正整数"
+args.timeout_invalid: "--timeout 需要秒数"
+args.unrecognized: "无法识别的参数: %{arg}"
+args.missing_target: "缺少目标（地址、设备名或短指纹）"
+
+resolve.mdns_failed: "mDNS 浏览失败: %{err}"
+resolve.discovered: "发现 %{name}: %{fp} @ %{addr}"
+resolve.ambiguous: "目标 `%{target}` 匹配到 %{count} 台设备，请用更精确的名称或短指纹: %{list}"
+resolve.timeout_none: "超时：局域网内未发现任何 Removent 设备"
+resolve.timeout_unmatched: "超时：未匹配到 `%{target}`；当前在线: %{seen}"
+
+pin.prompt: "请输入被控端显示的 PIN: "
+
+pairing.open_stream: "打开配对流: %{err}"
+pairing.challenge_timeout: "等待 Challenge 超时"
+pairing.stream_closed: "配对流被对端关闭"
+pairing.expected_challenge: "预期 Challenge，收到其他消息"
+pairing.no_pin: "未输入 PIN"
+pairing.spake2_verify: "SPAKE2 verify: %{err}"
+pairing.confirm_timeout: "等待 Confirm 超时"
+pairing.no_peer_key: "无法从对端证书提取公钥"
+pairing.confirm_failed: "Confirm 校验失败: %{err}"
+pairing.done: "配对完成"
+pairing.failed: "配对跳过/失败: %{err}"
+
+control.wait_timeout: "等待 %{what} 超时"
+control.stream_error: "控制流错误: %{err}"
+control.stream_closed: "控制流被对端关闭"
+control.unexpected: "收到无法识别的控制消息，预期 %{what}"
+control.what.session_accept: "SessionAccept"
+control.what.negotiate_offer: "NegotiateOffer"
+control.what.final_negotiate_reply: "最终 NegotiateReply"
+control.what.pong: "Pong"
+
+session.connecting: "连接 %{addr} …"
+session.ready: "会话就绪（%{codec} @%{fps}fps，音频 %{rate}Hz），开始 ping ×%{count}"
+
+ping.line: "ping #%{n}: %{ms} ms"
+ping.stats: "--- 统计: %{samples} 个样本 min %{min} / avg %{avg} / max %{max} ms（quinn 估计 %{est} ms）---"
+
+error.load_identity: "加载本机身份失败"
+error.create_endpoint: "创建 endpoint 失败: %{err}"
+error.quic_connect: "QUIC 连接失败: %{err}"
+error.no_peer_fp: "对端证书指纹缺失"
+error.handshake: "握手失败: %{err}"
+error.send_session_request: "发送 SessionRequest: %{err}"
+error.session_rejected: "被控端拒绝会话: %{reason}"
+error.expected_session_accept: "预期 SessionAccept，收到 %{msg}"
+error.expected_negotiate_offer: "预期 NegotiateOffer"
+error.send_negotiate_reply: "发送 NegotiateReply: %{err}"
+error.send_ping: "发送 Ping: %{err}"
+error.unknown_subcommand: "未知子命令: %{cmd}"

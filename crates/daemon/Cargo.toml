@@ -1,0 +1,29 @@
+[package]
+name = "removent-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "removentd"
+path = "src/main.rs"
+
+[lib]
+name = "removent_daemon"
+path = "src/lib.rs"
+
+[dependencies]
+removent-core = { workspace = true }
+removent-host = { workspace = true }
+removent-input = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+serde_json = { workspace = true }
+rust-i18n = { workspace = true }
+core-foundation = { workspace = true }
+
+[dev-dependencies]
+removent-proto = { workspace = true }
+tempfile = "3"

@@ -1,0 +1,37 @@
+/* 菜单状态行：服务状态 */
+"status.daemon_offline" = "未连接 daemon";
+"status.running" = "运行中";
+"status.stopped" = "已停用";
+
+/* 菜单项 */
+"menu.service_status" = "Removent 服务：%@";
+"menu.device_fingerprint" = "设备指纹：%@";
+"menu.open_main_window" = "打开 Removent 主窗口";
+"menu.no_sessions" = "当前无会话";
+"menu.permission_screen_recording_missing" = "缺少屏幕录制权限 — 请在系统设置 > 隐私与安全性中允许 removentd";
+"menu.permission_accessibility_missing" = "缺少辅助功能权限 — 请在系统设置 > 隐私与安全性中允许 removentd";
+"menu.pairing_pin" = "配对 PIN：%@";
+"menu.enable_service" = "启用服务";
+"menu.disable_service" = "停用服务";
+"menu.launch_at_login" = "开机自动启动";
+"menu.open_data_directory" = "打开数据目录";
+"menu.quit" = "退出菜单栏";
+
+/* 会话时长格式 */
+"session.duration.hm" = "%d小时%02d分";
+"session.duration.ms" = "%d分%02d秒";
+"session.duration.s" = "%d秒";
+
+/* 弹窗 */
+"alert.connection_request" = "连接请求：%@";
+"alert.connection_request_detail" = "指纹 %@\n允许后对方可以观看并控制本机屏幕。";
+"alert.allow" = "允许";
+"alert.deny" = "拒绝";
+"alert.ok" = "好";
+"alert.pairing_request" = "配对请求";
+"alert.pairing_pin_detail" = "PIN：%@，5 分钟内有效。";
+"alert.main_app_not_found" = "未找到 Removent 主应用";
+"alert.main_app_not_found_detail" = "未在系统中找到 Removent（bundle id io.removent.app），请先安装主应用。";
+"alert.open_main_app_failed" = "打开主应用失败：%@";
+"alert.daemon_not_found" = "找不到 removentd";
+"alert.daemon_not_found_detail" = "未找到 removentd 可执行文件，无法开启开机自动启动。请先安装 Removent daemon。";

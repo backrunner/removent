@@ -1,0 +1,37 @@
+/* Menu status line: service state */
+"status.daemon_offline" = "Daemon not connected";
+"status.running" = "Running";
+"status.stopped" = "Stopped";
+
+/* Menu items */
+"menu.service_status" = "Removent Service: %@";
+"menu.device_fingerprint" = "Device Fingerprint: %@";
+"menu.open_main_window" = "Open Removent Main Window";
+"menu.no_sessions" = "No Active Sessions";
+"menu.permission_screen_recording_missing" = "Screen Recording Permission Missing — allow removentd in System Settings > Privacy & Security";
+"menu.permission_accessibility_missing" = "Accessibility Permission Missing — allow removentd in System Settings > Privacy & Security";
+"menu.pairing_pin" = "Pairing PIN: %@";
+"menu.enable_service" = "Enable Service";
+"menu.disable_service" = "Disable Service";
+"menu.launch_at_login" = "Launch at Login";
+"menu.open_data_directory" = "Open Data Directory";
+"menu.quit" = "Quit Menu Bar App";
+
+/* Session duration formats */
+"session.duration.hm" = "%dh %02dm";
+"session.duration.ms" = "%dm %02ds";
+"session.duration.s" = "%ds";
+
+/* Alerts */
+"alert.connection_request" = "Connection Request: %@";
+"alert.connection_request_detail" = "Fingerprint %@\nIf allowed, the peer can view and control this Mac's screen.";
+"alert.allow" = "Allow";
+"alert.deny" = "Deny";
+"alert.ok" = "OK";
+"alert.pairing_request" = "Pairing Request";
+"alert.pairing_pin_detail" = "PIN: %@. Valid for 5 minutes.";
+"alert.main_app_not_found" = "Removent Main App Not Found";
+"alert.main_app_not_found_detail" = "Removent (bundle id io.removent.app) was not found on this system. Please install the main app first.";
+"alert.open_main_app_failed" = "Failed to open the main app: %@";
+"alert.daemon_not_found" = "removentd Not Found";
+"alert.daemon_not_found_detail" = "The removentd executable was not found, so Launch at Login cannot be enabled. Please install the Removent daemon first.";

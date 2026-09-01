@@ -1,0 +1,22 @@
+[package]
+name = "removent-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+removent-core = { workspace = true }
+removent-proto = { workspace = true }
+removent-net = { workspace = true }
+removent-media-codec = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+ed25519-dalek = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+removent-media-capture = { workspace = true }
+removent-host = { workspace = true }
+tracing-subscriber = { workspace = true }

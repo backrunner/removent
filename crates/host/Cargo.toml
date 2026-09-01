@@ -1,0 +1,24 @@
+[package]
+name = "removent-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+removent-core = { workspace = true }
+removent-proto = { workspace = true }
+removent-net = { workspace = true }
+removent-media-codec = { workspace = true }
+removent-media-capture = { workspace = true }
+removent-input = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+hex = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

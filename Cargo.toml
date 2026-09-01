@@ -1,0 +1,83 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/app",
+    "crates/client",
+    "crates/host",
+    "crates/core",
+    "crates/proto",
+    "crates/net",
+    "crates/media-capture",
+    "crates/media-codec",
+    "crates/input",
+    "crates/cli",
+    "crates/daemon",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/removent/removent"
+rust-version = "1.85"
+
+[workspace.dependencies]
+removent-core = { path = "crates/core" }
+removent-proto = { path = "crates/proto" }
+removent-net = { path = "crates/net" }
+removent-media-capture = { path = "crates/media-capture" }
+removent-media-codec = { path = "crates/media-codec" }
+removent-input = { path = "crates/input" }
+removent-client = { path = "crates/client" }
+removent-host = { path = "crates/host" }
+
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+postcard = { version = "1", features = ["alloc"] }
+bytes = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+quinn = "0.11"
+rustls = { version = "0.23", default-features = false, features = ["std", "aws_lc_rs"] }
+rcgen = "0.13"
+rustls-pemfile = "2"
+mdns-sd = "0.13"
+spake2 = "0.4"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+sha2 = "0.10"
+hex = "0.4"
+opus = "0.3"
+rubato = "0.16"
+libc = "0.2"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSData", "NSArray", "NSDictionary", "NSRunLoop", "NSThread", "NSObjCRuntime"] }
+objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSImage", "NSApplication", "NSWorkspace"] }
+core-graphics = "0.24"
+core-foundation = "0.10"
+uuid = { version = "1", features = ["v4"] }
+rust-i18n = "3"
+sys-locale = "0.3"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "allow"

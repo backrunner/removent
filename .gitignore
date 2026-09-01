@@ -1,0 +1,15 @@
+# Rust build artifacts
+/target/
+
+# Swift build artifacts
+/tray/.build/
+
+# Packaged app bundles, DMG/zip artifacts, generated update manifests
+/dist/
+
+# Local runtime data: device identity keys, settings, logs, sockets.
+# Never commit this — it contains private key material.
+/userdata/
+
+# macOS noise
+.DS_Store

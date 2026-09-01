@@ -1,0 +1,33 @@
+[package]
+name = "removent-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "removent"
+path = "src/main.rs"
+
+[dependencies]
+removent-core = { workspace = true }
+removent-proto = { workspace = true }
+removent-net = { workspace = true }
+removent-input = { workspace = true }
+removent-client = { workspace = true }
+
+gpui = "0.2"
+gpui-component = "0.5"
+image = "0.25"
+rust-i18n = { workspace = true }
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+ed25519-dalek = { workspace = true }
+libc = { workspace = true }
+
+tokio = { workspace = true }
+futures = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+core-foundation = { workspace = true }

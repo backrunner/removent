@@ -1,0 +1,158 @@
+# Removent 应用界面的简体中文文案。
+_version: 1
+
+app.name: Removent
+
+home.name_placeholder: 在局域网中显示的名称
+home.pin_placeholder: 6 位数字
+home.search_placeholder: 搜索设备
+home.manual_placeholder: IP 地址，如 192.168.1.10
+
+titlebar.to_light: 切换到浅色
+titlebar.to_dark: 切换到深色
+
+status.ready: 就绪
+status.host_starting: 正在启动被控服务…
+status.daemon_starting: 正在拉起 removentd…
+status.host_stopping: 正在停止被控服务…
+status.connecting_other: 正在连接其他设备…
+status.connecting: 正在连接 %{name}…
+status.connect_failed: 连接失败：%{err}
+status.admission_allowed: 已允许 %{peer}
+status.admission_denied: 已拒绝 %{peer}
+status.pin_submitted: PIN 已提交，等待协商…
+status.pairing_cancelled: 已取消配对
+status.device_name_empty: 设备名不能为空
+status.settings_saved: 设置已保存（设备名在重启被控服务后生效）
+status.settings_save_failed: 设置保存失败：%{err}
+status.pairing_busy: 收到配对请求，请先完成当前 PIN 输入
+status.pairing_done: 已与 %{peer} 完成配对
+status.auto_admitted: 已自动允许 %{peer} (auto-admit)
+status.session_active: 会话进行中 · %{name} · %{codec}
+status.viewer_open_failed: 打开会话窗口失败：%{err}，请查看日志
+status.peer_connected: 对端已接入 · 编码 %{codec}
+status.session_ended: 会话结束：%{reason}
+status.host_session_started: "%{peer} 已连入（%{codec}）"
+status.host_session_ended: 对端会话结束：%{reason}
+status.admission_expired: 准入请求已超时或被其他端处理
+status.host_running: 被控服务运行中
+status.host_stopped: 被控服务已停止
+status.daemon_offline: 服务守护进程（removentd）未连接
+status.daemon_offline_short: 服务守护进程未连接
+status.admission_mode_updated: 准入模式已更新
+
+err.session_in_progress: 已有进行中的会话
+err.frame_channel_missing: 帧通道缺失
+
+session.peer_disconnected: 对端已断开
+session.internal_error: 会话内部错误，已终止
+session.manually_disconnected: 已手动断开
+
+notice.daemon_spawn_failed: 无法启动 removentd：%{err}
+notice.daemon_start_timeout: removentd 启动超时，被控服务未能开启
+notice.daemon_binary_missing: 找不到 removentd 可执行文件
+notice.discovery_unavailable: 局域网设备发现不可用：%{err}（可用手动 IP 连接）
+
+manual.invalid_addr: 地址格式无效，如 192.168.1.10 或 192.168.1.10:7890
+
+device.paired: 已配对
+device.unpaired: 未配对
+device.searching: 正在搜索局域网设备
+device.searching_hint: 对方开启被控服务后自动出现
+device.no_match: 没有匹配的设备
+device.count: 设备 · %{count}
+device.manual_tooltip: 手动连接 IP
+device.online: 在线 · 可连接
+device.files_tooltip: 文件传输将在后续版本提供
+device.info: 设备信息
+device.address: 地址
+device.fingerprint: 指纹
+device.trust: 信任状态
+
+empty.control_title: 控制其他设备
+empty.control_desc: 从左侧列表选择设备即可查看详情并连接。
+empty.hint_search: 在左侧列表搜索局域网设备
+empty.hint_manual: 点列表头的 + 手动输入 IP 连接
+empty.controlled_title: 被他人控制
+empty.copy_fp_tooltip: 复制指纹
+
+host.service: 被控服务
+
+permissions.screen_capture: 屏幕录制
+permissions.accessibility: 辅助功能
+permissions.screen_capture_purpose: 采集本机画面共享给对端
+permissions.accessibility_purpose: 接收对端键鼠控制
+permissions.open_settings: 打开系统设置
+permissions.daemon_restart_hint: 守护进程（removentd）尚未获得该权限——请关闭再开启主机服务以重启它
+
+settings.title: 设置
+settings.general: 通用
+settings.device_name: 设备名称
+settings.appearance: 外观
+settings.theme.system: 跟随系统
+settings.theme.dark: 深色
+settings.theme.light: 浅色
+settings.language: 语言
+settings.language.system: 跟随系统
+settings.security: 安全
+settings.admission: 接入控制
+settings.admission.ask: 每次询问
+settings.admission.trusted: 信任设备自动通过
+settings.admission.deny: 拒绝所有连接
+settings.data: 数据
+settings.data_dir: 数据目录
+
+update.section: 软件更新
+update.current: 当前版本
+update.check_now: 检查更新
+update.auto_check: 自动检查更新
+update.checking: 正在检查更新…
+update.up_to_date: 已是最新版本
+update.available: 发现新版本：%{version}
+update.download_install: 下载并安装
+update.downloading: 正在下载 %{version}…
+update.verifying: 正在校验更新…
+update.ready: "%{version} 已就绪，可以安装"
+update.install_now: 安装并重启
+update.session_active_hint: 会话进行中，请先结束会话再安装
+update.installing: 正在安装，应用将自动重启…
+update.err.fetch: 获取更新信息失败（%{err}）
+update.err.bad_manifest: 更新清单格式无效（%{err}）
+update.err.signature: 更新签名校验失败，已丢弃下载
+update.err.proto_mismatch: 该版本要求两端一起升级，请同时升级对端后再更新
+update.err.download: 更新下载失败（%{err}）
+update.err.hash_mismatch: 更新文件哈希不一致，已丢弃下载
+update.err.unpack: 解包更新失败（%{err}）
+update.err.codesign: 更新未通过 macOS 代码签名校验，已丢弃
+update.err.codesign_team: 更新的开发者团队签名不符，已丢弃
+update.err.swap: 替换应用失败（%{err}）
+update.err.swap_rollback: 替换应用失败（%{err}），自动回滚也未成功——旧版本保留在 %{backup}，请手动将其移回原位
+update.err.not_in_bundle: 仅在已安装的 .app 中才能自动更新（当前为开发环境）
+update.err.session_active: 会话进行中，请先结束会话再安装
+
+action.connect: 连接
+action.cancel: 取消
+action.close: 关闭
+action.pair: 配对
+action.allow: 允许
+action.deny: 拒绝
+action.open: 打开
+action.save: 保存
+action.back: 返回
+action.files: 文件
+
+pairing.request_title: 配对请求
+pairing.display_desc: 对方设备正在请求配对，请告知 PIN（5 分钟内有效）：
+pairing.entry_title: 输入配对 PIN
+pairing.entry_desc: 请输入对方屏幕上显示的 6 位数字：
+
+admission.title: 连接请求
+admission.desc: 允许后对方可以观看并控制本机屏幕。30 秒未响应将自动拒绝。
+
+viewer.fullscreen_tooltip: 全屏 (⌘F)
+viewer.disconnect_tooltip: 断开连接 (Esc)
+viewer.waiting: 等待视频流
+viewer.waiting_stream: 等待视频流…
+viewer.ended_title: 连接已断开
+viewer.ended_desc: 对端关闭了会话，或网络连接中断。
+viewer.close_window: 关闭窗口

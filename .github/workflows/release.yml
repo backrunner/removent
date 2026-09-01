@@ -1,0 +1,121 @@
+name: Release
+
+# Tag-triggered signed + notarized release. Requires repository secrets:
+#   APPLE_CERTIFICATE            base64 of the Developer ID Application .p12
+#   APPLE_CERTIFICATE_PASSWORD   password of that .p12
+#   APPLE_SIGNING_IDENTITY       e.g. "Developer ID Application: Name (TEAMID)"
+#   UPDATE_SIGNING_KEY           PEM content of the Ed25519 update-signing private key
+#                                (signs latest.json; the matching public key is compiled
+#                                into the app). First-time setup: on the maintainer machine
+#                                the key lives at ~/.config/removent/update-signing-key.pem —
+#                                paste its full content into repo Settings → Secrets and
+#                                variables → Actions → New repository secret, named
+#                                UPDATE_SIGNING_KEY.
+#   Notarization, API key (preferred):
+#     APPLE_API_KEY_ID / APPLE_API_ISSUER / APPLE_API_KEY_BASE64 (base64 of AuthKey_<ID>.p8)
+#   or Apple ID (fallback):
+#     APPLE_ID / APPLE_PASSWORD (app-specific) / APPLE_TEAM_ID
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Check tag matches crate version
+        run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          test "${GITHUB_REF_NAME}" = "v${VERSION}" || {
+            echo "::error::tag ${GITHUB_REF_NAME} != Cargo.toml version v${VERSION}"; exit 1;
+          }
+
+      - name: Import code-signing certificate
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Verify signing identity
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: security find-identity -v -p codesigning | grep -qF "$APPLE_SIGNING_IDENTITY"
+
+      - name: Configure notarization credentials
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "$APPLE_API_KEY_ID" ]; then
+              KEY_PATH="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
+              echo "$APPLE_API_KEY_BASE64" | base64 --decode > "$KEY_PATH"
+              chmod 600 "$KEY_PATH"
+              grep -q "BEGIN PRIVATE KEY" "$KEY_PATH"
+              echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+              echo "APPLE_API_KEY_ID=$APPLE_API_KEY_ID" >> "$GITHUB_ENV"
+              echo "APPLE_API_ISSUER=$APPLE_API_ISSUER" >> "$GITHUB_ENV"
+          elif [ -n "$APPLE_ID" ]; then
+              echo "APPLE_ID=$APPLE_ID" >> "$GITHUB_ENV"
+              echo "APPLE_PASSWORD=$APPLE_PASSWORD" >> "$GITHUB_ENV"
+              echo "APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
+          else
+              echo "::error::no notarization credentials configured"; exit 1
+          fi
+
+      - name: Configure update-signing key
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$UPDATE_SIGNING_KEY" ]; then
+              echo "::error::secret UPDATE_SIGNING_KEY is not set; latest.json would be unsigned"
+              exit 1
+          fi
+          KEY_PATH="${RUNNER_TEMP}/update-signing-key.pem"
+          (umask 077; printf '%s\n' "$UPDATE_SIGNING_KEY" > "$KEY_PATH")
+          # Fail early if the PEM is not a usable Ed25519 private key.
+          openssl pkey -in "$KEY_PATH" -noout
+          echo "UPDATE_SIGNING_KEY_FILE=$KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize, package
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          GITHUB_REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: bash scripts/release.sh
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          gh release create "${GITHUB_REF_NAME}" \
+              "dist/Removent-${VERSION}-macos-arm64.dmg" \
+              "dist/Removent-${VERSION}-macos-arm64.zip" \
+              dist/latest.json \
+              --title "Removent v${VERSION}" \
+              --generate-notes
+
+      - name: Clean up notarization key
+        if: always()
+        run: find "${RUNNER_TEMP}" -maxdepth 1 -type f -name 'AuthKey_*.p8' -delete
+
+      - name: Clean up update-signing key
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/update-signing-key.pem"

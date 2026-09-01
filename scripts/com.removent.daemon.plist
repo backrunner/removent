@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.removent.daemon.plist — removentd LaunchAgent template.
+
+  Install (the installer replaces @EXE@ with the absolute path of removentd and
+  @DATA@ with the absolute path of userdata, then drops the result into
+  ~/Library/LaunchAgents/ and loads it):
+
+    sed -e "s|@EXE@|/path/to/removentd|g" \
+        -e "s|@DATA@|/path/to/userdata|g" \
+        com.removent.daemon.plist > ~/Library/LaunchAgents/com.removent.daemon.plist
+    launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.removent.daemon.plist
+
+  Uninstall:
+
+    launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/com.removent.daemon.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.removent.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>@EXE@</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>REMOVENT_DATA_DIR</key>
+        <string>@DATA@</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>@DATA@/logs/removentd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>@DATA@/logs/removentd.err.log</string>
+</dict>
+</plist>

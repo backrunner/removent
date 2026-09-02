@@ -6,7 +6,7 @@ app.name: Removent
 home.name_placeholder: Name shown on the local network
 home.pin_placeholder: 6-digit code
 home.search_placeholder: Search devices
-home.manual_placeholder: IP address, e.g. 192.168.1.10
+home.manual_placeholder: IP address, e.g. 192.168.1.10 (use :5900 for VNC)
 
 titlebar.to_light: Switch to light
 titlebar.to_dark: Switch to dark
@@ -40,6 +40,7 @@ status.host_stopped: Host service stopped
 status.daemon_offline: Daemon (removentd) not connected
 status.daemon_offline_short: Daemon not connected
 status.admission_mode_updated: Admission mode updated
+status.vnc_updated: VNC settings updated (restart the host service to apply)
 
 err.session_in_progress: A session is already in progress
 err.frame_channel_missing: Frame channel missing
@@ -99,6 +100,13 @@ settings.admission: Admission Control
 settings.admission.ask: Ask Every Time
 settings.admission.trusted: Auto-Allow Trusted Devices
 settings.admission.deny: Deny All Connections
+settings.vnc: Apple Remote Desktop / VNC
+settings.vnc_enabled: Enable VNC compatibility service
+settings.vnc_username: macOS Username
+settings.vnc_username_placeholder: Account name for Apple Remote Desktop
+settings.vnc_password: VNC Password
+settings.vnc_password_placeholder: Leave empty for no password
+settings.vnc_hint: Standard RFB port 5900; Apple Remote Desktop uses the username and password above.
 settings.data: Data
 settings.data_dir: Data Directory
 

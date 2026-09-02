@@ -95,6 +95,8 @@ pub struct HomeView {
     manual_error: Option<String>,
     settings_open: bool,
     device_name_input: Entity<InputState>,
+    vnc_username_input: Entity<InputState>,
+    vnc_password_input: Entity<InputState>,
     /// Auto-update state machine snapshot (engine → UiEvent::UpdateStatus).
     update_status: UpdateStatus,
     my_fp_short: String,
@@ -150,6 +152,21 @@ impl HomeView {
         });
         device_name_input.update(cx, |s, cx| {
             s.set_value(settings.device_name.clone(), window, cx);
+        });
+        let vnc_username_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("settings.vnc_username_placeholder").to_string())
+        });
+        vnc_username_input.update(cx, |s, cx| {
+            s.set_value(settings.vnc_username.clone(), window, cx);
+        });
+        let vnc_password_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .masked(true)
+                .placeholder(t!("settings.vnc_password_placeholder").to_string())
+        });
+        vnc_password_input.update(cx, |s, cx| {
+            s.set_value(settings.vnc_password.clone(), window, cx);
         });
         let focus = cx.focus_handle();
         window.focus(&focus);
@@ -246,6 +263,8 @@ impl HomeView {
             settings_open: false,
             dialog_seq: 0,
             device_name_input,
+            vnc_username_input,
+            vnc_password_input,
             focus,
             bridge_alive,
         }
@@ -392,6 +411,8 @@ impl HomeView {
 
     fn save_settings(&mut self, cx: &mut Context<Self>) {
         let name = self.device_name_input.read(cx).value().trim().to_string();
+        let vnc_username = self.vnc_username_input.read(cx).value().trim().to_string();
+        let vnc_password = self.vnc_password_input.read(cx).value().to_string();
         if name.is_empty() {
             self.set_status(t!("status.device_name_empty").to_string(), StatusTone::Warn);
             cx.notify();
@@ -399,6 +420,8 @@ impl HomeView {
         }
         match self.engine.update_settings(|s| {
             s.device_name = name.clone();
+            s.vnc_username = vnc_username.clone();
+            s.vnc_password = vnc_password.clone();
         }) {
             Ok(()) => {
                 self.trusted = self.engine.trusted_short_fps();
@@ -1282,6 +1305,7 @@ impl HomeView {
     fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors;
         let settings = self.engine.settings();
+        let vnc_enabled = settings.vnc_enabled;
         let admission_idx = match settings.admission {
             AdmissionMode::AlwaysAsk => 0,
             AdmissionMode::TrustedAuto => 1,
@@ -1535,6 +1559,100 @@ impl HomeView {
                                         })),
                                 ),
                         ),
+                    ),
+            )
+            .child(
+                // Compatibility: standard RFB/VNC for Apple Remote Desktop.
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(card_title(t!("settings.vnc").to_string(), cx))
+                    .child(
+                        grouped_card(cx)
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap_3()
+                                    .px_4()
+                                    .py_3()
+                                    .child(
+                                        div()
+                                            .text_size(px(13.))
+                                            .child(t!("settings.vnc_enabled").to_string()),
+                                    )
+                                    .child(
+                                        Switch::new("vnc-enabled").checked(vnc_enabled).on_click(
+                                            cx.listener(|this, _checked, _w, cx| {
+                                                let result = this.engine.update_settings(|s| {
+                                                    s.vnc_enabled = !s.vnc_enabled
+                                                });
+                                                match result {
+                                                    Ok(()) => this.set_status(
+                                                        t!("status.vnc_updated").to_string(),
+                                                        StatusTone::Ok,
+                                                    ),
+                                                    Err(e) => this.set_status(
+                                                        t!("status.settings_save_failed", err = e),
+                                                        StatusTone::Err,
+                                                    ),
+                                                }
+                                                cx.notify();
+                                            }),
+                                        ),
+                                    ),
+                            )
+                            .child(Divider::horizontal())
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .px_4()
+                                    .py_3()
+                                    .child(
+                                        div()
+                                            .w(px(112.))
+                                            .flex_shrink_0()
+                                            .text_size(px(13.))
+                                            .child(t!("settings.vnc_username").to_string()),
+                                    )
+                                    .child(
+                                        div().flex_1().child(Input::new(&self.vnc_username_input)),
+                                    ),
+                            )
+                            .child(Divider::horizontal())
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .px_4()
+                                    .py_3()
+                                    .child(
+                                        div()
+                                            .w(px(112.))
+                                            .flex_shrink_0()
+                                            .text_size(px(13.))
+                                            .child(t!("settings.vnc_password").to_string()),
+                                    )
+                                    .child(
+                                        div().flex_1().child(
+                                            Input::new(&self.vnc_password_input).mask_toggle(),
+                                        ),
+                                    ),
+                            )
+                            .child(Divider::horizontal())
+                            .child(
+                                div()
+                                    .px_4()
+                                    .py_3()
+                                    .text_size(px(12.))
+                                    .text_color(colors.muted_foreground)
+                                    .child(t!("settings.vnc_hint").to_string()),
+                            ),
                     ),
             )
             .child(self.render_update_section(cx))

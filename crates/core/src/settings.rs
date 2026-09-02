@@ -16,6 +16,17 @@ pub struct Settings {
     /// Service master switch (toggleable from the menu bar).
     pub host_enabled: bool,
     pub host_port: u16,
+    /// Optional legacy RFB/VNC listener for Apple Remote Desktop and other
+    /// standard VNC clients. Disabled by default because RFB is LAN-only and
+    /// its password authentication is intentionally legacy-compatible.
+    pub vnc_enabled: bool,
+    pub vnc_port: u16,
+    /// macOS account name used by Apple Remote Desktop (RFB 003.889, types 30/35).
+    pub vnc_username: String,
+    /// VNC password. Empty selects RFB `None` for standard servers; Apple
+    /// Remote Desktop uses this together with `vnc_username` for types 30/35.
+    /// The value is stored only in settings.toml.
+    pub vnc_password: String,
     pub audio_enabled_default: bool,
     /// Seconds to wait after the session window loses focus before clearing the remote-written clipboard; 0 = never clear (architecture.md §7.3).
     pub clipboard_clear_after_secs: u64,
@@ -67,6 +78,10 @@ impl Default for Settings {
             admission: AdmissionMode::AlwaysAsk,
             host_enabled: true,
             host_port: removent_proto::DEFAULT_PORT,
+            vnc_enabled: false,
+            vnc_port: 5900,
+            vnc_username: String::new(),
+            vnc_password: String::new(),
             audio_enabled_default: true,
             clipboard_clear_after_secs: 60,
             video_quality: QualityPreset::Auto,
@@ -155,11 +170,18 @@ mod tests {
         let s = Settings::load(&p).unwrap();
         assert_eq!(s.admission, AdmissionMode::AlwaysAsk);
         assert_eq!(s.host_port, removent_proto::DEFAULT_PORT);
+        assert!(!s.vnc_enabled);
+        assert_eq!(s.vnc_port, 5900);
+        assert!(s.vnc_username.is_empty());
+        assert!(s.vnc_password.is_empty());
 
         let mut modified = s.clone();
         modified.device_name = "Living Room Mac".into();
         modified.admission = AdmissionMode::TrustedAuto;
         modified.video_quality = QualityPreset::HighQuality;
+        modified.vnc_enabled = true;
+        modified.vnc_username = "alice".into();
+        modified.vnc_password = "test-password".into();
         modified.save(&p).unwrap();
 
         let reloaded = Settings::load(&p).unwrap();

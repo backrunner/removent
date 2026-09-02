@@ -521,10 +521,13 @@ fn build_session(
                                     ) {
                                         tracing::warn!(err=%e, "clipboard apply failed");
                                     }
-                                    // protocol.md §6.3: receiving a ClipboardSync must be answered with an Ack.
-                                    if sink.send(ControlMsg::ClipboardAck { seq }).await.is_err() {
-                                        break;
-                                    }
+                                }
+                                // An Ack confirms receipt, not that this endpoint had a
+                                // local pasteboard bridge. Always acknowledge the message
+                                // so a sender cannot remain blocked when clipboard support
+                                // is disabled or unavailable on this side.
+                                if sink.send(ControlMsg::ClipboardAck { seq }).await.is_err() {
+                                    break;
                                 }
                             }
                             ControlMsg::Ping { ts_us } => {

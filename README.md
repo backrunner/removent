@@ -46,6 +46,21 @@ Grant them under *System Settings → Privacy & Security*, then toggle the host 
 the menu-bar tray. On the other Mac, find this device in the device list (or connect by IP),
 enter the pairing PIN shown on the host, and you're in.
 
+### Apple Remote Desktop / VNC compatibility
+
+In addition to the native RVP/QUIC protocol, the host can optionally expose a standard RFB/VNC
+listener for VNC viewers. It is disabled by default. Enable
+**Apple Remote Desktop / VNC** in Settings, set a password, and restart the host service; clients
+can then connect over TCP port `5900`. An empty password selects RFB's unauthenticated mode and is
+suitable only for an isolated, trusted LAN. The compatibility layer provides a raw framebuffer and
+keyboard/mouse input; Removent pairing, clipboard, audio, and adaptive media remain available only
+through RVP.
+
+To use Removent as a VNC viewer, enter an external server as `IP:5900` in the manual address field.
+Standard VNC servers use the VNC password. Apple Remote Desktop / macOS Screen Sharing servers
+advertising RFB `003.889` use the configured macOS username and password and Apple type-30/type-35
+Diffie-Hellman/AES authentication.
+
 ## Build from source
 
 Requires a stable Rust toolchain (1.85+) and Xcode command line tools with Swift.
@@ -63,6 +78,19 @@ scripts/package.sh
 
 Run tests with `cargo test --workspace`; the tray integration test is
 `bash tray/Tests/run_integration_test.sh`.
+
+### Benchmarks
+
+Release-mode codec and control-path measurements are reproducible with:
+
+```bash
+cargo run --release -p removent-media-codec --example benchmark
+cargo run --release -p removent-net --example rtt_benchmark
+```
+
+The codec benchmark reports H.264/HEVC encode and encode-to-decode callback latency,
+throughput, compression, and Opus encode/decode cost. The RVP benchmark reports QUIC
+`Ping/Pong` control RTT percentiles. Both commands print the build mode and environment.
 
 ## How it works
 

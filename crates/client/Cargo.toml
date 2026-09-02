@@ -14,9 +14,15 @@ futures = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 ed25519-dalek = { workspace = true }
+des = { workspace = true }
+aes = { workspace = true }
+md-5 = { workspace = true }
+num-bigint = { workspace = true }
+rand = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+hex = { workspace = true }
 removent-media-capture = { workspace = true }
 removent-host = { workspace = true }
 tracing-subscriber = { workspace = true }

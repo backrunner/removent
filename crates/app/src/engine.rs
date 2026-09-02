@@ -17,6 +17,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::audio::AudioPlayer;
 use crate::updater::{self, UpdateShared, UpdateStatus};
 
 /// One decoded BGRA frame (consumed by UI rendering).
@@ -760,6 +761,20 @@ async fn run_client(
     frames: Arc<FrameBus>,
     cmd_slot: Arc<Mutex<Option<tokio::sync::mpsc::Sender<ControlMsg>>>>,
 ) -> Result<()> {
+    // `IP:5900` is the explicit compatibility entry point for Apple Screen
+    // Sharing / Apple Remote Desktop. The native Removent endpoint remains
+    // the default port and continues through the RVP flow below.
+    if addr.port() == 5900 {
+        return run_vnc_client(
+            addr,
+            settings.vnc_username,
+            settings.vnc_password,
+            events,
+            frames,
+            cmd_slot,
+        )
+        .await;
+    }
     let known = known_fingerprints(&paths);
     let (ep_client, _pin) = make_client_endpoint(
         SocketAddr::from(([0, 0, 0, 0], 0)),
@@ -767,13 +782,19 @@ async fn run_client(
         PinState::new(known, true),
     )?;
 
+    let audio_player = match AudioPlayer::new() {
+        Ok(player) => Some(player),
+        Err(e) => {
+            tracing::warn!(err = %e, "audio output unavailable; negotiating video only");
+            None
+        }
+    };
+    let audio_enabled = audio_player.is_some();
+
     let mk_cfg = || removent_client::ClientConfig {
         device_name: settings.device_name.clone(),
-        // Audio playback is not implemented on the app side (decoded PCM would
-        // never be consumed, deadlocking the playout path): do not negotiate
-        // audio until playback lands.
         caps: Caps {
-            audio: false,
+            audio: audio_enabled,
             ..Caps::all()
         },
         local_clip: Some(Arc::new(NsClipboard)),
@@ -798,6 +819,17 @@ async fn run_client(
     // Frame bridge: install the channel before telling the UI to open the viewer
     // (eliminates the race of not being able to take rx).
     let ftx = frames.install();
+    let mut audio_task = audio_player.as_ref().map(|player| {
+        let player = player.clone();
+        let (_drop_tx, drop_rx) = tokio::sync::mpsc::channel(1);
+        let pcm_rx = std::mem::replace(&mut session.decoded_pcm_rx, drop_rx);
+        tokio::spawn(async move {
+            let mut pcm_rx = pcm_rx;
+            while let Some(pcm) = pcm_rx.recv().await {
+                player.push(pcm);
+            }
+        })
+    });
     // Publish the control-channel egress so the viewer can forward input.
     *cmd_slot.lock().unwrap() = Some(session.cmd_tx.clone());
 
@@ -858,10 +890,52 @@ async fn run_client(
         }
         match resumed {
             Some(s) => {
+                if let Some(task) = audio_task.take() {
+                    task.abort();
+                    let _ = task.await;
+                }
                 session = s;
                 *cmd_slot.lock().unwrap() = Some(session.cmd_tx.clone());
+                audio_task = audio_player.as_ref().map(|player| {
+                    let player = player.clone();
+                    let (_drop_tx, drop_rx) = tokio::sync::mpsc::channel(1);
+                    let pcm_rx = std::mem::replace(&mut session.decoded_pcm_rx, drop_rx);
+                    tokio::spawn(async move {
+                        let mut pcm_rx = pcm_rx;
+                        while let Some(pcm) = pcm_rx.recv().await {
+                            player.push(pcm);
+                        }
+                    })
+                });
             }
             None => return Ok(()),
         }
     }
+}
+
+/// Connect to a standard RFB/VNC server and bridge its raw frames into the
+/// same viewer bus used by RVP. VNC has no Removent pairing/resume channel, so
+/// a disconnect is reported directly to the UI.
+async fn run_vnc_client(
+    addr: SocketAddr,
+    username: String,
+    password: String,
+    events: std::sync::mpsc::Sender<UiEvent>,
+    frames: Arc<FrameBus>,
+    cmd_slot: Arc<Mutex<Option<tokio::sync::mpsc::Sender<ControlMsg>>>>,
+) -> Result<()> {
+    let mut session = removent_client::connect_vnc_with_credentials(addr, &username, &password)
+        .await
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    let ftx = frames.install();
+    *cmd_slot.lock().unwrap() = Some(session.cmd_tx.clone());
+    let _ = events.send(UiEvent::SessionReady {
+        codec: "RFB/VNC".into(),
+    });
+    while let Some(frame) = session.decoded_bgra_rx.recv().await {
+        if send_latest(&ftx, frame).is_err() {
+            break;
+        }
+    }
+    Ok(())
 }

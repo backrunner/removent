@@ -1,6 +1,7 @@
 //! Removent app entry: GPUI interface + tokio engine bridge.
 
 mod assets;
+mod audio;
 mod engine;
 mod permissions;
 mod theme;

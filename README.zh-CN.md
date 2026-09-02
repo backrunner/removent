@@ -42,6 +42,18 @@ macOS 会请求两项权限 —— 共享本机时都必需：
 在「系统设置 → 隐私与安全性」中授予后，从菜单栏托盘开启被控服务。在另一台 Mac 上从设备
 列表找到本机（或手动输入 IP），输入被控端显示的配对 PIN，即可连接。
 
+### Apple Remote Desktop / VNC 兼容
+
+除自有的 RVP/QUIC 协议外，被控端可选开启标准 RFB/VNC 服务，供 VNC 客户端连接。该兼容
+服务默认关闭；在设置页打开「Apple Remote Desktop / VNC」并设置密码
+后，重启被控服务即可在 TCP `5900` 端口连接。密码为空时使用 RFB 的无认证模式，仅适合隔离
+且可信的局域网。VNC 兼容层提供 Raw framebuffer 和键鼠输入，不提供 Removent 的配对、剪贴板、
+音频、自适应编码等 RVP 功能。
+
+在 Removent 主控端手动输入 `IP:5900` 可连接外部 VNC/屏幕共享服务器。标准 VNC 服务使用 VNC
+密码；宣告 RFB `003.889` 的 Apple Remote Desktop / macOS「屏幕共享」服务使用设置中的 macOS
+用户名和密码，并执行 Apple type-30/type-35 Diffie-Hellman/AES 认证。
+
 ## 从源码构建
 
 需要 stable Rust 工具链（1.85+）和带 Swift 的 Xcode 命令行工具。
@@ -58,6 +70,19 @@ scripts/package.sh
 ```
 
 测试：`cargo test --workspace`；托盘集成测试：`bash tray/Tests/run_integration_test.sh`。
+
+### Benchmark
+
+可重复运行 release 模式的编解码和控制链路测试：
+
+```bash
+cargo run --release -p removent-media-codec --example benchmark
+cargo run --release -p removent-net --example rtt_benchmark
+```
+
+编解码测试输出 H.264/HEVC 编码及编码到解码回调的延迟、吞吐、压缩比和 Opus
+编解码耗时；RVP 测试输出基于 QUIC `Ping/Pong` 的控制 RTT 百分位数。两条命令都会打印
+构建模式和运行环境。
 
 ## 工作原理
 

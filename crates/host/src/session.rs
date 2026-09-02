@@ -1076,6 +1076,12 @@ pub fn spawn_control_pump(
                             ControlMsg::ClipboardSync { seq, data, .. } => {
                                 if !deps.caps.clipboard {
                                     tracing::warn!("clipboard sync from client without clipboard cap, ignored");
+                                    // Ack receipt even when this peer did not negotiate
+                                    // clipboard application; otherwise a sender waiting
+                                    // for confirmation can stall indefinitely.
+                                    if sink.send(ControlMsg::ClipboardAck { seq }).await.is_err() {
+                                        break;
+                                    }
                                     continue;
                                 }
                                 if let Some(clip) = deps.local_clip.as_ref() {
@@ -1093,9 +1099,11 @@ pub fn spawn_control_pump(
                                     ) {
                                         tracing::warn!(err=%e, "clipboard apply failed");
                                     }
-                                    if sink.send(ControlMsg::ClipboardAck { seq }).await.is_err() {
-                                        break;
-                                    }
+                                }
+                                // Receipt is acknowledged independently of whether a local
+                                // clipboard implementation exists.
+                                if sink.send(ControlMsg::ClipboardAck { seq }).await.is_err() {
+                                    break;
                                 }
                             }
                             ControlMsg::SessionEnd { .. } => break,

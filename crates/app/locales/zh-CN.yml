@@ -6,7 +6,7 @@ app.name: Removent
 home.name_placeholder: 在局域网中显示的名称
 home.pin_placeholder: 6 位数字
 home.search_placeholder: 搜索设备
-home.manual_placeholder: IP 地址，如 192.168.1.10
+home.manual_placeholder: IP 地址，如 192.168.1.10（VNC 使用 :5900）
 
 titlebar.to_light: 切换到浅色
 titlebar.to_dark: 切换到深色
@@ -40,6 +40,7 @@ status.host_stopped: 被控服务已停止
 status.daemon_offline: 服务守护进程（removentd）未连接
 status.daemon_offline_short: 服务守护进程未连接
 status.admission_mode_updated: 准入模式已更新
+status.vnc_updated: VNC 设置已更新（重启被控服务后生效）
 
 err.session_in_progress: 已有进行中的会话
 err.frame_channel_missing: 帧通道缺失
@@ -99,6 +100,13 @@ settings.admission: 接入控制
 settings.admission.ask: 每次询问
 settings.admission.trusted: 信任设备自动通过
 settings.admission.deny: 拒绝所有连接
+settings.vnc: Apple Remote Desktop / VNC
+settings.vnc_enabled: 启用 VNC 兼容服务
+settings.vnc_username: macOS 用户名
+settings.vnc_username_placeholder: Apple 远程桌面使用的账户名
+settings.vnc_password: VNC 密码
+settings.vnc_password_placeholder: 留空表示无需密码
+settings.vnc_hint: 使用标准 RFB 端口 5900；Apple 远程桌面使用上面的用户名和密码。
 settings.data: 数据
 settings.data_dir: 数据目录
 

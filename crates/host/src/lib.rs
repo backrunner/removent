@@ -5,6 +5,7 @@ pub mod input_sink;
 pub mod runner;
 pub mod sender;
 pub mod session;
+pub mod vnc;
 
 pub use admission::{AdmissionDecision, decide as decide_admission};
 pub use input_sink::{
@@ -18,3 +19,4 @@ pub use session::{
     EstablishedSession, HostConfig, HostError, HostInteractions, HostMediaFeeds, serve_connection,
     spawn_audio_loop, spawn_control_pump, spawn_video_loop,
 };
+pub use vnc::{VncConfig, serve_vnc};

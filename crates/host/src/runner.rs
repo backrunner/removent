@@ -20,6 +20,7 @@ use crate::session::{
     ControlPumpDeps, HostConfig, HostInteractions, PromptFuture, fit_capture_dims,
     serve_connection, spawn_audio_loop, spawn_control_pump, spawn_video_loop,
 };
+use crate::vnc::{VncConfig, serve_vnc};
 
 /// Static runner config (unchanged within one serve_forever call; changing settings
 /// requires restarting the runner).
@@ -171,10 +172,33 @@ pub async fn serve_forever(
         Advertiser::start(&settings.device_name, &fp_short, port, Caps::all())
             .map_err(|e| anyhow::anyhow!("{e}"))?,
     );
+    // At most one active session across both RVP and legacy VNC. Both paths
+    // share the same screen capture and input injection resources.
+    let session_slot = Arc::new(tokio::sync::Semaphore::new(1));
+
+    // Optional legacy RFB listener. It shares the host's input sink but has an
+    // independent TCP lifecycle and framebuffer capture per VNC client.
+    let vnc_shutdown = shutdown.child_token();
+    let mut vnc_task = if settings.vnc_enabled {
+        let vnc_cfg = VncConfig {
+            bind_addr: SocketAddr::from(([0, 0, 0, 0], settings.vnc_port)),
+            password: settings.vnc_password.clone(),
+            input_sink: cfg.input_sink.clone(),
+            shutdown: vnc_shutdown.clone(),
+            session_slot: session_slot.clone(),
+        };
+        Some(tokio::spawn(async move {
+            if let Err(e) = serve_vnc(vnc_cfg).await {
+                tracing::error!(err=%e, "VNC listener failed");
+            }
+        }))
+    } else {
+        None
+    };
 
     let cbs = Arc::new(cbs);
-    // At most one active session; further connections get SessionReject{Busy}.
-    let session_slot = Arc::new(tokio::sync::Semaphore::new(1));
+    // Further RVP connections get SessionReject{Busy}; VNC connections are
+    // rejected at accept time while the same semaphore is held.
     let active_session: Arc<std::sync::Mutex<Option<CancellationToken>>> =
         Arc::new(std::sync::Mutex::new(None));
 
@@ -226,6 +250,10 @@ pub async fn serve_forever(
     if let Some(cancel) = active_cancel {
         cancel.cancel();
         tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    vnc_shutdown.cancel();
+    if let Some(task) = vnc_task.take() {
+        let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
     }
     drop(advertiser);
     Ok(())

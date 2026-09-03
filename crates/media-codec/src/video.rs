@@ -1005,7 +1005,7 @@ fn scale_to_us((value, timescale): (i64, i32)) -> i64 {
     }
 }
 
-/// CVPixelBuffer → BGRA (NV12→BGRA conversion for non-BGRA formats).
+/// CVPixelBuffer → BGRA (8/10-bit bi-planar YUV conversion for non-BGRA formats).
 fn pixel_buffer_to_bgra(pb: &apple_cf::cv::CVPixelBuffer) -> Option<Vec<u8>> {
     let w = pb.width();
     let h = pb.height();
@@ -1055,7 +1055,24 @@ fn pixel_buffer_to_bgra(pb: &apple_cf::cv::CVPixelBuffer) -> Option<Vec<u8>> {
         let y_stride = pb.bytes_per_row_of_plane(0);
         let uv_stride = pb.bytes_per_row_of_plane(1);
         let bt709 = is_bt709(pb);
-        let out = nv12_to_bgra(y_ptr, y_stride, uv_ptr, uv_stride, w, h, bt709);
+        let color = YuvColor {
+            bt709,
+            full_range: fmt == u32::from_be_bytes(*b"420f"),
+        };
+        let out = nv12_to_bgra(y_ptr, y_stride, uv_ptr, uv_stride, w, h, color);
+        // Unlock only after the planes have been fully read.
+        drop(guard);
+        return Some(out);
+    }
+
+    if fmt == u32::from_be_bytes(*b"x420") {
+        // 10-bit video-range 4:2:0 (P010): each little-endian component is
+        // stored in the ten most-significant bits of a 16-bit word.
+        let y_ptr = guard.base_address_of_plane(0)?;
+        let uv_ptr = guard.base_address_of_plane(1)?;
+        let y_stride = pb.bytes_per_row_of_plane(0);
+        let uv_stride = pb.bytes_per_row_of_plane(1);
+        let out = p010_video_to_bgra(y_ptr, y_stride, uv_ptr, uv_stride, w, h, is_bt709(pb));
         // Unlock only after the planes have been fully read.
         drop(guard);
         return Some(out);
@@ -1083,7 +1100,13 @@ fn is_bt709(pb: &apple_cf::cv::CVPixelBuffer) -> bool {
     }
 }
 
-/// BT.601/BT.709 limited-range NV12 → BGRA. Valid uv bytes per row = ceil(w/2)*2.
+/// BT.601/BT.709 NV12 → BGRA. Valid uv bytes per row = ceil(w/2)*2.
+#[derive(Clone, Copy)]
+struct YuvColor {
+    bt709: bool,
+    full_range: bool,
+}
+
 fn nv12_to_bgra(
     y_plane: *const u8,
     y_stride: usize,
@@ -1091,13 +1114,15 @@ fn nv12_to_bgra(
     uv_stride: usize,
     w: usize,
     h: usize,
-    bt709: bool,
+    color: YuvColor,
 ) -> Vec<u8> {
-    // Fixed-point 8.8 coefficients; BT.601: Kr=0.299 Kb=0.114, BT.709: Kr=0.2126 Kb=0.0722.
-    let (cr, cgu, cgv, cb) = if bt709 {
-        (459, 55, 136, 541)
-    } else {
-        (409, 100, 208, 516)
+    // Fixed-point 8.8 coefficients; BT.601: Kr=0.299 Kb=0.114,
+    // BT.709: Kr=0.2126 Kb=0.0722.
+    let (y_scale, y_offset, cr, cgu, cgv, cb) = match (color.bt709, color.full_range) {
+        (false, false) => (298, 16, 409, 100, 208, 516),
+        (true, false) => (298, 16, 459, 55, 136, 541),
+        (false, true) => (256, 0, 359, 88, 183, 454),
+        (true, true) => (256, 0, 403, 48, 120, 475),
     };
     let mut out = vec![0u8; w * h * 4];
     let uv_w = w.div_ceil(2) * 2;
@@ -1112,10 +1137,10 @@ fn nv12_to_bgra(
             let uv_i = (col / 2) * 2;
             let u = i32::from(uv_row[uv_i]) - 128;
             let v = i32::from(uv_row[uv_i + 1]) - 128;
-            let c = y - 16;
-            let r = ((298 * c + cr * v + 128) >> 8).clamp(0, 255);
-            let g = ((298 * c - cgu * u - cgv * v + 128) >> 8).clamp(0, 255);
-            let b = ((298 * c + cb * u + 128) >> 8).clamp(0, 255);
+            let c = y - y_offset;
+            let r = ((y_scale * c + cr * v + 128) >> 8).clamp(0, 255);
+            let g = ((y_scale * c - cgu * u - cgv * v + 128) >> 8).clamp(0, 255);
+            let b = ((y_scale * c + cb * u + 128) >> 8).clamp(0, 255);
             let o = (row * w + col) * 4;
             out[o] = b as u8;
             out[o + 1] = g as u8;
@@ -1124,6 +1149,53 @@ fn nv12_to_bgra(
         }
     }
     out
+}
+
+/// BT.601/BT.709 limited-range P010 (`x420`) → BGRA.
+fn p010_video_to_bgra(
+    y_plane: *const u8,
+    y_stride: usize,
+    uv_plane: *const u8,
+    uv_stride: usize,
+    w: usize,
+    h: usize,
+    bt709: bool,
+) -> Vec<u8> {
+    let (cr, cgu, cgv, cb) = if bt709 {
+        (459, 55, 136, 541)
+    } else {
+        (409, 100, 208, 516)
+    };
+    let mut out = vec![0u8; w * h * 4];
+    for row in 0..h {
+        for col in 0..w {
+            let y_offset = row * y_stride + col * 2;
+            let uv_offset = (row / 2) * uv_stride + (col / 2) * 4;
+            // SAFETY: CoreVideo guarantees that each plane contains its
+            // stride-sized rows. `read_unaligned` avoids assuming word
+            // alignment for a plane base or padded row.
+            let y = i32::from(unsafe { read_p010(y_plane.add(y_offset)) });
+            let u = i32::from(unsafe { read_p010(uv_plane.add(uv_offset)) }) - 512;
+            let v = i32::from(unsafe { read_p010(uv_plane.add(uv_offset + 2)) }) - 512;
+            let c = y - 64;
+            // The 10-bit ranges are exactly four times their 8-bit
+            // counterparts, so 8.8 coefficients use a 10-bit final shift.
+            let r = ((298 * c + cr * v + 512) >> 10).clamp(0, 255);
+            let g = ((298 * c - cgu * u - cgv * v + 512) >> 10).clamp(0, 255);
+            let b = ((298 * c + cb * u + 512) >> 10).clamp(0, 255);
+            let o = (row * w + col) * 4;
+            out[o] = b as u8;
+            out[o + 1] = g as u8;
+            out[o + 2] = r as u8;
+            out[o + 3] = 255;
+        }
+    }
+    out
+}
+
+/// Reads one little-endian P010 word and removes its six padding bits.
+unsafe fn read_p010(ptr: *const u8) -> u16 {
+    u16::from_le(unsafe { ptr.cast::<u16>().read_unaligned() }) >> 6
 }
 
 // SAFETY: CoreFoundation/CoreMedia objects are thread-safe (CFType docs);
@@ -1172,5 +1244,67 @@ mod tests {
         });
         assert_eq!(result.unwrap(), 2);
         assert_eq!(*calls.borrow(), vec![false]);
+    }
+
+    #[test]
+    fn nv12_video_range_maps_neutral_black_and_white() {
+        let y = [16, 235];
+        let uv = [128, 128];
+        let bgra = nv12_to_bgra(
+            y.as_ptr(),
+            2,
+            uv.as_ptr(),
+            2,
+            2,
+            1,
+            YuvColor {
+                bt709: true,
+                full_range: false,
+            },
+        );
+        assert_eq!(bgra, [0, 0, 0, 255, 255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn nv12_full_range_maps_neutral_black_and_white() {
+        let y = [0, 255];
+        let uv = [128, 128];
+        let bgra = nv12_to_bgra(
+            y.as_ptr(),
+            2,
+            uv.as_ptr(),
+            2,
+            2,
+            1,
+            YuvColor {
+                bt709: true,
+                full_range: true,
+            },
+        );
+        assert_eq!(bgra, [0, 0, 0, 255, 255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn p010_video_range_maps_neutral_black_and_white_with_padding() {
+        let mut y = Vec::new();
+        for samples in [[64_u16, 940], [940, 64]] {
+            for sample in samples {
+                y.extend_from_slice(&(sample << 6).to_le_bytes());
+            }
+            y.extend_from_slice(&[0, 0]);
+        }
+        let mut uv = Vec::new();
+        for sample in [512_u16, 512] {
+            uv.extend_from_slice(&(sample << 6).to_le_bytes());
+        }
+        uv.extend_from_slice(&[0, 0]);
+
+        let bgra = p010_video_to_bgra(y.as_ptr(), 6, uv.as_ptr(), 6, 2, 2, true);
+        assert_eq!(
+            bgra,
+            [
+                0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 255,
+            ]
+        );
     }
 }

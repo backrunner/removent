@@ -1,0 +1,5 @@
+# audiopus_sys bundles an older Opus CMake project. CMake 4 requires callers
+# to opt that project into a supported policy baseline when pkg-config cannot
+# provide a system libopus.
+[env]
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"

@@ -9,10 +9,10 @@
 
 use crate::av1::{Av1Decoder, Av1Encoder};
 use crate::cm_ffi as cm;
+use crate::compat_decompression::CompatibleDecompressionSession;
 use apple_cf::iosurface::IOSurface;
 use std::os::raw::c_void;
 use std::sync::{Arc, mpsc};
-use videotoolbox::decompression::DecompressionSession;
 use videotoolbox::session::Codec;
 
 pub const BGRA_FOURCC: u32 = u32::from_be_bytes(*b"BGRA");
@@ -779,7 +779,7 @@ fn extract_param_sets_from_desc(desc: cm::CMFormatDescriptionRef, hevc: bool) ->
 pub struct VideoDecoder {
     /// Holds a +1 reference; released automatically on Drop.
     _format_desc: Option<apple_cf::cm::CMFormatDescription>,
-    session: Option<DecompressionSession>,
+    session: Option<CompatibleDecompressionSession>,
     /// Wrapped in a Mutex because `mpsc::Receiver` is `!Sync` while the
     /// decoder must be `Sync` for shared access across tasks; usage is
     /// effectively single-task, so contention is nil.
@@ -851,7 +851,7 @@ impl VideoDecoder {
 
         let format_desc = apple_cf::cm::CMFormatDescription::from_raw(desc.cast())
             .expect("non-null format description");
-        let session = DecompressionSession::new(&format_desc, move |frame| {
+        let session = CompatibleDecompressionSession::new(&format_desc, move |frame| {
             let Some(pb) = frame.image_buffer else { return };
             if frame.status != 0 {
                 tracing::warn!(status = frame.status, "decode callback error");

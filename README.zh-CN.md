@@ -84,6 +84,18 @@ cargo run --release -p removent-net --example rtt_benchmark
 编解码耗时；RVP 测试输出基于 QUIC `Ping/Pong` 的控制 RTT 百分位数。两条命令都会打印
 构建模式和运行环境。
 
+### 编码与静止帧策略
+
+被控端会比较完整的 BGRA 帧；只有与最近一次成功写入视频流的帧逐字节相同，才会跳过本帧。
+关键帧请求始终绕过去重检查，并缓存最近一帧，因此桌面静止、没有新的采集回调时也能立即
+响应关键帧请求。H.264/HEVC 仍通过帧间预测完成主要压缩；完全去重还能省掉 IOSurface
+拷贝、硬件编码和网络包。
+
+RVP 已为 AV1 保留 codec id `0x03`，但当前不会宣告或发送 AV1。`removent-media-codec`
+的 benchmark 会打印 VideoToolbox 的 AV1 硬件解码器/编码器探测结果。真正启用 AV1 还需要
+双方协商能力，并实现独立的 AV1 OBU/`av1C` 码流与 format-description 路径；仅检测到 AV1
+硬件并不足以安全发送。
+
 ## 工作原理
 
 三个进程协同工作：

@@ -92,6 +92,20 @@ The codec benchmark reports H.264/HEVC encode and encode-to-decode callback late
 throughput, compression, and Opus encode/decode cost. The RVP benchmark reports QUIC
 `Ping/Pong` control RTT percentiles. Both commands print the build mode and environment.
 
+### Codec and static-frame policy
+
+The host compares complete BGRA frames and skips a frame only when its pixels are
+byte-for-byte identical to the last frame successfully written to the video stream. A
+keyframe request always bypasses this check, and the most recent frame is cached so a
+request can be served even while the desktop is idle. H.264/HEVC still provide the main
+compression through inter-frame prediction; the exact-dedup layer avoids the capture copy,
+hardware encode, and packet entirely for unchanged frames.
+
+RVP reserves codec id `0x03` for AV1, but AV1 is not advertised or sent yet. The
+`removent-media-codec` benchmark prints VideoToolbox's AV1 hardware decoder/encoder probe.
+Enabling AV1 requires both peers to negotiate the capability and a separate AV1 OBU/`av1C`
+bitstream and format-description path; detecting an AV1 device alone is insufficient.
+
 ## How it works
 
 Three processes cooperate:

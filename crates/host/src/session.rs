@@ -5,6 +5,7 @@
 //! permissions and can be verified headless. Message sequencing: protocol.md §4–5.
 
 use crate::admission::{AdmissionDecision, decide};
+use crate::frame_dedup::FrameDeduplicator;
 use crate::input_sink::InputSink;
 use crate::sender::SendGate;
 use futures::{SinkExt, StreamExt};
@@ -621,7 +622,8 @@ fn new_token() -> [u8; 16] {
 
 // ---------------- media loops ----------------
 
-/// Video send loop: encode → backpressure gate → write to the media uni-stream.
+/// Video send loop: exact frame deduplication → encode → backpressure gate →
+/// write to the media uni-stream.
 /// Returns the JoinHandle; the loop exits immediately when `cancel` fires
 /// (control-pump exit / session end). `fatal_tx` receives a SessionEnd when the
 /// encoder fails fatally (init at session start or rebuild after a resolution
@@ -671,7 +673,159 @@ pub fn spawn_video_loop(
         // so the client hot-rebuilds its decoder (protocol.md §6.1).
         let mut config_changed_pending = false;
         let frame_id = std::cell::Cell::new(0u64);
+        let mut dedup = FrameDeduplicator::new();
+        // Keep the latest capture so a keyframe request can be satisfied even
+        // while the screen is static (there may be no future capture callback).
+        let mut last_bgra: Option<(Vec<u8>, i64)> = None;
+        let mut force_next_frame = false;
+        let mut pending_frame: Option<(Vec<u8>, i64, bool)> = None;
+        let mut last_encoded_pts_us: Option<i64> = None;
         loop {
+            // Encode outside the select so a keyframe request can enqueue the
+            // cached frame and take the exact same path as a new capture.
+            if let Some((bgra, pts_us, force)) = pending_frame.take() {
+                if !dedup.should_encode(&bgra, force) {
+                    continue;
+                }
+                if force {
+                    encoder.request_keyframe();
+                }
+                // Cached keyframes can arrive after newer captures. Keep wire
+                // timestamps strictly increasing for decoder/jitter ordering.
+                let encode_pts_us =
+                    last_encoded_pts_us.map_or(pts_us, |last| pts_us.max(last.saturating_add(1)));
+                let frames = match encoder.encode_bgra(&bgra, encode_pts_us) {
+                    Ok(f) => f,
+                    Err(removent_media_codec::VideoError::PixelSizeMismatch { got, .. }) => {
+                        // Capture resolution changed mid-stream: rebuild the
+                        // encoder at the new dimensions, force an IDR and flag
+                        // the keyframe CONFIG_CHANGED so the client hot-rebuilds.
+                        match current_capture_dims(capture_display_id) {
+                            Some((nw, nh)) if nw * nh * 4 == got => {
+                                match VideoEncoder::new(codec, nw, nh, cur_bitrate_kbps, fps) {
+                                    Ok(mut e) => {
+                                        e.request_keyframe();
+                                        encoder = e;
+                                        width = nw;
+                                        height = nh;
+                                        config_changed_pending = true;
+                                        dedup.reset();
+                                        // Retry the frame that exposed the new
+                                        // dimensions instead of losing it.
+                                        pending_frame = Some((bgra, pts_us, true));
+                                        if let Some(sink) = &input {
+                                            sink.set_capture_dims(nw as u32, nh as u32);
+                                        }
+                                        tracing::info!(
+                                            w = nw,
+                                            h = nh,
+                                            "encoder rebuilt after resolution change"
+                                        );
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(err=%e, "encoder rebuild failed");
+                                        if let Some(tx) = &fatal_tx {
+                                            let _ = tx
+                                                .send(ControlMsg::SessionEnd {
+                                                    reason:
+                                                        removent_proto::EndReason::InternalError,
+                                                })
+                                                .await;
+                                        }
+                                        return;
+                                    }
+                                }
+                            }
+                            _ => {
+                                dedup.reset();
+                                tracing::warn!(
+                                    got,
+                                    "frame size mismatch, no matching display; dropping frame"
+                                );
+                            }
+                        }
+                        continue;
+                    }
+                    Err(e) => {
+                        // Do not let a transient encoder error suppress the
+                        // same pixels forever; the next capture will retry.
+                        tracing::warn!(err=%e, "video encode failed");
+                        dedup.reset();
+                        continue;
+                    }
+                };
+                if frames.is_empty() {
+                    // A VideoToolbox frame drop is not a successful send. Keep
+                    // a forced refresh pending for the next capture callback.
+                    if force {
+                        force_next_frame = true;
+                    }
+                    continue;
+                }
+                let mut sent = false;
+                for ef in frames {
+                    match gate.on_submit(ef.keyframe) {
+                        crate::sender::SendAction::DropFrame => {
+                            if gate.take_downgrade_request()
+                                && let Some(tx) = &downgrade_tx
+                            {
+                                let _ = tx.try_send(());
+                            }
+                            continue;
+                        }
+                        act => {
+                            if act == crate::sender::SendAction::SendAndDowngrade {
+                                encoder.request_keyframe();
+                            }
+                            // Backpressure downgrade (protocol.md §6.4):
+                            // signal the control pump instead of writing
+                            // the encoder here — the pump routes them through
+                            // the adaptation controller, the single owner of
+                            // bitrate state.
+                            if gate.take_downgrade_request()
+                                && let Some(tx) = &downgrade_tx
+                            {
+                                let _ = tx.try_send(());
+                            }
+                            frame_id.set(frame_id.get() + 1);
+                            let mut flags = if ef.keyframe {
+                                removent_proto::video_flags::KEYFRAME
+                            } else {
+                                0
+                            };
+                            if ef.keyframe && config_changed_pending {
+                                flags |= removent_proto::video_flags::CONFIG_CHANGED;
+                                config_changed_pending = false;
+                            }
+                            let hdr = removent_proto::VideoFrameHeader {
+                                frame_id: frame_id.get(),
+                                pts_us: ef.pts_us,
+                                flags,
+                                codec,
+                                width: width as u16,
+                                height: height as u16,
+                                payload_len: annexb_len_of(&ef),
+                            };
+                            let wire = build_video_frame(&hdr, &ef.data);
+                            // on_sent only after the write completes (success or
+                            // failure), so `queued` reflects the real backlog.
+                            let write_result = stream.write_all(&wire).await;
+                            gate.on_sent();
+                            if write_result.is_err() {
+                                return;
+                            }
+                            sent = true;
+                            dedup.mark_sent(&bgra);
+                            last_encoded_pts_us = Some(ef.pts_us);
+                        }
+                    }
+                }
+                if force && !sent {
+                    force_next_frame = true;
+                }
+                continue;
+            }
+
             tokio::select! {
                 _ = cancel.cancelled() => break,
                 Some(kbps) = bitrate_rx.recv() => {
@@ -680,97 +834,19 @@ pub fn spawn_video_loop(
                         tracing::warn!(err=%e, "set bitrate failed");
                     }
                 }
-                Some(()) = keyframe_req_rx.recv() => encoder.request_keyframe(),
+                Some(()) = keyframe_req_rx.recv() => {
+                    encoder.request_keyframe();
+                    force_next_frame = true;
+                    if let Some((bgra, pts_us)) = last_bgra.as_ref() {
+                        pending_frame = Some((bgra.clone(), *pts_us, true));
+                        force_next_frame = false;
+                    }
+                }
                 item = video_rx.recv() => {
                     let Some((bgra, pts_us)) = item else { break };
-                    let frames = match encoder.encode_bgra(&bgra, pts_us) {
-                        Ok(f) => f,
-                        Err(removent_media_codec::VideoError::PixelSizeMismatch { got, .. }) => {
-                            // Capture resolution changed mid-stream: rebuild the
-                            // encoder at the new dimensions, force an IDR and flag
-                            // the next keyframe CONFIG_CHANGED so the client
-                            // decoder hot-rebuilds.
-                            match current_capture_dims(capture_display_id) {
-                                Some((nw, nh)) if nw * nh * 4 == got => {
-                                    match VideoEncoder::new(codec, nw, nh, cur_bitrate_kbps, fps) {
-                                        Ok(mut e) => {
-                                            e.request_keyframe();
-                                            encoder = e;
-                                            width = nw;
-                                            height = nh;
-                                            config_changed_pending = true;
-                                            // The peer's coordinates now refer to
-                                            // the new frame size; keep the input
-                                            // sink's rescale base in sync.
-                                            if let Some(sink) = &input {
-                                                sink.set_capture_dims(nw as u32, nh as u32);
-                                            }
-                                            tracing::info!(w = nw, h = nh, "encoder rebuilt after resolution change");
-                                        }
-                                        Err(e) => {
-                                            tracing::error!(err=%e, "encoder rebuild failed");
-                                            if let Some(tx) = &fatal_tx {
-                                                let _ = tx
-                                                    .send(ControlMsg::SessionEnd {
-                                                        reason: removent_proto::EndReason::InternalError,
-                                                    })
-                                                    .await;
-                                            }
-                                            return;
-                                        }
-                                    }
-                                }
-                                _ => tracing::warn!(got, "frame size mismatch, no matching display; dropping frame"),
-                            }
-                            continue;
-                        }
-                        Err(e) => { tracing::warn!(err=%e, "video encode failed"); continue; }
-                    };
-                    for ef in frames {
-                        match gate.on_submit(ef.keyframe) {
-                            crate::sender::SendAction::DropFrame => continue,
-                            act => {
-                                if act == crate::sender::SendAction::SendAndDowngrade {
-                                    encoder.request_keyframe();
-                                }
-                                // Backpressure downgrade (protocol.md §6.4):
-                                // signal the control pump instead of writing
-                                // the encoder here — the pump routes it through
-                                // the adaptation controller, the single owner of
-                                // bitrate state. (Writing here directly made the
-                                // gate's ×0.7 and the controller's ×1.25 fight.)
-                                if gate.take_downgrade_request()
-                                    && let Some(tx) = &downgrade_tx
-                                {
-                                    let _ = tx.try_send(());
-                                }
-                                frame_id.set(frame_id.get() + 1);
-                                let mut flags = if ef.keyframe { removent_proto::video_flags::KEYFRAME } else { 0 };
-                                if ef.keyframe && config_changed_pending {
-                                    flags |= removent_proto::video_flags::CONFIG_CHANGED;
-                                    config_changed_pending = false;
-                                }
-                                let hdr = removent_proto::VideoFrameHeader {
-                                    frame_id: frame_id.get(),
-                                    pts_us: ef.pts_us,
-                                    flags,
-                                    codec,
-                                    width: width as u16,
-                                    height: height as u16,
-                                    payload_len: annexb_len_of(&ef),
-                                };
-                                let wire = build_video_frame(&hdr, &ef.data);
-                                // on_sent only after the write completes (success or
-                                // failure), so `queued` reflects the real backlog and
-                                // the soft/hard limits can actually engage.
-                                let write_result = stream.write_all(&wire).await;
-                                gate.on_sent();
-                                if write_result.is_err() {
-                                    return;
-                                }
-                            }
-                        }
-                    }
+                    last_bgra = Some((bgra.clone(), pts_us));
+                    let force = std::mem::take(&mut force_next_frame);
+                    pending_frame = Some((bgra, pts_us, force));
                 }
             }
         }

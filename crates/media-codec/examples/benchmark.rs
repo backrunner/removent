@@ -10,6 +10,7 @@
 
 use removent_media_codec::{
     Application, AudioDecoder, AudioEncoder, VideoDecoder, VideoEncoder, VideoError,
+    av1_hardware_support,
 };
 use removent_proto::CodecId;
 use std::time::{Duration, Instant};
@@ -97,6 +98,39 @@ fn run_video(codec: CodecId, frame: &[u8]) -> Result<(), VideoError> {
             }
         }
     }
+    // A static workload models a desktop that receives repeated captures while
+    // the user is reading. Exact equality is the same policy used by the host
+    // sender; skipped frames never enter VideoToolbox or the wire.
+    let static_started = Instant::now();
+    let mut static_last: Option<Vec<u8>> = None;
+    let mut static_encoded = 0usize;
+    let mut static_skipped = 0usize;
+    let mut static_bytes = 0usize;
+    let mut static_timings = Vec::new();
+    for n in 0..VIDEO_FRAMES {
+        if static_last.as_deref() == Some(current_frame.as_slice()) {
+            static_skipped += 1;
+            continue;
+        }
+        let t0 = Instant::now();
+        let outputs = encoder.encode_bgra(
+            &current_frame,
+            (VIDEO_FRAMES as i64 + n as i64 + 1) * 16_667,
+        )?;
+        static_timings.push(t0.elapsed().as_nanos());
+        if outputs.is_empty() {
+            continue;
+        }
+        static_encoded += outputs.len();
+        static_bytes += outputs.iter().map(|f| f.data.len()).sum::<usize>();
+        static_last = Some(current_frame.clone());
+        for encoded in outputs {
+            decoder.decode_annexb(&encoded.data, encoded.pts_us)?;
+            let _ = wait_decoded(&decoder, Duration::from_secs(3));
+        }
+    }
+    let static_wall = static_started.elapsed();
+    static_timings.sort_unstable();
     let wall = started.elapsed();
     timings.sort_unstable();
     roundtrip_timings.sort_unstable();
@@ -114,6 +148,13 @@ fn run_video(codec: CodecId, frame: &[u8]) -> Result<(), VideoError> {
         roundtrip_timings.len(),
         VIDEO_FRAMES,
         encoded_bytes as f64 / 1_000_000.0,
+    );
+    println!(
+        "video codec={codec:?} workload=static {WIDTH}x{HEIGHT}: captured={VIDEO_FRAMES} encoded={static_encoded} skipped_unchanged={static_skipped} skip_ratio={:.1}% encode_p50={:.3}ms wire={:.2}MB wall={:.3}s",
+        static_skipped as f64 * 100.0 / VIDEO_FRAMES as f64,
+        percentile(&static_timings, 50, 100) as f64 / 1_000_000.0,
+        static_bytes as f64 / 1_000_000.0,
+        static_wall.as_secs_f64(),
     );
     Ok(())
 }
@@ -168,6 +209,11 @@ fn main() {
             "release"
         },
         std::thread::available_parallelism().map_or(1, usize::from),
+    );
+    let av1 = av1_hardware_support();
+    println!(
+        "av1 capability decoder_hardware={} encoder_hardware={} protocol_enabled=false reason=OBU/av1C framing and VideoToolbox wrapper pending",
+        av1.decoder, av1.encoder
     );
     let frame = video_frame(37);
     for codec in [CodecId::H264, CodecId::Hevc] {

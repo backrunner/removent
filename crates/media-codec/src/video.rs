@@ -14,7 +14,35 @@ use videotoolbox::decompression::DecompressionSession;
 use videotoolbox::session::Codec;
 
 pub const BGRA_FOURCC: u32 = u32::from_be_bytes(*b"BGRA");
+/// CoreMedia four-character code for AV1 (`av01`). The current wrapper does
+/// not encode/decode AV1 yet, but this constant is used by capability probes.
+pub const AV1_CODEC_TYPE: u32 = u32::from_be_bytes(*b"av01");
 const TIMESCALE_US: i32 = 1_000_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Av1HardwareSupport {
+    /// Whether VideoToolbox reports a hardware AV1 decoder on this Mac.
+    pub decoder: bool,
+    /// Whether the installed VideoToolbox encoder list contains a hardware
+    /// AV1 encoder for the current OS/device.
+    pub encoder: bool,
+}
+
+/// Probe AV1 support without creating a session or changing protocol
+/// negotiation. AV1 requires a separate OBU/av1C framing implementation, so
+/// callers must treat this as an informational capability until that path is
+/// available on both peers.
+pub fn av1_hardware_support() -> Av1HardwareSupport {
+    let decoder = unsafe { videotoolbox::ffi::VTIsHardwareDecodeSupported(AV1_CODEC_TYPE) != 0 };
+    let encoder = videotoolbox::available_video_encoder_details()
+        .ok()
+        .into_iter()
+        .flatten()
+        .any(|entry| {
+            entry.base.codec_type == AV1_CODEC_TYPE && entry.is_hardware_accelerated == Some(true)
+        });
+    Av1HardwareSupport { decoder, encoder }
+}
 
 fn is_hevc(codec: removent_proto::CodecId) -> bool {
     matches!(codec, removent_proto::CodecId::Hevc)

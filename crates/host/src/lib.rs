@@ -1,6 +1,7 @@
 //! removent-host: controlled-side service engine.
 
 pub mod admission;
+pub mod frame_dedup;
 pub mod input_sink;
 pub mod runner;
 pub mod sender;
@@ -8,6 +9,7 @@ pub mod session;
 pub mod vnc;
 
 pub use admission::{AdmissionDecision, decide as decide_admission};
+pub use frame_dedup::FrameDeduplicator;
 pub use input_sink::{
     InputReleaseTracker, InputSink, RealInputSink, RecordedInput, RecorderInputSink, drag_kind_for,
 };

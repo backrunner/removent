@@ -68,6 +68,7 @@ SCStream audio ──PCM 48k f32 stereo──▶ 重采样/整形 ─▶ Opus 10
 - **零拷贝优先**：SCK 给出的 IOSurface/CVPixelBuffer 直接喂给 VT（同进程内无需转 RGBA）；仅在需要缩放时插入 VTPixelTransferSession。
 - **排除自身窗口**：SCContentFilter 排除本 app 的窗口，避免"套娃画面"；音频设置 `excludesCurrentProcessAudio`。
 - **静态画面零负载**：SCK 本身只在内容变化时回调；配合 `minimumFrameInterval` 允许 15–60fps 区间浮动。
+- **静态帧保护**：如果采集层仍重复回调完全相同的 BGRA，host 在 VideoToolbox 前做逐字节去重；只提交成功写入的帧，关键帧请求可从最近缓存帧立即重发。
 
 ### 3.2 控制端（接收）
 

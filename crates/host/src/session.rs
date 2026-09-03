@@ -676,9 +676,9 @@ pub fn spawn_video_loop(
         let mut dedup = FrameDeduplicator::new();
         // Keep the latest capture so a keyframe request can be satisfied even
         // while the screen is static (there may be no future capture callback).
-        let mut last_bgra: Option<(Vec<u8>, i64)> = None;
+        let mut last_bgra: Option<(Arc<[u8]>, i64)> = None;
         let mut force_next_frame = false;
-        let mut pending_frame: Option<(Vec<u8>, i64, bool)> = None;
+        let mut pending_frame: Option<(Arc<[u8]>, i64, bool)> = None;
         let mut last_encoded_pts_us: Option<i64> = None;
         loop {
             // Encode outside the select so a keyframe request can enqueue the
@@ -815,7 +815,7 @@ pub fn spawn_video_loop(
                                 return;
                             }
                             sent = true;
-                            dedup.mark_sent(&bgra);
+                            dedup.mark_sent_shared(bgra.clone());
                             last_encoded_pts_us = Some(ef.pts_us);
                         }
                     }
@@ -844,6 +844,7 @@ pub fn spawn_video_loop(
                 }
                 item = video_rx.recv() => {
                     let Some((bgra, pts_us)) = item else { break };
+                    let bgra: Arc<[u8]> = bgra.into();
                     last_bgra = Some((bgra.clone(), pts_us));
                     let force = std::mem::take(&mut force_next_frame);
                     pending_frame = Some((bgra, pts_us, force));

@@ -5,9 +5,11 @@
 //! invocation, and a packet on the wire. This helper only tracks frames that
 //! were successfully sent so a frame dropped by backpressure is retried.
 
+use std::sync::Arc;
+
 #[derive(Debug, Default)]
 pub struct FrameDeduplicator {
-    last_sent: Option<Vec<u8>>,
+    last_sent: Option<Arc<[u8]>>,
 }
 
 impl FrameDeduplicator {
@@ -25,7 +27,13 @@ impl FrameDeduplicator {
     /// written. Keeping this separate from [`should_encode`] is important:
     /// backpressure drops and encoder failures must not suppress a retry.
     pub fn mark_sent(&mut self, frame: &[u8]) {
-        self.last_sent = Some(frame.to_vec());
+        self.last_sent = Some(Arc::from(frame));
+    }
+
+    /// Same as [`mark_sent`], but reuses an existing frame allocation shared
+    /// with the capture cache and pending encoder submission.
+    pub fn mark_sent_shared(&mut self, frame: Arc<[u8]>) {
+        self.last_sent = Some(frame);
     }
 
     pub fn reset(&mut self) {

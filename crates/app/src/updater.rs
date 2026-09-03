@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 
 /// Stable manifest URL (the `latest.json` asset of the newest GitHub Release).
 pub const DEFAULT_MANIFEST_URL: &str =
-    "https://github.com/removent/removent/releases/latest/download/latest.json";
+    "https://github.com/backrunner/removent/releases/latest/download/latest.json";
 
 /// Release-signing public key (Ed25519, hex). The private key only lives in the
 /// CI secrets of the release pipeline (release.md §2).

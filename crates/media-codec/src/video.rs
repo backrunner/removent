@@ -1,11 +1,13 @@
 //! Video codec: VideoToolbox hardware encode/decode wrappers.
 //!
-//! Frame data is uniformly Annex-B (with start codes); parameter sets are
-//! inlined before keyframes (H264: SPS+PPS, HEVC: VPS+SPS+PPS), matching the
-//! config_changed semantics of protocol.md §6.1.
+//! H264/HEVC frame data is Annex-B (with start codes); AV1 frame data is a
+//! complete temporal-unit OBU stream. Parameter sets are inlined before
+//! H264/HEVC keyframes (H264: SPS+PPS, HEVC: VPS+SPS+PPS), while rav1e emits
+//! the AV1 sequence header in keyframe temporal units.
 //! The decoder extracts parameter sets from Annex-B to create the
 //! CMVideoFormatDescription.
 
+use crate::av1::{Av1Decoder, Av1Encoder};
 use crate::cm_ffi as cm;
 use apple_cf::iosurface::IOSurface;
 use std::os::raw::c_void;
@@ -14,8 +16,8 @@ use videotoolbox::decompression::DecompressionSession;
 use videotoolbox::session::Codec;
 
 pub const BGRA_FOURCC: u32 = u32::from_be_bytes(*b"BGRA");
-/// CoreMedia four-character code for AV1 (`av01`). The current wrapper does
-/// not encode/decode AV1 yet, but this constant is used by capability probes.
+/// CoreMedia four-character code for AV1 (`av01`). The software AV1 path is
+/// used for media today; this constant remains useful for hardware probes.
 pub const AV1_CODEC_TYPE: u32 = u32::from_be_bytes(*b"av01");
 const TIMESCALE_US: i32 = 1_000_000;
 
@@ -28,10 +30,9 @@ pub struct Av1HardwareSupport {
     pub encoder: bool,
 }
 
-/// Probe AV1 support without creating a session or changing protocol
-/// negotiation. AV1 requires a separate OBU/av1C framing implementation, so
-/// callers must treat this as an informational capability until that path is
-/// available on both peers.
+/// Probe VideoToolbox's AV1 hardware support without creating a session or
+/// changing protocol negotiation. Software AV1 support is provided by rav1e
+/// and rav1d independently of this probe.
 pub fn av1_hardware_support() -> Av1HardwareSupport {
     let decoder = unsafe { videotoolbox::ffi::VTIsHardwareDecodeSupported(AV1_CODEC_TYPE) != 0 };
     let encoder = videotoolbox::available_video_encoder_details()
@@ -66,9 +67,11 @@ pub enum VideoError {
     NullSampleBuffer,
     #[error("avcc length prefix invalid")]
     InvalidAvcc,
+    #[error("software AV1: {0}")]
+    Av1(String),
 }
 
-/// One encoded frame (Annex-B).
+/// One encoded frame (Annex-B for H264/HEVC, temporal-unit OBUs for AV1).
 #[derive(Debug, Clone)]
 pub struct EncodedVideoFrame {
     pub data: Vec<u8>,
@@ -80,6 +83,7 @@ fn vt_codec(codec: removent_proto::CodecId) -> Codec {
     match codec {
         removent_proto::CodecId::H264 => Codec::H264,
         removent_proto::CodecId::Hevc => Codec::HEVC,
+        removent_proto::CodecId::Av1 => unreachable!("AV1 uses the software codec path"),
     }
 }
 
@@ -524,7 +528,8 @@ fn encode_maybe_forced<T, E: std::fmt::Display>(
 }
 
 pub struct VideoEncoder {
-    session: EncoderSession,
+    session: Option<EncoderSession>,
+    av1: Option<Av1Encoder>,
     codec: removent_proto::CodecId,
     width: usize,
     height: usize,
@@ -540,15 +545,26 @@ impl VideoEncoder {
         bitrate_kbps: u32,
         fps: u8,
     ) -> Result<Self, VideoError> {
-        let session = EncoderSession::new(
-            vt_codec(codec),
-            width as i32,
-            height as i32,
-            bitrate_kbps,
-            fps,
-        )?;
+        let (session, av1) = if codec == removent_proto::CodecId::Av1 {
+            (
+                None,
+                Some(Av1Encoder::new(width, height, bitrate_kbps, fps)?),
+            )
+        } else {
+            (
+                Some(EncoderSession::new(
+                    vt_codec(codec),
+                    width as i32,
+                    height as i32,
+                    bitrate_kbps,
+                    fps,
+                )?),
+                None,
+            )
+        };
         Ok(Self {
             session,
+            av1,
             codec,
             width,
             height,
@@ -572,15 +588,31 @@ impl VideoEncoder {
     }
 
     pub fn request_keyframe(&mut self) {
-        self.force_keyframe_pending = true;
+        if let Some(av1) = self.av1.as_mut() {
+            av1.request_keyframe();
+        } else {
+            self.force_keyframe_pending = true;
+        }
     }
 
     /// Adjusts the target bitrate at runtime (used by adaptive rate control).
     pub fn set_bitrate_kbps(&mut self, kbps: u32) -> Result<(), VideoError> {
-        self.session.set_i32_property(
+        if let Some(av1) = self.av1.as_mut() {
+            return av1.set_bitrate_kbps(kbps);
+        }
+        self.session.as_ref().expect("VT session").set_i32_property(
             unsafe { videotoolbox::ffi::kVTCompressionPropertyKey_AverageBitRate },
             (kbps * 1000) as i32,
         )
+    }
+
+    /// Flushes delayed software AV1 packets at end of stream. VideoToolbox
+    /// encoders are driven continuously and have no equivalent operation here.
+    pub fn flush(&mut self) -> Result<Vec<EncodedVideoFrame>, VideoError> {
+        if let Some(av1) = self.av1.as_mut() {
+            return av1.flush();
+        }
+        Ok(Vec::new())
     }
 
     /// Encodes one BGRA frame. May return empty (no output when the encoder
@@ -596,6 +628,9 @@ impl VideoEncoder {
                 need: bpr_expected * self.height,
                 got: bgra.len(),
             });
+        }
+        if let Some(av1) = self.av1.as_mut() {
+            return av1.encode_bgra(bgra, pts_us);
         }
         let force_keyframe = std::mem::take(&mut self.force_keyframe_pending);
 
@@ -616,7 +651,10 @@ impl VideoEncoder {
         }
 
         let Some(raw) = encode_maybe_forced(force_keyframe, |force| {
-            self.session.encode(&surface, pts_us, force)
+            self.session
+                .as_ref()
+                .expect("VT session")
+                .encode(&surface, pts_us, force)
         })?
         else {
             return Ok(Vec::new());
@@ -741,11 +779,13 @@ fn extract_param_sets_from_desc(desc: cm::CMFormatDescriptionRef, hevc: bool) ->
 pub struct VideoDecoder {
     /// Holds a +1 reference; released automatically on Drop.
     _format_desc: Option<apple_cf::cm::CMFormatDescription>,
-    session: DecompressionSession,
+    session: Option<DecompressionSession>,
     /// Wrapped in a Mutex because `mpsc::Receiver` is `!Sync` while the
     /// decoder must be `Sync` for shared access across tasks; usage is
     /// effectively single-task, so contention is nil.
     rx: std::sync::Mutex<mpsc::Receiver<DecodedBgra>>,
+    av1: std::sync::Mutex<Option<Av1Decoder>>,
+    av1_tx: Option<mpsc::Sender<DecodedBgra>>,
     hevc: bool,
     width: usize,
     height: usize,
@@ -763,8 +803,21 @@ impl VideoDecoder {
         height: usize,
         param_sets: &[Vec<u8>],
     ) -> Result<Self, VideoError> {
-        if param_sets.is_empty() {
+        if codec != removent_proto::CodecId::Av1 && param_sets.is_empty() {
             return Err(VideoError::NoParameterSets);
+        }
+        let (tx, rx) = mpsc::channel::<DecodedBgra>();
+        if codec == removent_proto::CodecId::Av1 {
+            return Ok(Self {
+                _format_desc: None,
+                session: None,
+                rx: std::sync::Mutex::new(rx),
+                av1: std::sync::Mutex::new(Some(Av1Decoder::new(width, height)?)),
+                av1_tx: Some(tx),
+                hevc: false,
+                width,
+                height,
+            });
         }
         let hevc = is_hevc(codec);
         let ptrs: Vec<*const u8> = param_sets.iter().map(|p| p.as_ptr()).collect();
@@ -796,7 +849,6 @@ impl VideoDecoder {
             return Err(VideoError::CoreMedia(status));
         }
 
-        let (tx, rx) = mpsc::channel::<DecodedBgra>();
         let format_desc = apple_cf::cm::CMFormatDescription::from_raw(desc.cast())
             .expect("non-null format description");
         let session = DecompressionSession::new(&format_desc, move |frame| {
@@ -813,8 +865,10 @@ impl VideoDecoder {
         })?;
         Ok(Self {
             _format_desc: Some(format_desc),
-            session,
+            session: Some(session),
             rx: std::sync::Mutex::new(rx),
+            av1: std::sync::Mutex::new(None),
+            av1_tx: None,
             hevc,
             width,
             height,
@@ -825,10 +879,42 @@ impl VideoDecoder {
         self.rx.lock().ok()?.try_recv().ok()
     }
 
-    /// Decodes one Annex-B frame; submission is fire-and-forget — decoded
-    /// frames arrive asynchronously via the callback; fetch finished frames with
-    /// try_recv_decoded.
+    /// Flushes delayed software AV1 pictures at end of stream. VideoToolbox
+    /// decoders deliver frames through their callback and need no explicit
+    /// flush here.
+    pub fn flush(&self) -> Result<(), VideoError> {
+        let mut av1 = self
+            .av1
+            .lock()
+            .map_err(|_| VideoError::Av1("decoder lock poisoned".into()))?;
+        let Some(decoder) = av1.as_mut() else {
+            return Ok(());
+        };
+        let frames = decoder.flush()?;
+        let tx = self.av1_tx.as_ref().expect("AV1 output sender");
+        for frame in frames {
+            let _ = tx.send(frame);
+        }
+        Ok(())
+    }
+
+    /// Decodes one encoded frame. H264/HEVC input is Annex-B; AV1 input is a
+    /// complete temporal-unit OBU payload. Fetch output with
+    /// [`Self::try_recv_decoded`].
     pub fn decode_annexb(&self, annexb: &[u8], pts_us: i64) -> Result<(), VideoError> {
+        if let Some(decoder) = self
+            .av1
+            .lock()
+            .map_err(|_| VideoError::Av1("decoder lock poisoned".into()))?
+            .as_mut()
+        {
+            let frames = decoder.decode(annexb, pts_us)?;
+            let tx = self.av1_tx.as_ref().expect("AV1 output sender").clone();
+            for frame in frames {
+                let _ = tx.send(frame);
+            }
+            return Ok(());
+        }
         // Split as Annex-B first, filter out parameter sets, then rebuild as AVCC.
         let nals: Vec<&[u8]> = split_annexb_nals(annexb)
             .into_iter()
@@ -896,7 +982,10 @@ impl VideoDecoder {
             let wrapped = apple_cf::cm::CMSampleBuffer::from_raw_retained(sb)
                 .ok_or(VideoError::NullSampleBuffer)?;
             videotoolbox::ffi::CFRelease(sb.cast()); // return our temporary +1
-            self.session.decode(&wrapped)?;
+            self.session
+                .as_ref()
+                .expect("VT decoder session")
+                .decode(&wrapped)?;
         }
         Ok(())
     }

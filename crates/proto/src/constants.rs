@@ -33,6 +33,7 @@ pub mod audio_flags {
 pub enum CodecId {
     H264 = 0x01,
     Hevc = 0x02,
+    Av1 = 0x03,
 }
 
 impl CodecId {
@@ -40,12 +41,14 @@ impl CodecId {
         match self {
             CodecId::H264 => 0x01,
             CodecId::Hevc => 0x02,
+            CodecId::Av1 => 0x03,
         }
     }
     pub fn from_payload_tag(tag: u8) -> Option<Self> {
         match tag {
             0x01 => Some(CodecId::H264),
             0x02 => Some(CodecId::Hevc),
+            0x03 => Some(CodecId::Av1),
             _ => None,
         }
     }
@@ -57,4 +60,6 @@ pub mod feature_bits {
     pub const HDR: u64 = 1 << 2;
     pub const RELATIVE_POINTER: u64 = 1 << 3;
     pub const RICH_CLIPBOARD: u64 = 1 << 4;
+    /// Peer can encode/decode the software AV1 temporal-unit wire format.
+    pub const SOFTWARE_AV1: u64 = 1 << 5;
 }

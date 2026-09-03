@@ -353,8 +353,10 @@ pub async fn serve_connection(
             *resume_verdict.lock().unwrap() = verdict;
             HandshakeServer {
                 proto_version: PROTO_VERSION,
-                // Honest declaration: file-transfer/two-way-audio/hdr are all unimplemented.
-                feature_bits: 0,
+                // File-transfer/two-way-audio/hdr remain unimplemented; the
+                // software AV1 codec is available on every build and is still
+                // opt-in during negotiation.
+                feature_bits: removent_proto::feature_bits::SOFTWARE_AV1,
                 device_name: cfg.device_name.clone(),
                 // Honest resume verdict (§7.4): Some(true) only when the presented token
                 // validated; Some(false) tells the client to fall back to full
@@ -483,9 +485,17 @@ pub async fn serve_connection(
 
     // Accept and negotiate.
     sink.send(ControlMsg::SessionAccept).await?;
+    let display_w = main_display.w_px;
+    let display_h = main_display.h_px;
     let displays = vec![main_display];
     let selected = displays[0].id;
-    let codec = CodecId::Hevc; // the client may downgrade in NegotiateReply
+    let codec = preferred_video_codec(
+        hello.feature_bits,
+        display_w,
+        display_h,
+        cfg.video_bitrate_kbps,
+        cfg.video_fps,
+    );
     let negotiate = Negotiate {
         displays,
         selected_display: selected,
@@ -546,6 +556,40 @@ pub async fn serve_connection(
         sink,
         source,
     ))
+}
+
+/// AV1 is intentionally opt-in for remote desktop sessions. Software AV1 has
+/// materially higher CPU cost and a few frames of encoder pipeline delay, so a
+/// peer must advertise the decoder feature and the operator must request it via
+/// `REMOVENT_VIDEO_CODEC=av1`. Any failed probe falls back to HEVC.
+fn preferred_video_codec(
+    peer_features: u64,
+    display_w: u32,
+    display_h: u32,
+    bitrate_kbps: u32,
+    fps: u8,
+) -> CodecId {
+    let requested = std::env::var("REMOVENT_VIDEO_CODEC")
+        .ok()
+        .is_some_and(|v| v.eq_ignore_ascii_case("av1") || v.eq_ignore_ascii_case("software-av1"));
+    if !requested || peer_features & removent_proto::feature_bits::SOFTWARE_AV1 == 0 {
+        return CodecId::Hevc;
+    }
+    let (w, h) = fit_capture_dims(display_w, display_h);
+    if removent_media_codec::VideoEncoder::new(
+        CodecId::Av1,
+        w as usize,
+        h as usize,
+        bitrate_kbps,
+        fps,
+    )
+    .is_ok()
+    {
+        CodecId::Av1
+    } else {
+        tracing::warn!("software AV1 probe failed; falling back to HEVC");
+        CodecId::Hevc
+    }
 }
 
 async fn run_pairing(
@@ -622,6 +666,16 @@ fn new_token() -> [u8; 16] {
 
 // ---------------- media loops ----------------
 
+fn mark_submitted_frame_sent(
+    dedup: &mut FrameDeduplicator,
+    submitted_frames: &mut HashMap<i64, Arc<[u8]>>,
+    pts_us: i64,
+) {
+    if let Some(sent_bgra) = submitted_frames.remove(&pts_us) {
+        dedup.mark_sent_shared(sent_bgra);
+    }
+}
+
 /// Video send loop: exact frame deduplication → encode → backpressure gate →
 /// write to the media uni-stream.
 /// Returns the JoinHandle; the loop exits immediately when `cancel` fires
@@ -679,7 +733,12 @@ pub fn spawn_video_loop(
         let mut last_bgra: Option<(Arc<[u8]>, i64)> = None;
         let mut force_next_frame = false;
         let mut pending_frame: Option<(Arc<[u8]>, i64, bool)> = None;
-        let mut last_encoded_pts_us: Option<i64> = None;
+        let mut last_submitted_pts_us: Option<i64> = None;
+        // Software AV1 may emit a packet one or more submissions after the
+        // corresponding encode call. Keep the exact BGRA associated with each
+        // submitted timestamp so deduplication is committed only when that
+        // packet is actually written to the wire.
+        let mut submitted_frames: HashMap<i64, Arc<[u8]>> = HashMap::new();
         loop {
             // Encode outside the select so a keyframe request can enqueue the
             // cached frame and take the exact same path as a new capture.
@@ -693,7 +752,9 @@ pub fn spawn_video_loop(
                 // Cached keyframes can arrive after newer captures. Keep wire
                 // timestamps strictly increasing for decoder/jitter ordering.
                 let encode_pts_us =
-                    last_encoded_pts_us.map_or(pts_us, |last| pts_us.max(last.saturating_add(1)));
+                    last_submitted_pts_us.map_or(pts_us, |last| pts_us.max(last.saturating_add(1)));
+                last_submitted_pts_us = Some(encode_pts_us);
+                submitted_frames.insert(encode_pts_us, bgra.clone());
                 let frames = match encoder.encode_bgra(&bgra, encode_pts_us) {
                     Ok(f) => f,
                     Err(removent_media_codec::VideoError::PixelSizeMismatch { got, .. }) => {
@@ -710,6 +771,7 @@ pub fn spawn_video_loop(
                                         height = nh;
                                         config_changed_pending = true;
                                         dedup.reset();
+                                        submitted_frames.clear();
                                         // Retry the frame that exposed the new
                                         // dimensions instead of losing it.
                                         pending_frame = Some((bgra, pts_us, true));
@@ -738,6 +800,7 @@ pub fn spawn_video_loop(
                             }
                             _ => {
                                 dedup.reset();
+                                submitted_frames.clear();
                                 tracing::warn!(
                                     got,
                                     "frame size mismatch, no matching display; dropping frame"
@@ -751,10 +814,14 @@ pub fn spawn_video_loop(
                         // same pixels forever; the next capture will retry.
                         tracing::warn!(err=%e, "video encode failed");
                         dedup.reset();
+                        submitted_frames.clear();
                         continue;
                     }
                 };
                 if frames.is_empty() {
+                    if codec != CodecId::Av1 {
+                        submitted_frames.remove(&encode_pts_us);
+                    }
                     // A VideoToolbox frame drop is not a successful send. Keep
                     // a forced refresh pending for the next capture callback.
                     if force {
@@ -766,6 +833,7 @@ pub fn spawn_video_loop(
                 for ef in frames {
                     match gate.on_submit(ef.keyframe) {
                         crate::sender::SendAction::DropFrame => {
+                            submitted_frames.remove(&ef.pts_us);
                             if gate.take_downgrade_request()
                                 && let Some(tx) = &downgrade_tx
                             {
@@ -815,8 +883,7 @@ pub fn spawn_video_loop(
                                 return;
                             }
                             sent = true;
-                            dedup.mark_sent_shared(bgra.clone());
-                            last_encoded_pts_us = Some(ef.pts_us);
+                            mark_submitted_frame_sent(&mut dedup, &mut submitted_frames, ef.pts_us);
                         }
                     }
                 }
@@ -833,6 +900,8 @@ pub fn spawn_video_loop(
                     if let Err(e) = encoder.set_bitrate_kbps(kbps) {
                         tracing::warn!(err=%e, "set bitrate failed");
                     }
+                    submitted_frames.clear();
+                    dedup.reset();
                 }
                 Some(()) = keyframe_req_rx.recv() => {
                     encoder.request_keyframe();
@@ -1333,6 +1402,24 @@ mod tests {
         assert_eq!(w % 2, 0);
         assert_eq!(h % 2, 0);
         assert!(w >= 2 && h >= 2);
+    }
+
+    #[test]
+    fn delayed_packet_commits_its_own_submitted_pixels() {
+        let frame_a: Arc<[u8]> = Arc::from([1, 2, 3, 4]);
+        let frame_b: Arc<[u8]> = Arc::from([5, 6, 7, 8]);
+        let mut submitted = HashMap::new();
+        submitted.insert(10, frame_a.clone());
+        submitted.insert(20, frame_b.clone());
+        let mut dedup = FrameDeduplicator::new();
+
+        // AV1 can return A while the encode call is currently submitting B.
+        mark_submitted_frame_sent(&mut dedup, &mut submitted, 10);
+        assert!(!dedup.should_encode(&frame_a, false));
+        assert!(dedup.should_encode(&frame_b, false));
+
+        mark_submitted_frame_sent(&mut dedup, &mut submitted, 20);
+        assert!(!dedup.should_encode(&frame_b, false));
     }
 
     #[test]

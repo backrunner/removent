@@ -11,3 +11,5 @@ apple-cf = "0.9"
 opus = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+rav1e = { version = "0.8.1", default-features = false, features = ["asm", "threading"] }
+rusty_av1d = { version = "1.2.0", default-features = false, features = ["bitdepth_8"] }

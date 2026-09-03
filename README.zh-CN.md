@@ -5,8 +5,8 @@
 Removent 是一个用 Rust 编写的 macOS 局域网远程桌面工具：在同一局域网内查看并控制另一台
 Mac —— 无中转服务器、无账号，流量不出局域网。
 
-- **为速度而生**：QUIC 传输、VideoToolbox 硬件 HEVC/H.264 编码、ScreenCaptureKit 采集、
-  Opus 音频。
+- **为速度而生**：QUIC 传输、VideoToolbox 硬件 HEVC/H.264 编码、可选的软件 AV1、
+  ScreenCaptureKit 采集和 Opus 音频。
 - **默认安全**：双向 TLS + 设备证书固定、SPAKE2 PIN 配对、逐连接的准入确认。
 - **原生体验**：GPUI 桌面应用 + 菜单栏托盘托管常驻被控服务。
 
@@ -22,14 +22,14 @@ Mac —— 无中转服务器、无账号，流量不出局域网。
 
 ### 方式一：下载 DMG
 
-从 [最新 release](https://github.com/removent/removent/releases/latest) 下载
+从 [最新 release](https://github.com/backrunner/removent/releases/latest) 下载
 `Removent-<版本>-macos-arm64.dmg`，打开后把 **Removent.app** 拖进「应用程序」。安装包
 已经过 Developer ID 签名和 Apple 公证，打开时不会有 Gatekeeper 警告。
 
 ### 方式二：一行命令安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/removent/removent/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh | bash
 ```
 
 ### 首次启动
@@ -59,7 +59,7 @@ macOS 会请求两项权限 —— 共享本机时都必需：
 需要 stable Rust 工具链（1.85+）和带 Swift 的 Xcode 命令行工具。
 
 ```bash
-git clone https://github.com/removent/removent.git
+git clone https://github.com/backrunner/removent.git
 cd removent
 
 # 调试模式运行
@@ -80,21 +80,22 @@ cargo run --release -p removent-media-codec --example benchmark
 cargo run --release -p removent-net --example rtt_benchmark
 ```
 
-编解码测试输出 H.264/HEVC 编码及编码到解码回调的延迟、吞吐、压缩比和 Opus
-编解码耗时；RVP 测试输出基于 QUIC `Ping/Pong` 的控制 RTT 百分位数。两条命令都会打印
-构建模式和运行环境。
+编解码测试输出 H.264/HEVC/AV1 编码耗时、逐帧编码到解码延迟、吞吐、压缩比、静止帧
+跳过率和 Opus 编解码耗时；RVP 测试输出基于 QUIC `Ping/Pong` 的控制 RTT 百分位数。
+两条命令都会打印构建模式和运行环境。
 
 ### 编码与静止帧策略
 
 被控端会比较完整的 BGRA 帧；只有与最近一次成功写入视频流的帧逐字节相同，才会跳过本帧。
 关键帧请求始终绕过去重检查，并缓存最近一帧，因此桌面静止、没有新的采集回调时也能立即
-响应关键帧请求。H.264/HEVC 仍通过帧间预测完成主要压缩；完全去重还能省掉 IOSurface
-拷贝、硬件编码和网络包。
+响应关键帧请求。H.264、HEVC 和 AV1 还会通过帧间预测压缩未变化区域；整帧完全去重能在
+画面完全不变时省掉编码器输入拷贝、编码调用和网络包。
 
-RVP 已为 AV1 保留 codec id `0x03`，但当前不会宣告或发送 AV1。`removent-media-codec`
-的 benchmark 会打印 VideoToolbox 的 AV1 硬件解码器/编码器探测结果。真正启用 AV1 还需要
-双方协商能力，并实现独立的 AV1 OBU/`av1C` 码流与 format-description 路径；仅检测到 AV1
-硬件并不足以安全发送。
+RVP codec id `0x03` 承载完整的 AV1 temporal-unit OBU payload。双方都会宣告软件 AV1
+能力，但实时软件 AV1 的 CPU 开销和延迟明显更高，因此仍默认使用 HEVC。在 host/daemon
+环境中设置 `REMOVENT_VIDEO_CODEC=av1` 可主动启用；会话前 encoder 探测失败时自动回退
+HEVC。目前使用 rav1e 软件编码和 rav1d 软件解码。Benchmark 同时打印 VideoToolbox 硬件
+支持情况，后续可据此增加硬件 AV1 backend。
 
 ## 工作原理
 
@@ -111,7 +112,7 @@ RVP 已为 AV1 保留 codec id `0x03`，但当前不会宣告或发送 AV1。`re
 ## 自动更新
 
 Removent 在启动 30 秒后、之后每 24 小时从 GitHub Releases 拉取一次
-[`latest.json`](https://github.com/removent/removent/releases/latest/download/latest.json)
+[`latest.json`](https://github.com/backrunner/removent/releases/latest/download/latest.json)
 检查新版本。可在应用设置中关闭；该检查不影响纯局域网使用。
 
 更新**仅提示、不强制**——有新版时设置页与菜单栏出现角标，不确认不会安装任何内容。

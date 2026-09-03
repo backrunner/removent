@@ -8,7 +8,7 @@
 # Optional environment:
 #   UPDATE_SIGNING_KEY_FILE  Ed25519 PEM for signing latest.json
 #                            (default ~/.config/removent/update-signing-key.pem)
-#   GITHUB_REPO_URL          release URL base (default https://github.com/removent/removent)
+#   GITHUB_REPO_URL          release URL base (default https://github.com/backrunner/removent)
 #
 # Produces in dist/:
 #   Removent-<ver>-macos-arm64.zip   (notarized app archive)
@@ -36,7 +36,7 @@ scripts/make_dmg.sh
 scripts/notarize.sh "$DMG"
 
 echo "==> generate latest.json"
-REPO_URL="${GITHUB_REPO_URL:-https://github.com/removent/removent}"
+REPO_URL="${GITHUB_REPO_URL:-https://github.com/backrunner/removent}"
 # The updater downloads the zip and swaps the .app, so the manifest points at it.
 MIN_PROTO=$(sed -n 's/.*PROTO_VERSION: u16 = \([0-9][0-9]*\).*/\1/p' crates/proto/src/constants.rs | head -1)
 : "${MIN_PROTO:?could not read PROTO_VERSION from crates/proto/src/constants.rs}"

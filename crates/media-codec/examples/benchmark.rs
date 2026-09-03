@@ -3,16 +3,17 @@
 //! Run with:
 //!   cargo run --release -p removent-media-codec --example benchmark
 //!
-//! Video numbers measure the synchronous cost of submitting BGRA frames to
-//! VideoToolbox and draining returned samples. Audio numbers measure Opus
-//! encode/decode cost for 10 ms stereo frames. This is intentionally a small,
-//! dependency-free benchmark rather than a statistically heavy microbenchmark.
+//! Video numbers measure synchronous BGRA submission cost and per-frame time
+//! from encoder submission to decoded output. Audio numbers measure Opus
+//! encode/decode cost for 10 ms stereo frames. This is intentionally a small
+//! benchmark harness rather than a statistically heavy microbenchmark.
 
 use removent_media_codec::{
     Application, AudioDecoder, AudioEncoder, VideoDecoder, VideoEncoder, VideoError,
     av1_hardware_support,
 };
 use removent_proto::CodecId;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 const WIDTH: usize = 1280;
@@ -53,32 +54,63 @@ fn machine_model() -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
-fn wait_decoded(decoder: &VideoDecoder, timeout: Duration) -> bool {
+fn drain_decoded(decoder: &VideoDecoder) -> Vec<removent_media_codec::DecodedBgra> {
+    let mut frames = Vec::new();
+    while let Some(frame) = decoder.try_recv_decoded() {
+        frames.push(frame);
+    }
+    frames
+}
+
+fn wait_decoded(
+    decoder: &VideoDecoder,
+    timeout: Duration,
+) -> Vec<removent_media_codec::DecodedBgra> {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if decoder.try_recv_decoded().is_some() {
-            return true;
+        let frames = drain_decoded(decoder);
+        if !frames.is_empty() {
+            return frames;
         }
         std::thread::sleep(Duration::from_millis(1));
     }
-    false
+    Vec::new()
+}
+
+fn account_decoded(
+    frames: Vec<removent_media_codec::DecodedBgra>,
+    submitted_at: &mut HashMap<i64, Instant>,
+    moving_decoded: &mut usize,
+    roundtrip_timings: &mut Vec<u128>,
+) {
+    for frame in frames {
+        if let Some(started) = submitted_at.remove(&frame.pts_us) {
+            roundtrip_timings.push(started.elapsed().as_nanos());
+            *moving_decoded += 1;
+        }
+    }
 }
 
 fn run_video(codec: CodecId, frame: &[u8]) -> Result<(), VideoError> {
     let mut current_frame = frame.to_vec();
     let mut encoder = VideoEncoder::new(codec, WIDTH, HEIGHT, 8_000, 60)?;
     let warmup = encoder.encode_bgra(frame, 0)?;
-    let parameter_sets = encoder
-        .parameter_sets()
-        .ok_or(VideoError::NoParameterSets)?
-        .to_vec();
+    let parameter_sets = match codec {
+        CodecId::Av1 => Vec::new(),
+        _ => encoder
+            .parameter_sets()
+            .ok_or(VideoError::NoParameterSets)?
+            .to_vec(),
+    };
     let decoder = VideoDecoder::new(codec, WIDTH, HEIGHT, &parameter_sets)?;
-    if let Some(encoded) = warmup.first() {
+    let mut roundtrip_timings = Vec::with_capacity(VIDEO_FRAMES);
+    let mut submitted_at = HashMap::with_capacity(VIDEO_FRAMES);
+    let mut moving_decoded = 0usize;
+    for encoded in warmup {
         decoder.decode_annexb(&encoded.data, encoded.pts_us)?;
         let _ = wait_decoded(&decoder, Duration::from_secs(3));
     }
     let mut timings = Vec::with_capacity(VIDEO_FRAMES);
-    let mut roundtrip_timings = Vec::with_capacity(VIDEO_FRAMES);
     let mut encoded_bytes = 0usize;
     let started = Instant::now();
     for n in 0..VIDEO_FRAMES {
@@ -87,17 +119,61 @@ fn run_video(codec: CodecId, frame: &[u8]) -> Result<(), VideoError> {
         let marker = (n * 4099) % (WIDTH * HEIGHT);
         current_frame[marker * 4] = n as u8;
         current_frame[marker * 4 + 1] = n.wrapping_mul(3) as u8;
+        let pts_us = (n as i64 + 1) * 16_667;
         let t0 = Instant::now();
-        let outputs = encoder.encode_bgra(&current_frame, (n as i64 + 1) * 16_667)?;
+        submitted_at.insert(pts_us, t0);
+        let outputs = encoder.encode_bgra(&current_frame, pts_us)?;
         timings.push(t0.elapsed().as_nanos());
-        encoded_bytes += outputs.iter().map(|f| f.data.len()).sum::<usize>();
+        encoded_bytes += outputs
+            .iter()
+            .filter(|f| submitted_at.contains_key(&f.pts_us))
+            .map(|f| f.data.len())
+            .sum::<usize>();
         for encoded in outputs {
             decoder.decode_annexb(&encoded.data, encoded.pts_us)?;
-            if wait_decoded(&decoder, Duration::from_secs(3)) {
-                roundtrip_timings.push(t0.elapsed().as_nanos());
-            }
+            let decoded = wait_decoded(&decoder, Duration::from_secs(3));
+            account_decoded(
+                decoded,
+                &mut submitted_at,
+                &mut moving_decoded,
+                &mut roundtrip_timings,
+            );
         }
     }
+    let tail = encoder.flush()?;
+    encoded_bytes += tail
+        .iter()
+        .filter(|f| submitted_at.contains_key(&f.pts_us))
+        .map(|f| f.data.len())
+        .sum::<usize>();
+    for encoded in tail {
+        decoder.decode_annexb(&encoded.data, encoded.pts_us)?;
+        let decoded = wait_decoded(&decoder, Duration::from_secs(3));
+        account_decoded(
+            decoded,
+            &mut submitted_at,
+            &mut moving_decoded,
+            &mut roundtrip_timings,
+        );
+    }
+    decoder.flush()?;
+    // rav1d may finish the last few pictures just after the final submission;
+    // drain its asynchronous output before reporting the moving-marker count.
+    let drain_deadline = Instant::now() + Duration::from_secs(3);
+    while moving_decoded < VIDEO_FRAMES && Instant::now() < drain_deadline {
+        let decoded = drain_decoded(&decoder);
+        if decoded.is_empty() {
+            std::thread::sleep(Duration::from_millis(1));
+        } else {
+            account_decoded(
+                decoded,
+                &mut submitted_at,
+                &mut moving_decoded,
+                &mut roundtrip_timings,
+            );
+        }
+    }
+    let moving_wall = started.elapsed();
     // A static workload models a desktop that receives repeated captures while
     // the user is reading. Exact equality is the same policy used by the host
     // sender; skipped frames never enter VideoToolbox or the wire.
@@ -107,13 +183,14 @@ fn run_video(codec: CodecId, frame: &[u8]) -> Result<(), VideoError> {
     let mut static_skipped = 0usize;
     let mut static_bytes = 0usize;
     let mut static_timings = Vec::new();
+    let mut static_encoder = VideoEncoder::new(codec, WIDTH, HEIGHT, 8_000, 60)?;
     for n in 0..VIDEO_FRAMES {
         if static_last.as_deref() == Some(current_frame.as_slice()) {
             static_skipped += 1;
             continue;
         }
         let t0 = Instant::now();
-        let outputs = encoder.encode_bgra(
+        let outputs = static_encoder.encode_bgra(
             &current_frame,
             (VIDEO_FRAMES as i64 + n as i64 + 1) * 16_667,
         )?;
@@ -124,18 +201,19 @@ fn run_video(codec: CodecId, frame: &[u8]) -> Result<(), VideoError> {
         static_encoded += outputs.len();
         static_bytes += outputs.iter().map(|f| f.data.len()).sum::<usize>();
         static_last = Some(current_frame.clone());
-        for encoded in outputs {
-            decoder.decode_annexb(&encoded.data, encoded.pts_us)?;
-            let _ = wait_decoded(&decoder, Duration::from_secs(3));
-        }
+        // Static mode measures capture deduplication and wire volume. The
+        // moving-marker decoder was flushed above, so no inter-frame decode is
+        // attempted against its reset state here.
     }
+    let static_tail = static_encoder.flush()?;
+    static_encoded += static_tail.len();
+    static_bytes += static_tail.iter().map(|f| f.data.len()).sum::<usize>();
     let static_wall = static_started.elapsed();
     static_timings.sort_unstable();
-    let wall = started.elapsed();
     timings.sort_unstable();
     roundtrip_timings.sort_unstable();
     let raw_bytes = frame.len() * VIDEO_FRAMES;
-    let seconds = wall.as_secs_f64().max(f64::MIN_POSITIVE);
+    let seconds = moving_wall.as_secs_f64().max(f64::MIN_POSITIVE);
     let fps = VIDEO_FRAMES as f64 / seconds;
     let mbps = encoded_bytes as f64 * 8.0 / seconds / 1_000_000.0;
     let ratio = raw_bytes as f64 / encoded_bytes.max(1) as f64;
@@ -145,7 +223,7 @@ fn run_video(codec: CodecId, frame: &[u8]) -> Result<(), VideoError> {
         percentile(&timings, 95, 100) as f64 / 1_000_000.0,
         percentile(&roundtrip_timings, 50, 100) as f64 / 1_000_000.0,
         percentile(&roundtrip_timings, 95, 100) as f64 / 1_000_000.0,
-        roundtrip_timings.len(),
+        moving_decoded,
         VIDEO_FRAMES,
         encoded_bytes as f64 / 1_000_000.0,
     );
@@ -212,11 +290,11 @@ fn main() {
     );
     let av1 = av1_hardware_support();
     println!(
-        "av1 capability decoder_hardware={} encoder_hardware={} protocol_enabled=false reason=OBU/av1C framing and VideoToolbox wrapper pending",
+        "av1 capability decoder_hardware={} encoder_hardware={} software_encoder=true software_decoder=true protocol_enabled=true opt_in=REMOVENT_VIDEO_CODEC=av1",
         av1.decoder, av1.encoder
     );
     let frame = video_frame(37);
-    for codec in [CodecId::H264, CodecId::Hevc] {
+    for codec in [CodecId::H264, CodecId::Hevc, CodecId::Av1] {
         if let Err(err) = run_video(codec, &frame) {
             println!("video codec={codec:?}: unavailable ({err})");
         }

@@ -258,6 +258,23 @@ mod tests {
     }
 
     #[test]
+    fn av1_video_header_roundtrip() {
+        let h = VideoFrameHeader {
+            frame_id: 9,
+            pts_us: 123,
+            flags: video_flags::KEYFRAME,
+            codec: CodecId::Av1,
+            width: 320,
+            height: 240,
+            payload_len: 3,
+        };
+        let buf = build_video_frame(&h, &[0x0a, 0x01, 0x00]);
+        let (parsed, consumed) = parse_video_header(&buf).unwrap();
+        assert_eq!(consumed, VIDEO_HEADER_LEN);
+        assert_eq!(parsed, h);
+    }
+
+    #[test]
     fn video_header_rejects_bad_type_and_codec() {
         let mut buf = build_video_frame(&sample_video(), b"HELLO");
         buf[0] = 0x02;

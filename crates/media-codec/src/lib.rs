@@ -1,6 +1,7 @@
-//! removent-media-codec: VideoToolbox video codec and Opus audio codec.
+//! removent-media-codec: VideoToolbox/AV1 video codecs and Opus audio codec.
 
 pub mod audio;
+mod av1;
 pub mod cm_ffi;
 pub mod video;
 

@@ -268,10 +268,17 @@ async fn full_session_pair_negotiate_media() {
         .await
         .expect("clip send");
     tokio::time::sleep(Duration::from_millis(400)).await;
+    let expected_codec = if std::env::var("REMOVENT_VIDEO_CODEC")
+        .ok()
+        .is_some_and(|v| v.eq_ignore_ascii_case("av1") || v.eq_ignore_ascii_case("software-av1"))
+    {
+        CodecId::Av1
+    } else {
+        CodecId::Hevc
+    };
     assert_eq!(
-        session.negotiated.video.codec,
-        CodecId::Hevc,
-        "host offers HEVC first"
+        session.negotiated.video.codec, expected_codec,
+        "host selects the requested codec"
     );
 
     // ---- receive decoded output ----

@@ -100,7 +100,7 @@ Client                                Host
 Hello{ app_version, device_name, os_ver, caps[] }
 HelloAck{ proto_version, caps[], resume_token_opt }
 ```
-- `feature_bits`：按位声明扩展（bit0=file-transfer, bit1=two-way-audio, bit2=hdr, …）。
+- `feature_bits`：按位声明扩展（bit0=file-transfer, bit1=two-way-audio, bit2=hdr, bit5=software AV1 temporal units, …）。
 - 版本不兼容且无公共特性集 → `Error{code=VersionMismatch}` 后关流。
 
 ### 5.2 会话协商
@@ -109,7 +109,7 @@ HelloAck{ proto_version, caps[], resume_token_opt }
 ```
 Negotiate{
   displays:[{id,w,h,scale,dpi}],        // 可选目标列表
-  video:{codec: HEVC|H264, max_fps, max_bitrate_kbps, scale_steps[]},
+  video:{codec: HEVC|H264|AV1, max_fps, max_bitrate_kbps, scale_steps[]},
   audio:{enabled, sample_rate:48000, channels:2, frame_ms:10, bitrate_kbps},
   input_caps:{relative_pointer:bool},
   clock_base_us                          // 双端各自单调时钟基准换算说明见 §6.5
@@ -128,17 +128,17 @@ offset  size  字段
 1       8     frame_id: u64            // 发送侧单调递增
 9       8     pts_us: i64              // host 单调时钟微秒
 17      1     flags: bit0=keyframe bit1=config_changed(sps/pps/vps 内联) bit2=end_of_stream
-18      1     codec_id: 0x01=H264 0x02=HEVC 0x03=AV1(预留)
+18      1     codec_id: 0x01=H264 0x02=HEVC 0x03=AV1
 19      2     width: u16 LE            // 仅 keyframe/config 帧有效
 21      2     height: u16 LE
 23      4     payload_len: u32 LE      // Annex-B NALU 流长度
-27..          payload                  // Annex-B NALU 流；每个关键帧前内联 VPS/SPS/PPS 或 SPS/PPS
+27..          payload                  // H264/HEVC 为 Annex-B NALU 流；AV1 为完整 temporal-unit OBU 流
 ```
 - 一帧一次 `write_all`；接收端按头解析后整段读取，零拷贝切分。
 - 参数集变化必须随关键帧内联，客户端据此热重置解码器（支持运行中改分辨率）。
 - host 对完整 BGRA 内容做逐字节去重：首帧、像素有变化的帧和强制关键帧必须编码发送；与最近一次**成功写入**完全相同的普通帧直接跳过。去重状态在编码失败、SendGate 丢帧或分辨率重建时不提交/重置，避免把接收端落后的画面误认为已同步。关键帧请求可复用最近缓存帧，因此静止画面也能立即恢复。
 - H.264/HEVC 的帧间预测已经压缩了未变化区域；RVP/1 不额外传 raw pixel delta，避免破坏硬件编码器的全局预测和 QUIC 有序流语义。
-- `codec_id=0x03` 仅为 AV1 预留。启用前必须完成双方能力协商、AV1 OBU/`av1C` framing、format-description 创建和软硬件 fallback；不能把 AV1 硬件探测结果直接当作可发送能力。
+- `codec_id=0x03` 使用完整 rav1e temporal-unit OBU payload。关键 temporal unit 自带 sequence-header OBU，不发送单独 `av1C`；只有双方握手都声明 `feature_bits::SOFTWARE_AV1` 时才可选择。AV1 默认 opt-in（`REMOVENT_VIDEO_CODEC=av1`）；协商前的软件 encoder 探测失败时回退 HEVC，已建立会话中的不可恢复编码错误按 `InternalError` 结束会话。
 
 ### 6.2 音频包（uni-stream）
 

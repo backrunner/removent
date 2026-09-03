@@ -7,7 +7,7 @@ another Mac on the same local network — no relay servers, no accounts, no traf
 your LAN.
 
 - **Fast by design**: QUIC transport, VideoToolbox hardware HEVC/H.264 encoding,
-  ScreenCaptureKit capture, Opus audio.
+  opt-in software AV1, ScreenCaptureKit capture, and Opus audio.
 - **Secure by default**: mutual TLS with pinned device certificates, SPAKE2 PIN pairing,
   per-connection admission control.
 - **Native feel**: GPUI-based desktop app plus a menu-bar tray for the always-on host service.
@@ -25,14 +25,14 @@ are working; expect rough edges).
 ### Option 1: Download the DMG
 
 Grab `Removent-<version>-macos-arm64.dmg` from the
-[latest release](https://github.com/removent/removent/releases/latest), open it, and drag
+[latest release](https://github.com/backrunner/removent/releases/latest), open it, and drag
 **Removent.app** into **Applications**. The app is Developer-ID signed and notarized, so it
 opens without Gatekeeper warnings.
 
 ### Option 2: One-line installer
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/removent/removent/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh | bash
 ```
 
 ### First launch
@@ -66,7 +66,7 @@ Diffie-Hellman/AES authentication.
 Requires a stable Rust toolchain (1.85+) and Xcode command line tools with Swift.
 
 ```bash
-git clone https://github.com/removent/removent.git
+git clone https://github.com/backrunner/removent.git
 cd removent
 
 # Run the app in debug mode
@@ -88,8 +88,8 @@ cargo run --release -p removent-media-codec --example benchmark
 cargo run --release -p removent-net --example rtt_benchmark
 ```
 
-The codec benchmark reports H.264/HEVC encode and encode-to-decode callback latency,
-throughput, compression, and Opus encode/decode cost. The RVP benchmark reports QUIC
+The codec benchmark reports H.264/HEVC/AV1 encode cost, per-frame encode-to-decode latency,
+throughput, compression, static-frame skip rate, and Opus encode/decode cost. The RVP benchmark reports QUIC
 `Ping/Pong` control RTT percentiles. Both commands print the build mode and environment.
 
 ### Codec and static-frame policy
@@ -97,14 +97,16 @@ throughput, compression, and Opus encode/decode cost. The RVP benchmark reports 
 The host compares complete BGRA frames and skips a frame only when its pixels are
 byte-for-byte identical to the last frame successfully written to the video stream. A
 keyframe request always bypasses this check, and the most recent frame is cached so a
-request can be served even while the desktop is idle. H.264/HEVC still provide the main
-compression through inter-frame prediction; the exact-dedup layer avoids the capture copy,
-hardware encode, and packet entirely for unchanged frames.
+request can be served even while the desktop is idle. H.264, HEVC, and AV1 also compress
+unchanged regions through inter-frame prediction; exact full-frame deduplication avoids the
+encoder input copy, encode call, and network packet when the entire image is unchanged.
 
-RVP reserves codec id `0x03` for AV1, but AV1 is not advertised or sent yet. The
-`removent-media-codec` benchmark prints VideoToolbox's AV1 hardware decoder/encoder probe.
-Enabling AV1 requires both peers to negotiate the capability and a separate AV1 OBU/`av1C`
-bitstream and format-description path; detecting an AV1 device alone is insufficient.
+RVP codec id `0x03` carries complete AV1 temporal-unit OBU payloads. Both peers advertise the
+software AV1 capability, but HEVC remains the default because real-time software AV1 has a
+substantially higher CPU and latency cost. Set `REMOVENT_VIDEO_CODEC=av1` in the host/daemon
+environment to opt in; a failed pre-session encoder probe falls back to HEVC. The current AV1
+path uses rav1e for software encoding and rav1d for software decoding. The benchmark also prints
+VideoToolbox hardware support so a hardware AV1 backend can be selected in a future revision.
 
 ## How it works
 
@@ -124,7 +126,7 @@ architecture, protocol — currently in Chinese).
 ## Updates
 
 Removent checks for updates 30 seconds after launch and then every 24 hours by fetching
-[`latest.json`](https://github.com/removent/removent/releases/latest/download/latest.json)
+[`latest.json`](https://github.com/backrunner/removent/releases/latest/download/latest.json)
 from GitHub Releases. You can turn this off in the app's settings; the check never
 interferes with LAN-only operation.
 

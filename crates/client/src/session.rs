@@ -303,7 +303,7 @@ pub async fn connect_session(
             magic: removent_proto::MAGIC,
             proto_version: removent_proto::PROTO_VERSION,
             // Honest declaration: file-transfer/two-way-audio are both unimplemented.
-            feature_bits: 0,
+            feature_bits: removent_proto::feature_bits::SOFTWARE_AV1,
             hello: Hello {
                 app_version: removent_core::APP_VERSION.to_string(),
                 device_name: cfg.device_name.clone(),
@@ -824,6 +824,9 @@ async fn media_dispatch_loop(
 /// resolution/codec change, rebuild using the keyframe's inline parameter sets
 /// (protocol.md §6.1).
 fn rebuild_decoder(hdr: &removent_proto::VideoFrameHeader, payload: &[u8]) -> Option<VideoDecoder> {
+    if hdr.codec == removent_proto::CodecId::Av1 {
+        return VideoDecoder::new(hdr.codec, hdr.width as usize, hdr.height as usize, &[]).ok();
+    }
     let hevc = matches!(hdr.codec, removent_proto::CodecId::Hevc);
     let ps = extract_param_sets(payload, hevc);
     match VideoDecoder::new(hdr.codec, hdr.width as usize, hdr.height as usize, &ps) {

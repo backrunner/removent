@@ -2,14 +2,14 @@
 # Removent quick installer — downloads the latest release DMG and installs Removent.app
 # into /Applications.
 #
-#   curl -fsSL https://raw.githubusercontent.com/removent/removent/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh | bash
 #
 # Environment overrides:
-#   REMOVENT_REPO   GitHub "owner/repo" (default: removent/removent)
+#   REMOVENT_REPO   GitHub "owner/repo" (default: backrunner/removent)
 #   REMOVENT_VERSION  install a specific tag (e.g. v0.1.0) instead of the latest release
 set -euo pipefail
 
-REPO="${REMOVENT_REPO:-removent/removent}"
+REPO="${REMOVENT_REPO:-backrunner/removent}"
 APP_NAME="Removent"
 
 if [ "$(uname -s)" != "Darwin" ]; then

@@ -19,6 +19,8 @@ flowchart LR
 
 ## 本机发布
 
+维护者直接在 `main` 提交发布代码，无需开 PR。检查通过后从 `main` 创建版本 tag，由发布工作流完成构建、签名、公证和发布。
+
 需要完整 Xcode（含 Metal 工具链）、Rust、Python 3.12+、Swift 和 GitHub CLI。脚本自动选择本机 Xcode，不修改全局 xcode-select。
 
 ```sh

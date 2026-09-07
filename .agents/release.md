@@ -58,6 +58,6 @@ Idle → Downloading(到 userdata/cache/update/Removent-<ver>-macos-arm64.zip, �
 
 ## 4. 发布纪律
 
-1. main 分支保护：PR + CI 全绿方可合入；release 分支仅 cherry-pick。
+1. 当前维护者流程：直接提交到 main，完成 CI 和发布验收后，从 main 创建不可变版本 tag 发布；不要求开 PR。
 2. 每个 release 附 changelog（keepachangelog 格式），标注协议版本变更。
 3. 回滚预案：Releases 保留全部历史版本可手动重下；更新器内置"恢复上一版"入口（利用 app.old）。

@@ -51,10 +51,15 @@ impl DeviceIdentity {
 /// Load or create the device identity. Key file permissions are 0600.
 pub fn load_or_create(paths: &DataPaths, device_name: &str) -> Result<DeviceIdentity> {
     paths.ensure_layout()?;
+    // App and daemon can start together on a fresh data directory. Hold one
+    // lock across both files so they never generate mismatched keys/certs.
+    let _initialization =
+        crate::flock::DataDirLock::acquire_blocking(&paths.identity_dir().join(".init.lock"))?;
     let key_path = paths.device_key();
     let key_pem = match std::fs::read_to_string(&key_path) {
         Ok(pem) => pem,
-        Err(_) => create_and_store(paths, device_name)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => create_and_store(paths, device_name)?,
+        Err(e) => return Err(e.into()),
     };
     let signing_key = SigningKey::from_pkcs8_pem(&key_pem)
         .map_err(|e| CoreError::Crypto(format!("parse device.key: {e}")))?;
@@ -71,7 +76,14 @@ fn create_and_store(paths: &DataPaths, _device_name: &str) -> Result<String> {
         .to_pem("PRIVATE KEY", LineEnding::LF)
         .map_err(|e| CoreError::Crypto(e.to_string()))?;
     let path = paths.device_key();
-    std::fs::write(&path, pem.as_bytes())?;
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)?;
+    file.write_all(pem.as_bytes())?;
     restrict_0600(&path)?;
     Ok(pem.to_string())
 }
@@ -135,6 +147,29 @@ fn restrict_0600(path: &std::path::Path) -> Result<()> {
 mod tests {
     use super::*;
     use crate::paths::DataPaths;
+
+    #[test]
+    fn concurrent_first_launch_shares_one_key_and_certificate() {
+        let dir = tempfile::tempdir().unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let tasks: Vec<_> = (0..8)
+            .map(|_| {
+                let paths = DataPaths {
+                    root: dir.path().to_path_buf(),
+                };
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    load_or_create(&paths, "Concurrent Mac").unwrap()
+                })
+            })
+            .collect();
+        let identities: Vec<_> = tasks.into_iter().map(|t| t.join().unwrap()).collect();
+        for identity in &identities {
+            assert_eq!(identity.fingerprint, identities[0].fingerprint);
+            assert_eq!(identity.verifying_key(), identities[0].verifying_key());
+        }
+    }
 
     #[test]
     fn identity_roundtrip_is_stable() {

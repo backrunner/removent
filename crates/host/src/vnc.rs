@@ -135,9 +135,11 @@ pub async fn serve_vnc(cfg: VncConfig) -> io::Result<()> {
         tracing::warn!("RFB/VNC listener has no password; connections are unauthenticated");
     }
     tracing::info!(addr = ?cfg.bind_addr, "RFB/VNC compatibility listener started");
+    let mut clients = tokio::task::JoinSet::new();
     loop {
         tokio::select! {
             _ = cfg.shutdown.cancelled() => break,
+            _ = clients.join_next(), if !clients.is_empty() => continue,
             accepted = listener.accept() => {
                 let (stream, peer) = accepted?;
                 let Ok(permit) = cfg.session_slot.clone().try_acquire_owned() else {
@@ -145,7 +147,7 @@ pub async fn serve_vnc(cfg: VncConfig) -> io::Result<()> {
                     continue;
                 };
                 let cfg = cfg.clone();
-                tokio::spawn(async move {
+                clients.spawn(async move {
                     if let Err(e) = serve_client(stream, cfg, permit).await {
                         tracing::debug!(?peer, err = %e, "VNC client disconnected");
                     }
@@ -153,6 +155,7 @@ pub async fn serve_vnc(cfg: VncConfig) -> io::Result<()> {
             }
         }
     }
+    clients.shutdown().await;
     tracing::info!("RFB/VNC compatibility listener stopped");
     Ok(())
 }
@@ -173,8 +176,8 @@ async fn serve_client(
             .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "VNC handshake timed out"))??,
     };
 
-    let (raw_tx, mut raw_rx) = mpsc::channel::<(Vec<u8>, i64)>(2);
-    let (frame_tx, frame_rx) = mpsc::channel::<Frame>(2);
+    let (raw_tx, mut raw_rx) = removent_core::latest::channel::<(Vec<u8>, i64)>();
+    let (frame_tx, frame_rx) = removent_core::latest::channel::<Frame>();
     let capture = removent_media_capture::start_display_capture(
         target.id as u32,
         target.capture_width,
@@ -184,14 +187,15 @@ async fn serve_client(
     )
     .map_err(|e| io::Error::other(e.to_string()))?;
     let frame_target = target.clone();
-    let frame_forward = tokio::spawn(async move {
+    let mut tasks = tokio::task::JoinSet::new();
+    tasks.spawn(async move {
         while let Some((data, _pts)) = raw_rx.recv().await {
             let frame = Frame {
                 data,
                 width: frame_target.capture_width,
                 height: frame_target.capture_height,
             };
-            if frame_tx.send(frame).await.is_err() {
+            if frame_tx.send(frame).is_err() {
                 break;
             }
         }
@@ -202,8 +206,9 @@ async fn serve_client(
 
     let (msg_tx, msg_rx) = mpsc::channel::<ClientMessage>(16);
     let (mut read_half, write_half) = stream.into_split();
-    let reader_task =
-        tokio::spawn(async move { input::read_client_messages(&mut read_half, msg_tx).await });
+    tasks.spawn(async move {
+        let _ = input::read_client_messages(&mut read_half, msg_tx).await;
+    });
     let writer_result = writer::write_frames(
         write_half,
         frame_rx,
@@ -213,10 +218,7 @@ async fn serve_client(
         cfg.shutdown.clone(),
     )
     .await;
-    reader_task.abort();
-    let _ = reader_task.await;
-    frame_forward.abort();
-    let _ = frame_forward.await;
+    tasks.shutdown().await;
     drop(capture);
     writer_result
 }

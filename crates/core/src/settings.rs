@@ -21,11 +21,11 @@ pub struct Settings {
     /// its password authentication is intentionally legacy-compatible.
     pub vnc_enabled: bool,
     pub vnc_port: u16,
-    /// macOS account name used by Apple Remote Desktop (RFB 003.889, types 30/35).
+    /// Legacy client username retained for settings-file compatibility. New client
+    /// connections use credentials from the connection dialog instead.
     pub vnc_username: String,
-    /// VNC password. Empty selects RFB `None` for standard servers; Apple
-    /// Remote Desktop uses this together with `vnc_username` for types 30/35.
-    /// The value is stored only in settings.toml.
+    /// Password for the local VNC compatibility listener. Empty selects RFB `None`.
+    /// Remote client passwords are supplied per connection and are not persisted.
     pub vnc_password: String,
     pub audio_enabled_default: bool,
     /// Seconds to wait after the session window loses focus before clearing the remote-written clipboard; 0 = never clear (architecture.md §7.3).
@@ -121,13 +121,14 @@ impl Settings {
                     // original content survives the next save overwriting the file.
                     let bak = file.with_extension("toml.bak");
                     if let Err(re) = std::fs::rename(&file, &bak) {
-                        tracing::warn!(error = %re, path = %file.display(), "failed to back up corrupt settings file");
+                        return Err(re.into());
                     }
                     tracing::warn!(error = %e, "settings.toml is corrupt; backed up to settings.toml.bak, using defaults");
                     Self::default()
                 }
             },
-            Err(_) => Self::default(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Self::default(),
+            Err(e) => return Err(e.into()),
         };
         s.loaded_from = Some(file);
         Ok(s)
@@ -145,20 +146,88 @@ impl Settings {
 /// Atomic write via tmp + rename to avoid half-written files.
 pub(crate) fn atomic_write(path: &PathBuf, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
-    let tmp = path.with_extension("tmp");
-    {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
+    use std::os::unix::fs::OpenOptionsExt;
+    // Each writer owns a separate sibling file. A shared .tmp can be renamed
+    // while another writer is still modifying it, corrupting the final file.
+    let tmp = path.with_extension(format!("{:032x}.tmp", rand::random::<u128>()));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp)?;
+    let result = (|| -> std::io::Result<()> {
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
-    std::fs::rename(&tmp, path)?;
-    Ok(())
+    result.map_err(Into::into)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn concurrent_writers_publish_complete_private_files() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::{Arc, Barrier};
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let barrier = Arc::new(Barrier::new(8));
+        std::thread::scope(|scope| {
+            for byte in b'a'..=b'h' {
+                let path = &path;
+                let barrier = barrier.clone();
+                scope.spawn(move || {
+                    let payload = vec![byte; 64 * 1024];
+                    barrier.wait();
+                    for _ in 0..10 {
+                        atomic_write(path, &payload).unwrap();
+                        let visible = std::fs::read(path).unwrap();
+                        assert_eq!(visible.len(), payload.len());
+                        assert!(visible.iter().all(|b| *b == visible[0]));
+                    }
+                });
+            }
+        });
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_atomic_save_cleans_its_temporary_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::create_dir(&path).unwrap();
+        assert!(atomic_write(&path, b"secret").is_err());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn read_error_and_failed_corrupt_backup_are_reported() {
+        let dir = tempdir().unwrap();
+        let paths = DataPaths {
+            root: dir.path().to_owned(),
+        };
+        paths.ensure_layout().unwrap();
+        std::fs::create_dir(paths.settings_file()).unwrap();
+        assert!(Settings::load(&paths).is_err());
+        std::fs::remove_dir(paths.settings_file()).unwrap();
+        std::fs::write(paths.settings_file(), "[[[ invalid").unwrap();
+        std::fs::create_dir(paths.settings_file().with_extension("toml.bak")).unwrap();
+        assert!(Settings::load(&paths).is_err());
+        assert_eq!(
+            std::fs::read_to_string(paths.settings_file()).unwrap(),
+            "[[[ invalid"
+        );
+    }
 
     #[test]
     fn defaults_roundtrip_preserve_semantics() {

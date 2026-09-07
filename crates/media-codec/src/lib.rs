@@ -4,6 +4,7 @@ pub mod audio;
 mod av1;
 pub mod cm_ffi;
 mod compat_decompression;
+pub mod scale;
 pub mod video;
 
 pub use audio::{Application, AudioDecoder, AudioEncoder, AudioError, FRAME_SAMPLES_PER_CHANNEL};

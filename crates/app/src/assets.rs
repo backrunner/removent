@@ -13,6 +13,7 @@ macro_rules! icons {
 
 static ICONS: &[(&str, &str)] = icons![
     "alert-triangle",
+    "arrow-left",
     "check",
     "chevron-right",
     "clipboard",

@@ -41,7 +41,7 @@ pub enum VncError {
 /// keeps the viewer and engine input path identical for RVP and RFB.
 pub struct VncSession {
     pub cmd_tx: mpsc::Sender<ControlMsg>,
-    pub decoded_bgra_rx: mpsc::Receiver<DecodedFrame>,
+    pub decoded_bgra_rx: removent_core::latest::Receiver<DecodedFrame>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
@@ -131,21 +131,23 @@ pub async fn connect_vnc_with_credentials(
     }
 
     let (cmd_tx, cmd_rx) = mpsc::channel(64);
-    let (frame_tx, frame_rx) = mpsc::channel(2);
+    let (frame_tx, frame_rx) = removent_core::latest::channel();
     let (signal_tx, signal_rx) = mpsc::channel(4);
-    let reader = tokio::spawn(framebuffer::read_frames(
-        read_half,
-        frame_tx,
-        signal_tx,
-        dimensions.clone(),
-        format,
-    ));
-    let writer = tokio::spawn(input::write_commands(
-        write_half, cmd_rx, signal_rx, dimensions, apple_ard,
-    ));
+    // One owner for both halves: if either loop ends, dropping the other
+    // closes the socket and frame channel instead of leaving a frozen viewer.
+    let task = tokio::spawn(async move {
+        tokio::select! {
+            _ = framebuffer::read_frames(
+                read_half, frame_tx, signal_tx, dimensions.clone(), format,
+            ) => {},
+            _ = input::write_commands(
+                write_half, cmd_rx, signal_rx, dimensions.clone(), apple_ard,
+            ) => {},
+        }
+    });
     Ok(VncSession {
         cmd_tx,
         decoded_bgra_rx: frame_rx,
-        tasks: vec![reader, writer],
+        tasks: vec![task],
     })
 }

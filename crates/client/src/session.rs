@@ -9,6 +9,7 @@ use crate::jitter::{AudioPacketIn, JitterBuffer, PopOutcome};
 use futures::{SinkExt, StreamExt};
 use removent_core::{ClipSyncState, DeviceIdentity};
 use removent_media_codec::{AudioDecoder, VideoDecoder, extract_param_sets};
+use removent_net::session::send_control;
 use removent_net::{
     ControlItem, ControlSink, ControlSource, PairingMsg, RvpConnection, client_begin,
     client_confirm_check, client_verify,
@@ -74,7 +75,7 @@ pub struct ClientSession {
     /// Most recently received quick-resume token (the host rotates it every session, §7.4).
     pub resume_token: Arc<Mutex<Option<[u8; 16]>>>,
     /// Decoded BGRA frames (consumed by the renderer).
-    pub decoded_bgra_rx: mpsc::Receiver<DecodedFrame>,
+    pub decoded_bgra_rx: removent_core::latest::Receiver<DecodedFrame>,
     /// Decoded PCM (consumed by playback).
     pub decoded_pcm_rx: mpsc::Receiver<Vec<i16>>,
     /// Most recent host quality directive (bitrate_kbps, fps, scale).
@@ -83,11 +84,22 @@ pub struct ClientSession {
     last_kf: Arc<Mutex<Option<Instant>>>,
     /// Background task handles (aborted on close/drop of the session).
     tasks: Vec<tokio::task::JoinHandle<()>>,
-    /// Media sub-loop handles (registered dynamically by dispatch; aborted on close/drop).
-    media_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    /// Completed after the control pump flushes SessionEnd and tears down media.
+    closed: oneshot::Receiver<()>,
+    clean_end: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl ClientSession {
+    /// Stream EOF/errors also interrupt a session, even if pump cleanup then
+    /// locally closes QUIC. Preserve explicit SessionEnd separately.
+    pub fn was_interrupted(&self) -> bool {
+        !self.clean_end.load(std::sync::atomic::Ordering::SeqCst)
+            && !matches!(
+                self.conn.inner().close_reason(),
+                Some(removent_net::quinn::ConnectionError::ApplicationClosed(_))
+            )
+    }
+
     /// Request a keyframe (quality convergence / stall recovery); rate-limited to a
     /// 500ms minimum interval (protocol.md §7.1).
     pub async fn request_keyframe(&self) -> Result<(), ConnectError> {
@@ -110,20 +122,24 @@ impl ClientSession {
     /// Proactive close: send SessionEnd, then terminate all background tasks and close
     /// the connection.
     pub async fn close(mut self) -> Result<(), ConnectError> {
-        let _ = self
-            .send(ControlMsg::SessionEnd {
-                reason: EndReason::ClientClosed,
-            })
-            .await;
+        // Enqueuing SessionEnd is not a flush: wait for the pump to send it
+        // before aborting tasks. A stalled peer must not block close forever.
+        let _ = tokio::time::timeout(Duration::from_secs(2), async {
+            let _ = self
+                .cmd_tx
+                .send(ControlMsg::SessionEnd {
+                    reason: EndReason::ClientClosed,
+                })
+                .await;
+            let _ = (&mut self.closed).await;
+        })
+        .await;
         self.teardown();
         Ok(())
     }
 
     fn teardown(&mut self) {
         for t in self.tasks.drain(..) {
-            t.abort();
-        }
-        for t in self.media_tasks.lock().unwrap().drain(..) {
             t.abort();
         }
         self.conn
@@ -243,8 +259,9 @@ async fn expect_msg(
     timeout: Duration,
     pred: impl Fn(&ControlMsg) -> bool + Copy,
 ) -> Result<ControlMsg, ConnectError> {
+    let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        let item = tokio::time::timeout(timeout, source.next())
+        let item = tokio::time::timeout_at(deadline, source.next())
             .await
             .map_err(|_| ConnectError::Timeout(what))?
             .transpose()
@@ -324,7 +341,7 @@ pub async fn connect_session(
     // The pairing result comes back over a oneshot, with errors attributed to Pairing
     // rather than a bare Timeout.
     let mut pairing_rx: Option<oneshot::Receiver<Result<(), String>>> = None;
-    let mut pairing_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut pairing_task: Option<AbortOnDrop> = None;
     if !resume_accepted
         && !server_ack.peer_known
         && let Some(pin_request) = pin_request
@@ -340,7 +357,7 @@ pub async fn connect_session(
             pin_rx,
         );
         pairing_rx = Some(rx);
-        pairing_task = Some(handle);
+        pairing_task = Some(AbortOnDrop(handle));
     }
 
     let mut sink = sink;
@@ -414,9 +431,8 @@ pub async fn connect_session(
             _ => {}
         }
     }
-    if let Some(t) = pairing_task.take() {
-        t.abort();
-    }
+    // Abort on success, early error, and cancellation of connect_session.
+    drop(pairing_task.take());
 
     let offer = expect_msg(&mut source, "NegotiateOffer", NEGOTIATE_TIMEOUT, |m| {
         matches!(m, ControlMsg::NegotiateOffer { .. })
@@ -464,15 +480,16 @@ fn build_session(
     ack: NegotiateAck,
     cfg: ClientConfig,
 ) -> Result<ClientSession, ConnectError> {
-    use futures::SinkExt;
+    let mut cfg = cfg;
+    if !cfg.caps.clipboard {
+        cfg.local_clip = None;
+    }
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<ControlMsg>(64);
-    let (decoded_bgra_tx, decoded_bgra_rx) = mpsc::channel(4);
+    let (decoded_bgra_tx, decoded_bgra_rx) = removent_core::latest::channel();
     let (decoded_pcm_tx, decoded_pcm_rx) = mpsc::channel(128);
 
     let resume_token = Arc::new(Mutex::new(ack.resume_token));
     let last_kf = Arc::new(Mutex::new(None));
-    let media_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>> =
-        Arc::new(Mutex::new(Vec::new()));
 
     // Media receive: stream count follows the negotiation result (when audio.enabled is
     // off there is only a video stream).
@@ -483,7 +500,6 @@ fn build_session(
         ack.audio.enabled,
         cmd_tx.clone(),
         last_kf.clone(),
-        media_tasks.clone(),
     );
 
     // Session-level clipboard state: the pump and poller share the suppress singleton
@@ -498,7 +514,27 @@ fn build_session(
     let quality = last_quality.clone();
     let pump_clip_state = clip_state.clone();
     let pump_resume_token = resume_token.clone();
+    // Local clipboard changes → send to the peer (shares suppress state with the pump).
+    let poller = cfg.local_clip.clone().map(|clip| {
+        removent_core::spawn_clipboard_poller(
+            clip,
+            clip_state.clone().expect("clip_state with clip"),
+            cmd_tx.clone(),
+            250,
+        )
+    });
+
+    let (closed_tx, closed) = oneshot::channel();
+    let cleanup = PumpCleanup {
+        conn: conn.clone(),
+        media: dispatch.abort_handle(),
+        clipboard: poller.as_ref().map(|task| task.abort_handle()),
+        closed: Some(closed_tx),
+    };
+    let clean_end = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let pump_clean_end = clean_end.clone();
     let pump = tokio::spawn(async move {
+        let _cleanup = cleanup;
         let local_suppress = std::sync::atomic::AtomicU64::new(0);
         loop {
             let sink = &mut sink;
@@ -508,8 +544,9 @@ fn build_session(
                     let Ok(item) = item else { break };
                     match item {
                         ControlItem::Msg(m) => match *m {
-                            ControlMsg::ClipboardSync { seq, data, .. } => {
-                                if let Some(clip) = local_clip.as_ref() {
+                            ControlMsg::ClipboardSync { seq, format, data } => {
+                                if format == removent_proto::ClipFormat::TextUtf8
+                                    && let Some(clip) = local_clip.as_ref() {
                                     let suppress: &std::sync::atomic::AtomicU64 = pump_clip_state
                                         .as_ref()
                                         .map(|s| &s.suppress_cc)
@@ -526,12 +563,12 @@ fn build_session(
                                 // local pasteboard bridge. Always acknowledge the message
                                 // so a sender cannot remain blocked when clipboard support
                                 // is disabled or unavailable on this side.
-                                if sink.send(ControlMsg::ClipboardAck { seq }).await.is_err() {
+                                if send_control(sink, ControlMsg::ClipboardAck { seq }).await.is_err() {
                                     break;
                                 }
                             }
                             ControlMsg::Ping { ts_us } => {
-                                if sink.send(ControlMsg::Pong { ts_us }).await.is_err() {
+                                if send_control(sink, ControlMsg::Pong { ts_us }).await.is_err() {
                                     break;
                                 }
                             }
@@ -550,7 +587,10 @@ fn build_session(
                                     *pump_resume_token.lock().unwrap() = Some(t);
                                 }
                             }
-                            ControlMsg::SessionEnd { .. } => break,
+                            ControlMsg::SessionEnd { .. } => {
+                                pump_clean_end.store(true, std::sync::atomic::Ordering::SeqCst);
+                                break;
+                            },
                             _ => {}
                         },
                         ControlItem::Skipped => continue,
@@ -559,13 +599,16 @@ fn build_session(
                 maybe_cmd = cmd_rx.recv() => {
                     match maybe_cmd {
                         Some(msg @ ControlMsg::SessionEnd { .. }) => {
+                            pump_clean_end.store(true, std::sync::atomic::Ordering::SeqCst);
                             // Outbound SessionEnd must actually reach the peer before we exit.
-                            let _ = sink.send(msg).await;
+                            if send_control(sink, msg).await.is_ok() && sink.get_mut().finish().is_ok() {
+                                let _ = tokio::time::timeout(Duration::from_secs(1), sink.get_mut().stopped()).await;
+                            }
                             break;
                         }
                         None => break,
                         Some(msg) => {
-                            if sink.send(msg).await.is_err() {
+                            if send_control(sink, msg).await.is_err() {
                                 break;
                             }
                         }
@@ -573,16 +616,6 @@ fn build_session(
                 }
             }
         }
-    });
-
-    // Local clipboard changes → send to the peer (shares suppress state with the pump).
-    let poller = cfg.local_clip.clone().map(|clip| {
-        removent_core::spawn_clipboard_poller(
-            clip,
-            clip_state.clone().expect("clip_state with clip"),
-            cmd_tx.clone(),
-            250,
-        )
     });
 
     let mut tasks = vec![dispatch, pump];
@@ -600,8 +633,32 @@ fn build_session(
         last_quality,
         last_kf,
         tasks,
-        media_tasks,
+        closed,
+        clean_end,
     })
+}
+
+/// Teardown runs on EOF, SessionEnd, a send failure, panic or cancellation.
+struct PumpCleanup {
+    conn: RvpConnection,
+    media: tokio::task::AbortHandle,
+    clipboard: Option<tokio::task::AbortHandle>,
+    closed: Option<oneshot::Sender<()>>,
+}
+
+impl Drop for PumpCleanup {
+    fn drop(&mut self) {
+        self.media.abort();
+        if let Some(task) = &self.clipboard {
+            task.abort();
+        }
+        self.conn
+            .inner()
+            .close(removent_net::quinn::VarInt::from_u32(0), b"session ended");
+        if let Some(tx) = self.closed.take() {
+            let _ = tx.send(());
+        }
+    }
 }
 
 fn hex_encode(bytes: [u8; 32]) -> String {
@@ -760,17 +817,15 @@ fn peer_verifying_key(conn: &RvpConnection) -> Option<ed25519_dalek::VerifyingKe
 /// video/audio loops.
 /// Stream count follows the negotiation result: when audio.enabled=false only the
 /// video stream is expected (§5.2).
-/// Sub-loop handles are registered into `media_tasks` so the session can abort them on
-/// close/drop.
+/// The dispatch task owns its sub-loops, so dropping it also aborts them.
 #[allow(clippy::too_many_arguments)]
 fn spawn_media_loops(
     conn: RvpConnection,
-    bgra_tx: mpsc::Sender<DecodedFrame>,
+    bgra_tx: removent_core::latest::Sender<DecodedFrame>,
     pcm_tx: mpsc::Sender<Vec<i16>>,
     audio_enabled: bool,
     cmd_tx: mpsc::Sender<ControlMsg>,
     last_kf: Arc<Mutex<Option<Instant>>>,
-    media_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(media_dispatch_loop(
         conn,
@@ -779,57 +834,87 @@ fn spawn_media_loops(
         audio_enabled,
         cmd_tx,
         last_kf,
-        media_tasks,
     ))
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn media_dispatch_loop(
     conn: RvpConnection,
-    bgra_tx: mpsc::Sender<DecodedFrame>,
+    bgra_tx: removent_core::latest::Sender<DecodedFrame>,
     pcm_tx: mpsc::Sender<Vec<i16>>,
     audio_enabled: bool,
     cmd_tx: mpsc::Sender<ControlMsg>,
     last_kf: Arc<Mutex<Option<Instant>>>,
-    media_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
 ) {
     use removent_proto::{STREAM_TYPE_AUDIO, STREAM_TYPE_VIDEO};
+    let mut media = tokio::task::JoinSet::new();
     let expected = if audio_enabled { 2 } else { 1 };
-    for _ in 0..expected {
-        let Ok(mut stream) = conn.accept_media_stream().await else {
-            return;
-        };
-        let mut first = [0u8; 1];
-        if stream.read_exact(&mut first).await.is_err() {
-            continue;
-        }
-        let handle = match first[0] {
-            STREAM_TYPE_VIDEO => tokio::spawn(video_recv_loop(
-                stream,
-                bgra_tx.clone(),
-                cmd_tx.clone(),
-                last_kf.clone(),
-            )),
-            STREAM_TYPE_AUDIO => tokio::spawn(audio_recv_loop(stream, pcm_tx.clone())),
-            other => {
-                tracing::warn!(t = other, "unknown media stream type");
+    let startup = async {
+        for _ in 0..expected {
+            let Ok(mut stream) = conn.accept_media_stream().await else {
+                return false;
+            };
+            let mut first = [0u8; 1];
+            if stream.read_exact(&mut first).await.is_err() {
                 continue;
             }
-        };
-        media_tasks.lock().unwrap().push(handle);
+            match first[0] {
+                STREAM_TYPE_VIDEO => media.spawn(video_recv_loop(
+                    stream,
+                    bgra_tx.clone(),
+                    cmd_tx.clone(),
+                    last_kf.clone(),
+                )),
+                STREAM_TYPE_AUDIO => media.spawn(audio_recv_loop(stream, pcm_tx.clone())),
+                other => {
+                    tracing::warn!(t = other, "unknown media stream type");
+                    continue;
+                }
+            };
+        }
+        true
+    };
+    if !matches!(
+        tokio::time::timeout(Duration::from_secs(10), startup).await,
+        Ok(true)
+    ) {
+        tracing::warn!("media streams failed to start within deadline");
+        return;
     }
+    // Only the video loop should keep the frame channel open from here.
+    drop(bgra_tx);
+    drop(pcm_tx);
+    while media.join_next().await.is_some() {}
 }
 
 /// Rebuild the decoder on demand (hot) from the frame header: on CONFIG_CHANGED or a
 /// resolution/codec change, rebuild using the keyframe's inline parameter sets
 /// (protocol.md §6.1).
-fn rebuild_decoder(hdr: &removent_proto::VideoFrameHeader, payload: &[u8]) -> Option<VideoDecoder> {
-    if hdr.codec == removent_proto::CodecId::Av1 {
-        return VideoDecoder::new(hdr.codec, hdr.width as usize, hdr.height as usize, &[]).ok();
-    }
-    let hevc = matches!(hdr.codec, removent_proto::CodecId::Hevc);
-    let ps = extract_param_sets(payload, hevc);
-    match VideoDecoder::new(hdr.codec, hdr.width as usize, hdr.height as usize, &ps) {
+fn rebuild_decoder(
+    hdr: &removent_proto::VideoFrameHeader,
+    payload: &[u8],
+    tx: removent_core::latest::Sender<DecodedFrame>,
+) -> Option<VideoDecoder> {
+    let ps = if hdr.codec == removent_proto::CodecId::Av1 {
+        Vec::new()
+    } else {
+        extract_param_sets(payload, hdr.codec == removent_proto::CodecId::Hevc)
+    };
+    let (width, height) = (u32::from(hdr.width), u32::from(hdr.height));
+    match VideoDecoder::with_output(
+        hdr.codec,
+        width as usize,
+        height as usize,
+        &ps,
+        move |frame| {
+            let _ = tx.send(DecodedFrame {
+                data: frame.data,
+                width,
+                height,
+                pts_us: frame.pts_us,
+            });
+        },
+    ) {
         Ok(d) => Some(d),
         Err(e) => {
             tracing::error!(err=%e, "decoder init failed");
@@ -864,54 +949,6 @@ fn payload_len_ok(len: u32) -> bool {
     true
 }
 
-/// The live decoder plus its output dimensions (from the header it was built from).
-struct ActiveDecoder {
-    dec: VideoDecoder,
-    width: u32,
-    height: u32,
-}
-
-/// Poll interval for the decoder drain task.
-const DECODE_DRAIN_INTERVAL: Duration = Duration::from_millis(2);
-
-/// Forward decoded frames independently of packet arrival. VTDecompressionSessionDecodeFrame
-/// is asynchronous: decoded frames land in the decoder's internal channel from a VideoToolbox
-/// callback thread, so draining only when the next packet arrives would add a constant
-/// one-frame lag and strand the last frame before a static screen. This task polls the
-/// decoder at a short interval and forwards whatever is finished.
-fn spawn_decode_drain(
-    decoder: Arc<Mutex<Option<ActiveDecoder>>>,
-    bgra_tx: mpsc::Sender<DecodedFrame>,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(DECODE_DRAIN_INTERVAL);
-        loop {
-            ticker.tick().await;
-            // Collect finished frames; never hold the lock across .await.
-            let ready: Vec<DecodedFrame> = {
-                let g = decoder.lock().unwrap();
-                let mut out = Vec::new();
-                if let Some(active) = g.as_ref() {
-                    while let Some(f) = active.dec.try_recv_decoded() {
-                        out.push(DecodedFrame {
-                            data: f.data,
-                            width: active.width,
-                            height: active.height,
-                            pts_us: f.pts_us,
-                        });
-                    }
-                }
-                out
-            };
-            for frame in ready {
-                if bgra_tx.send(frame).await.is_err() {
-                    return;
-                }
-            }
-        }
-    })
-}
-
 /// Enqueue a KeyframeRequest, rate-limited to one per KEYFRAME_MIN_INTERVAL. The limiter
 /// state is shared with [`ClientSession::request_keyframe`] so every request path (app,
 /// first-frame, config-change, decode failure) honours the same 500ms minimum interval
@@ -928,16 +965,26 @@ fn request_keyframe(cmd_tx: &mpsc::Sender<ControlMsg>, last_kf: &Mutex<Option<In
     let _ = cmd_tx.try_send(ControlMsg::KeyframeRequest);
 }
 
+/// Once a frame has started, partial headers/payloads cannot wait forever
+/// while transport keepalives continue. Quiet static screens may still wait
+/// indefinitely for the first byte of the next frame.
+async fn read_media_part(stream: &mut removent_net::quinn::RecvStream, bytes: &mut [u8]) -> bool {
+    matches!(
+        tokio::time::timeout(Duration::from_secs(10), stream.read_exact(bytes)).await,
+        Ok(Ok(()))
+    )
+}
+
 async fn video_recv_loop(
     mut stream: removent_net::quinn::RecvStream,
-    bgra_tx: mpsc::Sender<DecodedFrame>,
+    bgra_tx: removent_core::latest::Sender<DecodedFrame>,
     cmd_tx: mpsc::Sender<ControlMsg>,
     last_kf: Arc<Mutex<Option<Instant>>>,
 ) {
     use removent_proto::video_flags;
     // The first byte was already consumed; the remaining header is 26 bytes.
     let mut rest = [0u8; 26];
-    if stream.read_exact(&mut rest).await.is_err() {
+    if !read_media_part(&mut stream, &mut rest).await {
         return;
     }
     let mut head_bytes = [0u8; 27];
@@ -948,10 +995,9 @@ async fn video_recv_loop(
         return;
     };
 
-    // Shared with the drain task (aborted when this loop exits); decoded frames are
-    // forwarded from there, not inline here.
-    let decoder: Arc<Mutex<Option<ActiveDecoder>>> = Arc::new(Mutex::new(None));
-    let _drain = AbortOnDrop(spawn_decode_drain(decoder.clone(), bgra_tx.clone()));
+    // Decoder callbacks publish directly into the latest-frame slot. Static
+    // screens no longer wake a drain task 500 times per second.
+    let mut decoder: Option<VideoDecoder> = None;
     // Current decoder configuration (codec, w, h), used to detect when a hot rebuild
     // is needed.
     let mut cur_cfg: Option<(removent_proto::CodecId, u16, u16)> = None;
@@ -961,11 +1007,11 @@ async fn video_recv_loop(
         return;
     }
     let mut first_payload = vec![0u8; hdr0.payload_len as usize];
-    if stream.read_exact(&mut first_payload).await.is_err() {
+    if !read_media_part(&mut stream, &mut first_payload).await {
         return;
     }
     if hdr0.is_keyframe() {
-        match rebuild_decoder(&hdr0, &first_payload) {
+        match rebuild_decoder(&hdr0, &first_payload, bgra_tx.clone()) {
             Some(d) => {
                 if let Err(e) = d.decode_annexb(&first_payload, hdr0.pts_us) {
                     // First-frame decode failure: nudge the host for a fresh keyframe
@@ -974,11 +1020,7 @@ async fn video_recv_loop(
                     tracing::warn!(err=%e, "first frame decode failed, requesting keyframe");
                     request_keyframe(&cmd_tx, &last_kf);
                 }
-                *decoder.lock().unwrap() = Some(ActiveDecoder {
-                    dec: d,
-                    width: hdr0.width as u32,
-                    height: hdr0.height as u32,
-                });
+                decoder = Some(d);
                 cur_cfg = Some((hdr0.codec, hdr0.width, hdr0.height));
             }
             None => {
@@ -999,7 +1041,9 @@ async fn video_recv_loop(
             return;
         }
         // Subsequent frames: full 27-byte header.
-        if stream.read_exact(&mut head_bytes).await.is_err() {
+        if stream.read_exact(&mut head_bytes[..1]).await.is_err()
+            || !read_media_part(&mut stream, &mut head_bytes[1..]).await
+        {
             break;
         }
         let Ok((hdr, _)) = parse_video_header(&head_bytes) else {
@@ -1010,14 +1054,14 @@ async fn video_recv_loop(
             break;
         }
         let mut payload = vec![0u8; hdr.payload_len as usize];
-        if stream.read_exact(&mut payload).await.is_err() {
+        if !read_media_part(&mut stream, &mut payload).await {
             break;
         }
 
         // CONFIG_CHANGED or a resolution/codec change → hot-rebuild the decoder from
         // this keyframe.
         let stale = cur_cfg != Some((hdr.codec, hdr.width, hdr.height));
-        let need_rebuild = decoder.lock().unwrap().is_none() || hdr.config_changed() || stale;
+        let need_rebuild = decoder.is_none() || hdr.config_changed() || stale;
         if need_rebuild {
             if hdr.flags & video_flags::KEYFRAME == 0 {
                 // Config changed but no parameter sets: request a keyframe and skip
@@ -1025,17 +1069,14 @@ async fn video_recv_loop(
                 request_keyframe(&cmd_tx, &last_kf);
                 continue;
             }
-            match rebuild_decoder(&hdr, &payload) {
+            match rebuild_decoder(&hdr, &payload, bgra_tx.clone()) {
                 Some(d) => {
                     tracing::info!(
                         codec = ?hdr.codec, w = hdr.width, h = hdr.height,
                         "video decoder (re)initialised"
                     );
-                    *decoder.lock().unwrap() = Some(ActiveDecoder {
-                        dec: d,
-                        width: hdr.width as u32,
-                        height: hdr.height as u32,
-                    });
+                    // Tear down old callbacks before publishing the new decoder.
+                    decoder = Some(d);
                     cur_cfg = Some((hdr.codec, hdr.width, hdr.height));
                 }
                 None => {
@@ -1044,11 +1085,9 @@ async fn video_recv_loop(
                 }
             }
         }
-        let result = {
-            let g = decoder.lock().unwrap();
-            g.as_ref()
-                .map(|a| a.dec.decode_annexb(&payload, hdr.pts_us))
-        };
+        let result = decoder
+            .as_ref()
+            .map(|d| d.decode_annexb(&payload, hdr.pts_us));
         let Some(result) = result else { continue };
         if let Err(e) = result {
             // Mid-stream decode failure: nudge the host for a keyframe (rate-limited)
@@ -1081,11 +1120,12 @@ async fn audio_recv_loop(
     loop {
         let r = if first {
             first = false;
-            stream.read_exact(&mut head[1..]).await
+            read_media_part(&mut stream, &mut head[1..]).await
         } else {
-            stream.read_exact(&mut head).await
+            stream.read_exact(&mut head[..1]).await.is_ok()
+                && read_media_part(&mut stream, &mut head[1..]).await
         };
-        if r.is_err() {
+        if !r {
             break;
         }
         if head[0] != removent_proto::STREAM_TYPE_AUDIO {
@@ -1097,7 +1137,7 @@ async fn audio_recv_loop(
             break;
         };
         let mut payload = vec![0u8; hdr.payload_len as usize];
-        if stream.read_exact(&mut payload).await.is_err() {
+        if !read_media_part(&mut stream, &mut payload).await {
             break;
         }
         jb.lock().unwrap().push(AudioPacketIn {
@@ -1146,6 +1186,242 @@ async fn audio_playout_loop(jb: Arc<Mutex<JitterBuffer>>, pcm_tx: mpsc::Sender<V
                 Err(e) => tracing::warn!(err=%e, "opus plc"),
             },
             PopOutcome::Wait => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use removent_net::{ControlCodec, PinState, make_client_endpoint, make_server_endpoint};
+    use removent_proto::{AudioParams, CodecId, VideoParams};
+
+    struct Peer {
+        _endpoints: [removent_net::quinn::Endpoint; 2],
+        conn: RvpConnection,
+        sink: ControlSink,
+        source: ControlSource,
+    }
+
+    async fn fixture(
+        caps: Caps,
+        clip: Option<Arc<dyn removent_core::TextClipboard>>,
+    ) -> (ClientSession, Peer) {
+        let client_dir = tempfile::tempdir().unwrap();
+        let host_dir = tempfile::tempdir().unwrap();
+        let identity = |dir: &tempfile::TempDir| {
+            removent_core::identity::load_or_create(
+                &removent_core::DataPaths {
+                    root: dir.path().to_owned(),
+                },
+                "lifecycle-test",
+            )
+            .unwrap()
+        };
+        let (client, _) = make_client_endpoint(
+            "127.0.0.1:0".parse().unwrap(),
+            &identity(&client_dir),
+            PinState::new([], true),
+        )
+        .unwrap();
+        let (host, _) = make_server_endpoint(
+            "127.0.0.1:0".parse().unwrap(),
+            &identity(&host_dir),
+            PinState::new([], true),
+        )
+        .unwrap();
+        let (client_conn, host_conn) = tokio::join!(
+            client
+                .connect(host.local_addr().unwrap(), "removent")
+                .unwrap(),
+            async { host.accept().await.unwrap().await },
+        );
+        let client_conn = RvpConnection::new(client_conn.unwrap());
+        let host_conn = RvpConnection::new(host_conn.unwrap());
+        let (send, recv) = client_conn.inner().open_bi().await.unwrap();
+        let mut sink = ControlSink::new(send, ControlCodec);
+        sink.send(ControlMsg::Ping { ts_us: 0 }).await.unwrap();
+        let (send, recv_host) = host_conn.inner().accept_bi().await.unwrap();
+        let mut source = ControlSource::new(recv_host, ControlCodec);
+        source.next().await.unwrap().unwrap();
+        let ack = NegotiateAck {
+            video: VideoParams {
+                codec: CodecId::Hevc,
+                max_fps: 30,
+                max_bitrate_kbps: 3000,
+                initial_scale: 1.,
+            },
+            audio: AudioParams {
+                enabled: caps.audio,
+                ..Default::default()
+            },
+            resume_token: None,
+        };
+        let session = build_session(
+            client_conn,
+            sink,
+            ControlSource::new(recv, ControlCodec),
+            ack,
+            ClientConfig {
+                device_name: "test".into(),
+                caps,
+                local_clip: clip,
+            },
+        )
+        .unwrap();
+        (
+            session,
+            Peer {
+                _endpoints: [client, host],
+                conn: host_conn,
+                sink: ControlSink::new(send, ControlCodec),
+                source,
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn missing_media_streams_close_viewer_despite_live_control() {
+        let (mut session, _peer) = fixture(Caps::all(), None).await;
+        assert!(
+            tokio::time::timeout(Duration::from_secs(12), session.decoded_bgra_rx.recv())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(session.was_interrupted());
+    }
+
+    #[tokio::test]
+    async fn irrelevant_messages_do_not_extend_negotiation_deadline() {
+        let (session, mut peer) = fixture(Caps::all(), None).await;
+        let tx = session.cmd_tx.clone();
+        let _producer = AbortOnDrop(tokio::spawn(async move {
+            loop {
+                if tx.send(ControlMsg::Ping { ts_us: 1 }).await.is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }));
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            expect_msg(
+                &mut peer.source,
+                "negotiation",
+                Duration::from_millis(100),
+                |msg| matches!(msg, ControlMsg::SessionAccept),
+            ),
+        )
+        .await
+        .expect("unrelated traffic must not reset the deadline");
+        assert!(matches!(result, Err(ConnectError::Timeout("negotiation"))));
+    }
+
+    #[tokio::test]
+    async fn peer_end_or_control_eof_closes_pending_media_receivers() {
+        for eof in [false, true] {
+            let (mut session, mut peer) = fixture(Caps::all(), None).await;
+            // Start a video stream but leave its frame header incomplete and
+            // never open audio: both the dispatcher and a child are waiting.
+            let mut video = peer.conn.open_media_stream().await.unwrap();
+            video
+                .write_all(&[removent_proto::STREAM_TYPE_VIDEO])
+                .await
+                .unwrap();
+            if eof {
+                peer.sink.get_mut().finish().unwrap();
+            } else {
+                peer.sink
+                    .send(ControlMsg::SessionEnd {
+                        reason: EndReason::HostClosed,
+                    })
+                    .await
+                    .unwrap();
+            }
+            assert!(
+                tokio::time::timeout(Duration::from_secs(2), session.decoded_bgra_rx.recv())
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(
+                tokio::time::timeout(Duration::from_secs(2), session.decoded_pcm_rx.recv())
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(session.conn.inner().close_reason().is_some());
+            assert_eq!(
+                session.was_interrupted(),
+                eof,
+                "EOF must remain retryable after local cleanup"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn close_flushes_session_end_before_aborting_pump() {
+        let (session, mut peer) = fixture(Caps::all(), None).await;
+        session.close().await.unwrap();
+        let end = tokio::time::timeout(Duration::from_secs(2), peer.source.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(end, ControlItem::Msg(msg) if matches!(*msg, ControlMsg::SessionEnd { reason: EndReason::ClientClosed }))
+        );
+    }
+
+    #[tokio::test]
+    async fn disabled_or_non_text_clipboard_is_acknowledged_without_applying() {
+        use removent_core::TextClipboard;
+        for enabled in [false, true] {
+            let clip = removent_core::MemoryClipboard::new();
+            clip.write("local").unwrap();
+            let caps = Caps {
+                clipboard: enabled,
+                ..Caps::all()
+            };
+            let (_session, mut peer) = fixture(caps, Some(clip.clone())).await;
+            for (seq, format) in [
+                (1, removent_proto::ClipFormat::Html),
+                (2, removent_proto::ClipFormat::TextUtf8),
+            ] {
+                peer.sink
+                    .send(ControlMsg::ClipboardSync {
+                        seq,
+                        format,
+                        data: b"remote".to_vec(),
+                    })
+                    .await
+                    .unwrap();
+                let ack = tokio::time::timeout(Duration::from_secs(2), peer.source.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                assert!(
+                    matches!(ack, ControlItem::Msg(msg) if matches!(*msg, ControlMsg::ClipboardAck { seq: received } if received == seq))
+                );
+                assert_eq!(
+                    clip.read().unwrap(),
+                    if enabled && seq == 2 {
+                        "remote"
+                    } else {
+                        "local"
+                    }
+                );
+            }
+            if !enabled {
+                clip.write("new local copy").unwrap();
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(350), peer.source.next())
+                        .await
+                        .is_err()
+                );
+            }
         }
     }
 }

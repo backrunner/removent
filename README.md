@@ -18,14 +18,15 @@ are working; expect rough edges).
 ## Requirements
 
 - macOS 13.0 or later, Apple Silicon (arm64)
-- Both Macs on the same LAN (devices discover each other via mDNS)
+- For native Removent connections, both Macs on the same LAN (mDNS discovery)
+- For compatibility connections, a reachable VNC or RDP server
 
 ## Quick start
 
 ### Option 1: Download the DMG
 
 Grab `Removent-<version>-macos-arm64.dmg` from the
-[latest release](https://github.com/backrunner/removent/releases/latest), open it, and drag
+[latest release](https://github.com/backrunner/removent/releases), open it, and drag
 **Removent.app** into **Applications**. The app is Developer-ID signed and notarized, so it
 opens without Gatekeeper warnings.
 
@@ -56,25 +57,48 @@ suitable only for an isolated, trusted LAN. The compatibility layer provides a r
 keyboard/mouse input; Removent pairing, clipboard, audio, and adaptive media remain available only
 through RVP.
 
-To use Removent as a VNC viewer, enter an external server as `IP:5900` in the manual address field.
-Standard VNC servers use the VNC password. Apple Remote Desktop / macOS Screen Sharing servers
-advertising RFB `003.889` use the configured macOS username and password and Apple type-30/type-35
-Diffie-Hellman/AES authentication.
+To use Removent as a VNC viewer, choose **Add connection**, select VNC, then enter the host, port
+(default `5900`), and credentials for that connection. Standard VNC servers only need a password.
+Apple Remote Desktop / macOS Screen Sharing uses a macOS username and password with Apple
+type-30/type-35 Diffie-Hellman/AES authentication. Hostnames, IPv4, IPv6, and custom ports are
+supported; the protocol is selected explicitly instead of inferred from the port.
+
+### RDP compatibility
+
+**Add connection** opens a two-level dialog: choose Removent, VNC, or RDP, then enter connection
+details. Back or Esc returns to protocol selection, and pending connections can be cancelled.
+RDP defaults to port `3389` and accepts a username, password, and optional domain. IronRDP provides
+an in-app desktop session with TLS, NLA/CredSSP, graphics, keyboard, and mouse input.
+
+Server certificates are verified by default. For self-signed certificates, use system trust or
+explicitly allow untrusted certificates for that connection. Dialog passwords are not written to
+settings. RDP support is currently client-only, without audio, clipboard, file redirection, or
+automatic reconnection. Windows hosts must have Remote Desktop enabled and allow the account to log in.
 
 ## Build from source
 
-Requires a stable Rust toolchain (1.85+) and Xcode command line tools with Swift.
+Requires a stable Rust toolchain (1.89+, required by IronRDP) and full Xcode with Swift and the Metal toolchain.
 
 ```bash
 git clone https://github.com/backrunner/removent.git
 cd removent
 
-# Run the app in debug mode
-cargo run -p removent-app
+# Build incrementally and start the app, daemon and tray
+scripts/dev.sh
+
+# Restart immediately using existing debug binaries
+scripts/dev.sh --no-build
 
 # Or package a .app bundle + zip into dist/ (ad-hoc signed for local use)
 scripts/package.sh
 ```
+
+The development script uses `userdata/dev` (override with `REMOVENT_DATA_DIR`),
+skips scheduled update checks, and stops its own processes on Ctrl-C. Use
+`--no-tray` for app/daemon work, `--build-only` to build without launching, or
+`--help` for options. The first build requires compiling dependencies; subsequent
+runs build incrementally. See [the review report](docs/review-2026-09-06.md) for
+findings, validation and performance measurements.
 
 Run tests with `cargo test --workspace`; the tray integration test is
 `bash tray/Tests/run_integration_test.sh`.
@@ -152,3 +176,5 @@ locally, set `APPLE_SIGNING_IDENTITY` plus notarization credentials
 ## License
 
 [Apache-2.0](LICENSE)
+
+Beta builds check for later betas and stable releases; stable builds only check stable releases. See the [release guide](docs/release-pipeline.md) for signing and publishing.

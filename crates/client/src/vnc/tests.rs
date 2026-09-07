@@ -322,3 +322,55 @@ async fn apple_ard_session_select_and_zero_size_frame_roundtrip() {
     assert_eq!(frame.data, vec![1, 2, 3, 255]);
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn closing_command_channel_closes_frames_while_server_stays_open() {
+    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (keep_open_tx, keep_open_rx) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        stream.write_all(RFB_VERSION).await.unwrap();
+        let mut client_version = [0u8; 12];
+        stream.read_exact(&mut client_version).await.unwrap();
+        stream.write_all(&[1, SEC_NONE]).await.unwrap();
+        let mut selected = [0u8; 1];
+        stream.read_exact(&mut selected).await.unwrap();
+        assert_eq!(selected[0], SEC_NONE);
+        stream.write_all(&0u32.to_be_bytes()).await.unwrap();
+        let mut shared = [0u8; 1];
+        stream.read_exact(&mut shared).await.unwrap();
+        let mut init = vec![0u8; 24];
+        init[1] = 1;
+        init[3] = 1;
+        init[4..20].copy_from_slice(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]);
+        stream.write_all(&init).await.unwrap();
+        let mut setup = [0u8; 38];
+        stream.read_exact(&mut setup).await.unwrap();
+        let mut update = vec![0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0];
+        update.extend_from_slice(&[1, 2, 3, 255]);
+        stream.write_all(&update).await.unwrap();
+        // The server leaves its write half open until the test finishes.
+        let _ = keep_open_rx.await;
+    });
+    let mut session = connect_vnc(addr, "").await.unwrap();
+    let frame = timeout(Duration::from_secs(1), session.decoded_bgra_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(frame.width, 1);
+    assert_eq!(frame.height, 1);
+    assert_eq!(frame.data, vec![1, 2, 3, 255]);
+    let (replacement, _unused) = mpsc::channel(1);
+    drop(std::mem::replace(&mut session.cmd_tx, replacement));
+    assert!(
+        timeout(Duration::from_secs(1), session.decoded_bgra_rx.recv())
+            .await
+            .expect("writer shutdown must close the frame channel")
+            .is_none()
+    );
+    let _ = keep_open_tx.send(());
+    server.await.unwrap();
+}

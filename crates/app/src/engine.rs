@@ -7,6 +7,7 @@
 use anyhow::Result;
 use futures::FutureExt;
 use removent_client::connect_session;
+use removent_client::connection::{ConnectionProtocol, ConnectionRequest};
 use removent_core::ipc::{IpcEvent, IpcRequest, IpcResponse, StatusReport};
 use removent_core::{DataPaths, DeviceIdentity, PeersStore, Settings};
 use removent_input as rinput;
@@ -43,15 +44,25 @@ pub enum UiEvent {
         peer_fp_short: String,
     },
     /// Controlling side: the user must enter the peer's PIN to finish pairing.
-    ClientNeedsPin(tokio::sync::oneshot::Sender<String>),
+    ClientNeedsPin {
+        generation: usize,
+        tx: tokio::sync::oneshot::Sender<String>,
+    },
     SessionReady {
+        generation: usize,
         codec: String,
     },
     /// Controlling-side connect failure (connect button resets + red error;
     /// no SessionClosed will follow).
-    ConnectFailed(String),
+    ConnectFailed {
+        generation: usize,
+        error: String,
+    },
     /// Controlling-side session ended (including manual disconnect).
-    SessionClosed(String),
+    SessionClosed {
+        generation: usize,
+        reason: String,
+    },
     /// Controlled side: a peer connected to this machine (status hint only;
     /// does not affect the controlling-side connecting state).
     HostSessionStarted {
@@ -84,32 +95,102 @@ pub enum UiEvent {
     UpdateStatus(UpdateStatus),
 }
 
-/// Decoded-frame bus (pulled by the viewer, bounded latest-wins).
-pub struct FrameBus {
-    rx: Mutex<Option<std::sync::mpsc::Receiver<VideoFrame>>>,
-}
-
-impl FrameBus {
-    pub fn take_rx(&self) -> Option<std::sync::mpsc::Receiver<VideoFrame>> {
-        self.rx.lock().unwrap().take()
-    }
-
-    /// Install the frame channel for a new session (capacity 2; backlog is dropped
-    /// to keep the latest frame).
-    fn install(&self) -> std::sync::mpsc::SyncSender<VideoFrame> {
-        let (tx, rx) = std::sync::mpsc::sync_channel(2);
-        *self.rx.lock().unwrap() = Some(rx);
-        tx
+impl UiEvent {
+    pub fn belongs_to_client(&self, current: usize) -> bool {
+        match self {
+            Self::ClientNeedsPin { generation, .. }
+            | Self::SessionReady { generation, .. }
+            | Self::ConnectFailed { generation, .. }
+            | Self::SessionClosed { generation, .. } => *generation == current,
+            _ => true,
+        }
     }
 }
 
-/// Bounded send: drop this frame when full (the viewer only takes the latest frame per
-/// render, so a backlog is meant to be discarded).
-fn send_latest(tx: &std::sync::mpsc::SyncSender<VideoFrame>, frame: VideoFrame) -> Result<(), ()> {
-    match tx.try_send(frame) {
-        Ok(()) => Ok(()),
-        Err(std::sync::mpsc::TrySendError::Full(_)) => Ok(()),
-        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => Err(()),
+/// Generation and channel publication share a lock: aborting a tokio task alone
+/// does not prevent its current poll from publishing after a cancellation.
+#[derive(Default)]
+struct ClientChannels {
+    generation: usize,
+    geometry: Option<(u32, u32)>,
+    frames: Option<removent_core::latest::Receiver<VideoFrame>>,
+    cmd: Option<tokio::sync::mpsc::Sender<ControlMsg>>,
+}
+
+impl ClientChannels {
+    fn invalidate(&mut self) -> usize {
+        self.generation += 1;
+        self.frames = None;
+        self.geometry = None;
+        self.cmd = None;
+        self.generation
+    }
+}
+
+#[derive(Clone)]
+struct ClientAttempt {
+    generation: usize,
+    channels: Arc<Mutex<ClientChannels>>,
+    events: std::sync::mpsc::Sender<UiEvent>,
+}
+
+impl ClientAttempt {
+    fn publish(
+        &self,
+        cmd: tokio::sync::mpsc::Sender<ControlMsg>,
+        codec: String,
+    ) -> Result<removent_core::latest::Sender<VideoFrame>> {
+        let mut channels = self.channels.lock().unwrap();
+        anyhow::ensure!(
+            channels.generation == self.generation,
+            "Connection cancelled"
+        );
+        let (tx, rx) = removent_core::latest::channel();
+        channels.frames = Some(rx);
+        channels.geometry = None;
+        channels.cmd = Some(cmd);
+        let _ = self.events.send(UiEvent::SessionReady {
+            generation: self.generation,
+            codec,
+        });
+        Ok(tx)
+    }
+
+    fn pause_input(&self) {
+        let mut channels = self.channels.lock().unwrap();
+        if channels.generation == self.generation {
+            channels.cmd = None;
+        }
+    }
+
+    fn resume(&self, cmd: tokio::sync::mpsc::Sender<ControlMsg>) -> Result<()> {
+        let mut channels = self.channels.lock().unwrap();
+        anyhow::ensure!(
+            channels.generation == self.generation,
+            "Connection cancelled"
+        );
+        channels.geometry = None;
+        channels.cmd = Some(cmd);
+        Ok(())
+    }
+
+    fn finish(&self, error: Option<String>) {
+        let mut channels = self.channels.lock().unwrap();
+        if channels.generation != self.generation {
+            return;
+        }
+        channels.cmd = None;
+        let event = match error {
+            Some(error) => UiEvent::ConnectFailed {
+                generation: self.generation,
+                error,
+            },
+            None => UiEvent::SessionClosed {
+                generation: self.generation,
+                reason: t!("session.peer_disconnected").to_string(),
+            },
+        };
+        let _ = self.events.send(event);
     }
 }
 
@@ -119,14 +200,14 @@ pub struct Engine {
     pub(crate) rt: Arc<tokio::runtime::Runtime>,
     paths: DataPaths,
     settings: Arc<Mutex<Settings>>,
+    identity: Arc<Mutex<Option<DeviceIdentity>>>,
     pub events_tx: std::sync::mpsc::Sender<UiEvent>,
     /// Event receiver end (shared; can only be taken once, but a clone can still take it).
     pub events_rx: Arc<Mutex<Option<std::sync::mpsc::Receiver<UiEvent>>>>,
-    pub frames: Arc<FrameBus>,
     client_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     /// Live client-session control-message egress (Some while a session runs);
     /// viewer input and clipboard-clear sends go through here.
-    client_cmd: Arc<Mutex<Option<tokio::sync::mpsc::Sender<ControlMsg>>>>,
+    client_channels: Arc<Mutex<ClientChannels>>,
     /// daemon IPC request outlet (Some while online).
     daemon_req: Arc<Mutex<Option<ReqTx>>>,
     daemon_online: Arc<AtomicBool>,
@@ -147,11 +228,11 @@ impl Clone for Engine {
             rt: self.rt.clone(),
             paths: self.paths.clone(),
             settings: self.settings.clone(),
+            identity: self.identity.clone(),
             events_tx: self.events_tx.clone(),
             events_rx: self.events_rx.clone(),
-            frames: self.frames.clone(),
             client_task: self.client_task.clone(),
-            client_cmd: self.client_cmd.clone(),
+            client_channels: self.client_channels.clone(),
             daemon_req: self.daemon_req.clone(),
             daemon_online: self.daemon_online.clone(),
             host_running: self.host_running.clone(),
@@ -194,20 +275,17 @@ fn known_fingerprints(paths: &DataPaths) -> Vec<[u8; 32]> {
 }
 
 impl Engine {
-    pub fn new(rt: tokio::runtime::Runtime, paths: DataPaths) -> Self {
-        let settings = Settings::load(&paths).unwrap_or_default();
+    pub fn new(rt: tokio::runtime::Runtime, paths: DataPaths, settings: Settings) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         let engine = Self {
             rt: Arc::new(rt),
             paths,
             settings: Arc::new(Mutex::new(settings)),
+            identity: Arc::new(Mutex::new(None)),
             events_tx: tx,
             events_rx: Arc::new(Mutex::new(Some(rx))),
-            frames: Arc::new(FrameBus {
-                rx: Mutex::new(None),
-            }),
             client_task: Arc::new(Mutex::new(None)),
-            client_cmd: Arc::new(Mutex::new(None)),
+            client_channels: Arc::new(Mutex::new(ClientChannels::default())),
             daemon_req: Arc::new(Mutex::new(None)),
             daemon_online: Arc::new(AtomicBool::new(false)),
             host_running: Arc::new(AtomicBool::new(false)),
@@ -217,8 +295,6 @@ impl Engine {
         };
         engine.spawn_daemon_link();
         engine.spawn_update_scheduler();
-        // A previous update may have left a Removent.app.old backup behind.
-        updater::cleanup_stale_backup();
         engine
     }
 
@@ -231,11 +307,13 @@ impl Engine {
     pub fn update_settings(&self, f: impl FnOnce(&mut Settings)) -> Result<(), String> {
         {
             let mut s = self.settings.lock().unwrap();
-            f(&mut s);
-            if let Err(e) = s.save(&self.paths) {
+            let mut next = s.clone();
+            f(&mut next);
+            if let Err(e) = next.save(&self.paths) {
                 tracing::error!(err=%e, "settings save failed");
                 return Err(e.to_string());
             }
+            *s = next;
         }
         // Reload on the daemon side (the runner picks up the new settings on next restart).
         if let Some(tx) = self.daemon_req.lock().unwrap().as_ref() {
@@ -303,6 +381,9 @@ impl Engine {
     /// Check schedule (release.md §3.1): once 30s after launch, then every 24h;
     /// skipped when the user disabled update checks.
     fn spawn_update_scheduler(&self) {
+        if std::env::var("REMOVENT_NO_UPDATE_CHECK").as_deref() == Ok("1") {
+            return;
+        }
         let settings = self.settings.clone();
         let shared = self.update.clone();
         let events = self.events_tx.clone();
@@ -330,10 +411,13 @@ impl Engine {
     }
 
     pub fn identity(&self) -> Result<DeviceIdentity> {
-        Ok(removent_core::identity::load_or_create(
-            &self.paths,
-            &self.device_name(),
-        )?)
+        let mut cached = self.identity.lock().unwrap();
+        if let Some(identity) = cached.as_ref() {
+            return Ok(identity.clone());
+        }
+        let identity = removent_core::identity::load_or_create(&self.paths, &self.device_name())?;
+        *cached = Some(identity.clone());
+        Ok(identity)
     }
 
     pub fn fingerprint_short(&self) -> String {
@@ -454,12 +538,12 @@ impl Engine {
                         *slot.lock().unwrap() = Some(req_tx);
                         // Take a snapshot right after connecting.
                         let _ = removent_core::ipc::write_msg(&mut w, &IpcRequest::Status).await;
-                        let mut tick =
-                            tokio::time::interval(std::time::Duration::from_secs(3));
+                        let mut reader = removent_core::ipc::MessageReader::default();
+                        let mut tick = tokio::time::interval(std::time::Duration::from_secs(3));
                         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                         loop {
                             tokio::select! {
-                                line = removent_core::ipc::read_msg::<_, serde_json::Value>(&mut r) => {
+                                line = reader.read::<_, serde_json::Value>(&mut r) => {
                                     match line {
                                         Ok(Some(v)) => handle_daemon_message(
                                             v, &events, &running, &perms, &sessions,
@@ -505,75 +589,132 @@ impl Engine {
 
     /// Connect to the peer at the given address and enter a viewing session.
     pub fn connect_to(&self, addr: SocketAddr) -> Result<()> {
-        {
-            let task = self.client_task.lock().unwrap();
-            if task.as_ref().is_some_and(|t| !t.is_finished()) {
-                anyhow::bail!(t!("err.session_in_progress").to_string());
-            }
+        self.connect_request(ConnectionRequest::native(addr))
+    }
+
+    pub fn connect_request(&self, request: ConnectionRequest) -> Result<()> {
+        // Serialize the check, generation change and task installation with disconnect.
+        let mut task = self.client_task.lock().unwrap();
+        if task.as_ref().is_some_and(|t| !t.is_finished()) {
+            anyhow::bail!(t!("err.session_in_progress").to_string());
         }
-        let identity = self.identity()?;
-        let events = self.events_tx.clone();
-        let frames = self.frames.clone();
+        let identity = if request.protocol == ConnectionProtocol::Removent {
+            Some(self.identity()?)
+        } else {
+            None
+        };
         let paths = self.paths.clone();
         let settings = self.settings.lock().unwrap().clone();
-        let cmd_slot = self.client_cmd.clone();
-
+        let attempt = ClientAttempt {
+            generation: self.client_channels.lock().unwrap().invalidate(),
+            channels: self.client_channels.clone(),
+            events: self.events_tx.clone(),
+        };
         let handle = self.rt.spawn(async move {
             // catch_unwind: even a task panic must reset the UI (the connect button
             // must not get stuck on "connecting…").
-            let result = std::panic::AssertUnwindSafe(run_client(
+            let result = std::panic::AssertUnwindSafe(run_requested_client(
                 identity,
-                addr,
+                request,
                 paths,
                 settings,
-                events.clone(),
-                frames,
-                cmd_slot.clone(),
+                attempt.clone(),
             ))
             .catch_unwind()
             .await;
-            *cmd_slot.lock().unwrap() = None;
-            match result {
-                Ok(Ok(())) => {
-                    let _ = events.send(UiEvent::SessionClosed(
-                        t!("session.peer_disconnected").to_string(),
-                    ));
-                }
-                Ok(Err(e)) => {
-                    let _ = events.send(UiEvent::ConnectFailed(format!("{e:#}")));
-                }
-                Err(_) => {
-                    let _ = events.send(UiEvent::ConnectFailed(
-                        t!("session.internal_error").to_string(),
-                    ));
-                }
-            }
+            attempt.finish(match result {
+                Ok(Ok(())) => None,
+                Ok(Err(e)) => Some(format!("{e:#}")),
+                Err(_) => Some(t!("session.internal_error").to_string()),
+            });
         });
-        *self.client_task.lock().unwrap() = Some(handle);
+        *task = Some(handle);
         Ok(())
+    }
+
+    pub fn client_generation(&self) -> usize {
+        self.client_channels.lock().unwrap().generation
+    }
+
+    pub fn take_client_frames(&self) -> Option<removent_core::latest::Receiver<VideoFrame>> {
+        self.client_channels.lock().unwrap().frames.take()
+    }
+
+    /// Closing an old disconnected viewer must not terminate a newer session.
+    pub fn disconnect_client_if(&self, generation: usize) {
+        self.cancel_client(
+            Some(generation),
+            t!("session.manually_disconnected").to_string(),
+        );
     }
 
     /// Disconnect the session proactively; only sends SessionClosed when a live task
     /// exists (avoids a bogus event when closing the window).
     pub fn disconnect_client(&self) {
-        let task = self.client_task.lock().unwrap().take();
-        if let Some(task) = task
-            && !task.is_finished()
-        {
+        self.cancel_client(None, t!("session.manually_disconnected").to_string());
+    }
+
+    fn cancel_client(&self, expected_generation: Option<usize>, reason: String) {
+        let mut task = self.client_task.lock().unwrap();
+        let mut channels = self.client_channels.lock().unwrap();
+        if expected_generation.is_some_and(|generation| generation != channels.generation) {
+            return;
+        }
+        // Also invalidate already-queued ready/PIN/error events from a finished task.
+        let generation = channels.invalidate();
+        if let Some(task) = task.take() {
             task.abort();
-            let _ = self.events_tx.send(UiEvent::SessionClosed(
-                t!("session.manually_disconnected").to_string(),
-            ));
+            let _ = self
+                .events_tx
+                .send(UiEvent::SessionClosed { generation, reason });
         }
     }
 
     // ---- viewer input / clipboard pass-through ----
 
-    /// Best-effort send on the live session's control channel; a full channel (the
-    /// peer is lagging) drops the message, which is the right policy for input.
+    /// Publish geometry on the same FIFO as input, and resend it after resume.
+    pub fn set_frame_geometry(&self, generation: usize, width: u32, height: u32) {
+        let failed = {
+            let mut channels = self.client_channels.lock().unwrap();
+            if generation != channels.generation || channels.geometry == Some((width, height)) {
+                return;
+            }
+            let Some(tx) = &channels.cmd else {
+                return;
+            };
+            match tx.try_send(ControlMsg::FrameGeometry { width, height }) {
+                Ok(()) => {
+                    channels.geometry = Some((width, height));
+                    false
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => true,
+                Err(_) => false,
+            }
+        };
+        if failed {
+            self.cancel_client(Some(generation), t!("session.input_overloaded").to_string());
+        }
+    }
+
+    /// Reserve queue space for transitions. If a key/button event cannot be
+    /// delivered, close the session so the peer releases held inputs.
     fn try_send_cmd(&self, msg: ControlMsg) {
-        if let Some(tx) = self.client_cmd.lock().unwrap().as_ref() {
-            let _ = tx.try_send(msg);
+        let failed_generation = {
+            let channels = self.client_channels.lock().unwrap();
+            channels
+                .cmd
+                .as_ref()
+                .and_then(|tx| match enqueue_input(tx, msg) {
+                    // The frame bridge owns disconnect/retry handling. A closed
+                    // old channel must not abort a reconnect that is starting.
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        Some(channels.generation)
+                    }
+                    _ => None,
+                })
+        };
+        if let Some(generation) = failed_generation {
+            self.cancel_client(Some(generation), t!("session.input_overloaded").to_string());
         }
     }
 
@@ -634,6 +775,28 @@ impl Engine {
             tracing::warn!(err=%e, "local clipboard clear failed");
         }
     }
+}
+
+/// Pointer motion may be skipped under pressure; ordered key/button/scroll
+/// transitions either enter the FIFO or cause an explicit session shutdown.
+fn enqueue_input(
+    tx: &tokio::sync::mpsc::Sender<ControlMsg>,
+    msg: ControlMsg,
+) -> Result<(), tokio::sync::mpsc::error::TrySendError<ControlMsg>> {
+    let motion = matches!(
+        msg,
+        ControlMsg::MouseEvent {
+            kind: removent_proto::MouseKind::Moved
+                | removent_proto::MouseKind::LeftDragged
+                | removent_proto::MouseKind::RightDragged
+                | removent_proto::MouseKind::MiddleDragged,
+            ..
+        }
+    );
+    if motion && !tx.is_closed() && tx.capacity() <= (tx.max_capacity() / 4).max(1) {
+        return Ok(());
+    }
+    tx.try_send(msg)
 }
 
 /// daemon message dispatch: responses update state, events become UiEvent.
@@ -736,20 +899,20 @@ fn apply_status(
     }
 }
 
-/// True when the connection dropped abnormally (idle timeout/reset/transport
-/// error) rather than via a clean SessionEnd + application close.
-fn abnormal_disconnect(session: &removent_client::ClientSession) -> bool {
-    use removent_net::quinn::ConnectionError as E;
-    matches!(
-        session.conn.inner().close_reason(),
-        Some(
-            E::TimedOut
-                | E::Reset
-                | E::ConnectionClosed(_)
-                | E::TransportError(_)
-                | E::CidsExhausted
-        )
-    )
+/// Audio forwarding must stop even when the UI aborts the connection task.
+struct AudioForwardTask(tokio::task::JoinHandle<()>);
+impl Drop for AudioForwardTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+fn client_bind_addr(peer: SocketAddr) -> SocketAddr {
+    if peer.is_ipv6() {
+        SocketAddr::from(([0u16; 8], 0))
+    } else {
+        SocketAddr::from(([0u8; 4], 0))
+    }
 }
 
 async fn run_client(
@@ -757,32 +920,16 @@ async fn run_client(
     addr: SocketAddr,
     paths: DataPaths,
     settings: Settings,
-    events: std::sync::mpsc::Sender<UiEvent>,
-    frames: Arc<FrameBus>,
-    cmd_slot: Arc<Mutex<Option<tokio::sync::mpsc::Sender<ControlMsg>>>>,
+    attempt: ClientAttempt,
 ) -> Result<()> {
-    // `IP:5900` is the explicit compatibility entry point for Apple Screen
-    // Sharing / Apple Remote Desktop. The native Removent endpoint remains
-    // the default port and continues through the RVP flow below.
-    if addr.port() == 5900 {
-        return run_vnc_client(
-            addr,
-            settings.vnc_username,
-            settings.vnc_password,
-            events,
-            frames,
-            cmd_slot,
-        )
-        .await;
-    }
     let known = known_fingerprints(&paths);
     let (ep_client, _pin) = make_client_endpoint(
-        SocketAddr::from(([0, 0, 0, 0], 0)),
+        client_bind_addr(addr),
         &identity,
         PinState::new(known, true),
     )?;
 
-    let audio_player = match AudioPlayer::new() {
+    let audio_player = match tokio::task::spawn_blocking(AudioPlayer::new).await? {
         Ok(player) => Some(player),
         Err(e) => {
             tracing::warn!(err = %e, "audio output unavailable; negotiating video only");
@@ -802,7 +949,7 @@ async fn run_client(
 
     // The PIN prompt is deferred until pairing actually starts: a trusted peer
     // never needs one (no popup flash on every connect).
-    let pin_events = events.clone();
+    let pin_attempt = attempt.clone();
     let mut session = connect_session(
         ep_client,
         addr,
@@ -811,48 +958,58 @@ async fn run_client(
         None,
         None,
         Some(Box::new(move |pin_tx| {
-            let _ = pin_events.send(UiEvent::ClientNeedsPin(pin_tx));
+            let _ = pin_attempt.events.send(UiEvent::ClientNeedsPin {
+                generation: pin_attempt.generation,
+                tx: pin_tx,
+            });
         })),
     )
     .await?;
 
     // Frame bridge: install the channel before telling the UI to open the viewer
     // (eliminates the race of not being able to take rx).
-    let ftx = frames.install();
+    let ftx = attempt.publish(
+        session.cmd_tx.clone(),
+        format!("{:?}", session.negotiated.video.codec),
+    )?;
     let mut audio_task = audio_player.as_ref().map(|player| {
         let player = player.clone();
         let (_drop_tx, drop_rx) = tokio::sync::mpsc::channel(1);
         let pcm_rx = std::mem::replace(&mut session.decoded_pcm_rx, drop_rx);
-        tokio::spawn(async move {
+        AudioForwardTask(tokio::spawn(async move {
             let mut pcm_rx = pcm_rx;
             while let Some(pcm) = pcm_rx.recv().await {
                 player.push(pcm);
             }
-        })
+        }))
     });
-    // Publish the control-channel egress so the viewer can forward input.
-    *cmd_slot.lock().unwrap() = Some(session.cmd_tx.clone());
-
-    let _ = events.send(UiEvent::SessionReady {
-        codec: format!("{:?}", session.negotiated.video.codec),
-    });
-
     loop {
         while let Some(frame) = session.decoded_bgra_rx.recv().await {
-            if send_latest(&ftx, frame).is_err() {
+            if ftx.send(frame).is_err() {
                 return Ok(());
             }
         }
         // The frame channel closed: a clean SessionEnd ends here; an abnormal
         // network drop gets one transparent quick-resume attempt (§7.3/§7.4) —
         // on success the session continues without the UI noticing.
-        if !abnormal_disconnect(&session) {
+        attempt.pause_input();
+        if let Some(mut task) = audio_task.take() {
+            task.0.abort();
+            let _ = (&mut task.0).await;
+        }
+        if let Some(player) = &audio_player {
+            player.clear();
+        }
+        if !session.was_interrupted() {
             return Ok(());
         }
         let Some(token) = session.current_resume_token() else {
             return Ok(());
         };
         let prev_ack = session.negotiated.clone();
+        // A media stream can fail while QUIC/control remain live. Release that
+        // session before retrying, or it keeps the host busy across all retries.
+        drop(session);
         tracing::info!("connection dropped abnormally; attempting quick resume");
         // The old session's permit on the host is released at the end of its
         // teardown chain, so a resume attempted immediately after a drop can
@@ -865,47 +1022,47 @@ async fn run_client(
             }
             let known = known_fingerprints(&paths);
             let (ep, _pin) = make_client_endpoint(
-                SocketAddr::from(([0, 0, 0, 0], 0)),
+                client_bind_addr(addr),
                 &identity,
                 PinState::new(known, true),
             )?;
-            match removent_client::quick_resume(
-                ep,
-                addr,
-                &identity,
-                mk_cfg(),
-                token,
-                prev_ack.clone(),
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(8),
+                removent_client::quick_resume(
+                    ep,
+                    addr,
+                    &identity,
+                    mk_cfg(),
+                    token,
+                    prev_ack.clone(),
+                ),
             )
             .await
             {
-                Ok(s) => {
+                Ok(Ok(s)) => {
                     resumed = Some(s);
                     break;
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     tracing::warn!(err=%e, attempt, "quick resume attempt failed");
                 }
+                Err(_) => tracing::warn!(attempt, "quick resume attempt timed out"),
             }
         }
         match resumed {
             Some(s) => {
-                if let Some(task) = audio_task.take() {
-                    task.abort();
-                    let _ = task.await;
-                }
                 session = s;
-                *cmd_slot.lock().unwrap() = Some(session.cmd_tx.clone());
+                attempt.resume(session.cmd_tx.clone())?;
                 audio_task = audio_player.as_ref().map(|player| {
                     let player = player.clone();
                     let (_drop_tx, drop_rx) = tokio::sync::mpsc::channel(1);
                     let pcm_rx = std::mem::replace(&mut session.decoded_pcm_rx, drop_rx);
-                    tokio::spawn(async move {
+                    AudioForwardTask(tokio::spawn(async move {
                         let mut pcm_rx = pcm_rx;
                         while let Some(pcm) = pcm_rx.recv().await {
                             player.push(pcm);
                         }
-                    })
+                    }))
                 });
             }
             None => return Ok(()),
@@ -916,26 +1073,241 @@ async fn run_client(
 /// Connect to a standard RFB/VNC server and bridge its raw frames into the
 /// same viewer bus used by RVP. VNC has no Removent pairing/resume channel, so
 /// a disconnect is reported directly to the UI.
-async fn run_vnc_client(
-    addr: SocketAddr,
-    username: String,
-    password: String,
-    events: std::sync::mpsc::Sender<UiEvent>,
-    frames: Arc<FrameBus>,
-    cmd_slot: Arc<Mutex<Option<tokio::sync::mpsc::Sender<ControlMsg>>>>,
-) -> Result<()> {
-    let mut session = removent_client::connect_vnc_with_credentials(addr, &username, &password)
-        .await
-        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    let ftx = frames.install();
-    *cmd_slot.lock().unwrap() = Some(session.cmd_tx.clone());
-    let _ = events.send(UiEvent::SessionReady {
-        codec: "RFB/VNC".into(),
-    });
+async fn run_vnc_client(request: ConnectionRequest, attempt: ClientAttempt) -> Result<()> {
+    let mut session = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let addresses =
+            tokio::net::lookup_host((request.address.host.as_str(), request.address.port)).await?;
+        let mut last_error = anyhow::anyhow!("No addresses found for {}", request.address.host);
+        for addr in addresses {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                removent_client::connect_vnc_with_credentials(
+                    addr,
+                    &request.username,
+                    &request.password,
+                ),
+            )
+            .await
+            {
+                Ok(Ok(session)) => return Ok(session),
+                Ok(Err(e)) => last_error = e.into(),
+                Err(e) => last_error = e.into(),
+            }
+        }
+        Err(last_error)
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("VNC connection timed out after 30 seconds"))??;
+    let ftx = attempt.publish(session.cmd_tx.clone(), "RFB/VNC".into())?;
     while let Some(frame) = session.decoded_bgra_rx.recv().await {
-        if send_latest(&ftx, frame).is_err() {
+        if ftx.send(frame).is_err() {
             break;
         }
     }
     Ok(())
+}
+
+async fn run_requested_client(
+    identity: Option<DeviceIdentity>,
+    request: ConnectionRequest,
+    paths: DataPaths,
+    settings: Settings,
+    attempt: ClientAttempt,
+) -> Result<()> {
+    match request.protocol {
+        ConnectionProtocol::Removent => {
+            let addr = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                tokio::net::lookup_host((request.address.host.as_str(), request.address.port)),
+            )
+            .await??
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("No addresses found for {}", request.address.host))?;
+            run_client(
+                identity.ok_or_else(|| anyhow::anyhow!("Device identity missing"))?,
+                addr,
+                paths,
+                settings,
+                attempt,
+            )
+            .await
+        }
+        ConnectionProtocol::Vnc => run_vnc_client(request, attempt).await,
+        ConnectionProtocol::Rdp => {
+            let mut session = removent_client::rdp::connect_rdp(request).await?;
+            let ftx = attempt.publish(session.cmd_tx.clone(), "RDP".into())?;
+            while let Some(frame) = session.decoded_bgra_rx.recv().await {
+                if ftx.send(frame).is_err() {
+                    return Ok(());
+                }
+            }
+            (&mut session.completion)
+                .await
+                .map_err(|_| anyhow::anyhow!("RDP session task stopped unexpectedly"))?
+        }
+    }
+}
+
+#[cfg(test)]
+mod client_lifecycle_tests {
+    use super::*;
+
+    fn attempt(
+        channels: &Arc<Mutex<ClientChannels>>,
+        events: &std::sync::mpsc::Sender<UiEvent>,
+    ) -> ClientAttempt {
+        ClientAttempt {
+            generation: channels.lock().unwrap().invalidate(),
+            channels: channels.clone(),
+            events: events.clone(),
+        }
+    }
+
+    #[test]
+    fn reconnect_pauses_input_without_invalidating_viewer_or_new_attempt() {
+        let channels = Arc::new(Mutex::new(ClientChannels::default()));
+        let (events, _rx) = std::sync::mpsc::channel();
+        let old = attempt(&channels, &events);
+        let (cmd, _cmd_rx) = tokio::sync::mpsc::channel(4);
+        let _frames = old.publish(cmd, "test".into()).unwrap();
+        old.pause_input();
+        assert!(channels.lock().unwrap().cmd.is_none());
+        assert!(channels.lock().unwrap().frames.is_some());
+        let (cmd, _cmd_rx) = tokio::sync::mpsc::channel(4);
+        channels.lock().unwrap().geometry = Some((160, 120));
+        old.resume(cmd).unwrap();
+        assert!(
+            channels.lock().unwrap().geometry.is_none(),
+            "resume must resend viewer geometry"
+        );
+        assert!(channels.lock().unwrap().cmd.is_some());
+        let new = attempt(&channels, &events);
+        let (cmd, _cmd_rx) = tokio::sync::mpsc::channel(4);
+        let _frames = new.publish(cmd, "test".into()).unwrap();
+        old.pause_input();
+        assert!(channels.lock().unwrap().cmd.is_some());
+    }
+
+    #[test]
+    fn motion_flood_reserves_capacity_for_ordered_key_releases() {
+        use removent_proto::{KeyKind, KeyModifiers, MouseKind};
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let key = |kind| ControlMsg::KeyEvent {
+            vk_code: 0,
+            modifiers: KeyModifiers::empty(),
+            kind,
+            unicode: None,
+        };
+        enqueue_input(&tx, key(KeyKind::Down)).unwrap();
+        for _ in 0..1000 {
+            enqueue_input(
+                &tx,
+                ControlMsg::MouseEvent {
+                    display_id: 0,
+                    x_px: 1.,
+                    y_px: 1.,
+                    buttons: 0,
+                    kind: MouseKind::Moved,
+                },
+            )
+            .unwrap();
+        }
+        enqueue_input(&tx, key(KeyKind::Up)).unwrap();
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            ControlMsg::KeyEvent {
+                kind: KeyKind::Down,
+                ..
+            }
+        ));
+        while let Ok(msg) = rx.try_recv() {
+            if matches!(
+                msg,
+                ControlMsg::KeyEvent {
+                    kind: KeyKind::Up,
+                    ..
+                }
+            ) {
+                assert!(rx.try_recv().is_err());
+                return;
+            }
+        }
+        panic!("key release was lost");
+    }
+
+    #[test]
+    fn transition_overflow_and_closed_channel_are_reported() {
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        let release = || ControlMsg::KeyEvent {
+            vk_code: 0,
+            modifiers: removent_proto::KeyModifiers::empty(),
+            kind: removent_proto::KeyKind::Up,
+            unicode: None,
+        };
+        enqueue_input(&tx, release()).unwrap();
+        assert!(matches!(
+            enqueue_input(&tx, release()),
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_))
+        ));
+        drop(rx);
+        assert!(matches!(
+            enqueue_input(&tx, release()),
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_))
+        ));
+    }
+
+    #[test]
+    fn cancellation_invalidates_queued_ready_pin_and_failure_events() {
+        let channels = Arc::new(Mutex::new(ClientChannels::default()));
+        let (events, rx) = std::sync::mpsc::channel();
+        let old = attempt(&channels, &events);
+        let (cmd, _) = tokio::sync::mpsc::channel(1);
+        let frames = old.publish(cmd, "RDP".into()).unwrap();
+        let (tx, _) = tokio::sync::oneshot::channel();
+        events
+            .send(UiEvent::ClientNeedsPin {
+                generation: old.generation,
+                tx,
+            })
+            .unwrap();
+        old.finish(Some("old failure".into()));
+
+        let cancelled = channels.lock().unwrap().invalidate();
+        assert!(frames.is_closed());
+        let queued: Vec<_> = rx.try_iter().collect();
+        assert_eq!(queued.len(), 3);
+        assert!(
+            queued
+                .iter()
+                .all(|event| !event.belongs_to_client(cancelled))
+        );
+        assert!(UiEvent::Notice("daemon notice".into()).belongs_to_client(cancelled));
+    }
+
+    #[test]
+    fn cancelled_task_cannot_publish_or_clear_replacement_channels() {
+        let channels = Arc::new(Mutex::new(ClientChannels::default()));
+        let (events, rx) = std::sync::mpsc::channel();
+        let old = attempt(&channels, &events);
+        let current = attempt(&channels, &events);
+        let (cmd, _) = tokio::sync::mpsc::channel(1);
+        let current_frames = current.publish(cmd.clone(), "RDP".into()).unwrap();
+        assert!(old.publish(cmd.clone(), "VNC".into()).is_err());
+        assert!(old.resume(cmd.clone()).is_err());
+        old.finish(Some("cancelled task failed".into()));
+        assert!(!current_frames.is_closed());
+        assert!(
+            channels
+                .lock()
+                .unwrap()
+                .cmd
+                .as_ref()
+                .unwrap()
+                .same_channel(&cmd)
+        );
+        assert_eq!(rx.try_iter().count(), 1);
+        current.finish(None);
+        assert!(channels.lock().unwrap().cmd.is_none());
+        assert!(rx.try_recv().unwrap().belongs_to_client(current.generation));
+    }
 }

@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+removent-core = { workspace = true }
 screencapturekit = "0.3"
 core-media-rs = "0.3"
 core-foundation = "0.10"

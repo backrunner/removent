@@ -28,3 +28,4 @@ pub use settings::{AdmissionMode, Language, QualityPreset, Settings, Theme};
 /// Application metadata.
 pub const APP_NAME: &str = "Removent";
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub mod latest;

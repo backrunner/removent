@@ -1,43 +1,51 @@
 name: CI
-
 on:
   push:
     branches: [main]
   pull_request:
-
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 env:
   CARGO_TERM_COLOR: always
-
+  MACOSX_DEPLOYMENT_TARGET: '13.0'
 jobs:
   check:
-    runs-on: macos-14
+    runs-on: macos-15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-      - name: rustfmt
-        run: cargo fmt --all --check
-      - name: clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: tests
-        run: cargo test --workspace
-
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: cargo fmt --all --check
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo test --locked --workspace -- --test-threads=1
+      - run: python3 scripts/gen_latest.py --self-test
+      - run: for script in scripts/*.sh; do bash -n "$script" || exit; done
+      - name: Check installer
+        run: xcrun swiftc -typecheck -target arm64-apple-macosx13.0 scripts/launcher.swift
   build:
     needs: check
-    runs-on: macos-14
+    runs-on: macos-15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-      - name: Build release
-        run: cargo build --release -p removent-app
-      - name: Package app bundle
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Package development bundle
         run: bash scripts/package.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: Removent-macos
+          name: Removent-development-not-notarized
           path: dist/*.zip
+          retention-days: 7

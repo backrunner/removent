@@ -8,13 +8,14 @@ Computes the artifact's sha256 and writes latest.json to stdout. When an
 Ed25519 private key is available (--key or UPDATE_SIGNING_KEY_FILE), the
 payload "{version}\n{url}\n{sha256}\n{min_compatible_proto}" (UTF-8, no
 trailing newline) is signed via `openssl pkeyutl -sign -rawin` and the hex
-signature is stored in the `signature` field. Without a key the field is
-left empty (development builds only) and a warning goes to stderr.
+signature is stored in the `signature` field. The release CLI requires a matching signing key and refuses unsigned manifests.
 """
 import argparse
 import hashlib
 import json
 import os
+import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -143,11 +144,25 @@ def self_test() -> int:
     return 0 if failures == 0 else 1
 
 
+def check_release_key(key_path: str) -> None:
+    public = subprocess.run(['openssl', 'pkey', '-in', key_path, '-pubout', '-outform', 'DER'],
+                            capture_output=True, check=True).stdout
+    # RFC 8410 SubjectPublicKeyInfo header for Ed25519, then exactly 32 bytes.
+    if len(public) != 44 or public[:12].hex() != '302a300506032b6570032100':
+        raise ValueError('Update key must be Ed25519')
+    source = (pathlib.Path(__file__).resolve().parent.parent / 'crates/app/src/updater.rs').read_text()
+    expected = re.search(r'RELEASE_PUBLIC_KEY_HEX: &str =\s*"([0-9a-f]{64})"', source).group(1)
+    if public[12:].hex() != expected:
+        raise ValueError('Update signing key does not match the public key compiled into the app')
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("version", nargs="?")
     ap.add_argument("zip_url", nargs="?")
     ap.add_argument("--notes", default="")
+    ap.add_argument("--notes-file")
+    ap.add_argument("--check-key", metavar="PEM")
     ap.add_argument("--file", default=None,
                     help="local artifact path (for sha256 before upload)")
     ap.add_argument("--min-proto", type=int, default=1,
@@ -160,6 +175,10 @@ def main() -> int:
 
     if args.self_test:
         return self_test()
+    if args.check_key:
+        check_release_key(args.check_key)
+        print("Update signing key matches the compiled public key")
+        return 0
 
     if not args.version or not args.zip_url:
         ap.error("version and zip_url are required (unless --self-test)")
@@ -169,7 +188,11 @@ def main() -> int:
         print("error: signing key not found: %s" % key, file=sys.stderr)
         return 1
 
-    manifest = build_manifest(args.version, args.zip_url, args.notes,
+    if not key:
+        ap.error("a signing key is required for release manifests")
+    check_release_key(key)
+    notes = pathlib.Path(args.notes_file).read_text() if args.notes_file else args.notes
+    manifest = build_manifest(args.version, args.zip_url, notes,
                               args.min_proto, args.file, key)
     json.dump(manifest, sys.stdout, ensure_ascii=False, indent=2)
     print()

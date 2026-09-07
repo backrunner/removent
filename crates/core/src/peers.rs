@@ -30,7 +30,8 @@ impl PeersStore {
         let path = paths.peers_file();
         let peers: Vec<PeerRecord> = match std::fs::read_to_string(&path) {
             Ok(txt) => serde_json::from_str(&txt)?,
-            Err(_) => Vec::new(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => return Err(e.into()),
         };
         Ok(Self {
             peers,
@@ -55,23 +56,28 @@ impl PeersStore {
     }
 
     pub fn upsert(&mut self, record: PeerRecord) -> Result<()> {
-        match self
+        let mut next = self.clone();
+        match next
             .peers
             .iter_mut()
             .find(|p| p.fingerprint == record.fingerprint)
         {
             Some(existing) => *existing = record,
-            None => self.peers.push(record),
+            None => next.peers.push(record),
         }
-        self.flush()
+        next.flush()?;
+        self.peers = next.peers;
+        Ok(())
     }
 
     pub fn remove(&mut self, fp_hex: &str) -> Result<bool> {
         let before = self.peers.len();
-        self.peers.retain(|p| p.fingerprint != fp_hex);
-        let removed = self.peers.len() != before;
+        let mut next = self.clone();
+        next.peers.retain(|p| p.fingerprint != fp_hex);
+        let removed = next.peers.len() != before;
         if removed {
-            self.flush()?;
+            next.flush()?;
+            self.peers = next.peers;
         }
         Ok(removed)
     }
@@ -118,6 +124,27 @@ mod tests {
             added_at_unix: 1,
             last_connected_unix: 2,
         }
+    }
+
+    #[test]
+    fn failed_save_does_not_change_in_memory_trust() {
+        let dir = tempdir().unwrap();
+        let paths = DataPaths {
+            root: dir.path().to_owned(),
+        };
+        paths.ensure_layout().unwrap();
+        let mut store = PeersStore::load(&paths).unwrap();
+        let fp = "aa".repeat(32);
+        store.upsert(rec(&fp, true)).unwrap();
+        std::fs::remove_file(paths.peers_file()).unwrap();
+        std::fs::create_dir(paths.peers_file()).unwrap();
+        assert!(store.upsert(rec(&fp, false)).is_err());
+        assert!(store.by_fingerprint(&fp).unwrap().trusted);
+        assert!(store.upsert(rec(&"bb".repeat(32), true)).is_err());
+        assert_eq!(store.all().len(), 1);
+        assert!(store.remove(&fp).is_err());
+        assert!(store.by_fingerprint(&fp).is_some());
+        assert!(PeersStore::load(&paths).is_err());
     }
 
     #[test]

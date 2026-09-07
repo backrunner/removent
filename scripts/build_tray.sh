@@ -5,12 +5,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-if ! command -v swift >/dev/null 2>&1; then
-    export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}"
-    SWIFT="$(xcrun -f swift)"
-else
-    SWIFT="$(command -v swift)"
-fi
+source scripts/macos_env.sh
+SWIFT=$(xcrun -f swift)
+BASE_VERSION=$(python3 scripts/release_meta.py base)
+BUILD_VERSION=$(python3 scripts/release_meta.py build)
 
 echo "==> swift build (release)"
 "$SWIFT" build -c release --package-path tray
@@ -31,7 +29,7 @@ else
     echo "WARNING: $RES_BUNDLE not found; tray UI strings will fall back to keys" >&2
 fi
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -54,9 +52,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>${BASE_VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>${BUILD_VERSION}</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>

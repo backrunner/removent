@@ -13,3 +13,7 @@
 
 # macOS noise
 .DS_Store
+
+# Local release tooling
+/.venv-release/
+__pycache__/

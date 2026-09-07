@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="shell" x1="180" y1="100" x2="844" y2="940" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#263958"/><stop offset=".48" stop-color="#182942"/><stop offset="1" stop-color="#0D192E"/>
+    </linearGradient>
+    <linearGradient id="bezel" x1="270" y1="255" x2="730" y2="694" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C9F0FF"/><stop offset=".34" stop-color="#8FBDEF"/><stop offset=".7" stop-color="#7190DE"/><stop offset="1" stop-color="#A2A6EC"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="246" y1="291" x2="777" y2="637" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#397CDF"/><stop offset=".52" stop-color="#365BC2"/><stop offset="1" stop-color="#3D4199"/>
+    </linearGradient>
+    <linearGradient id="stand" x1="457" y1="674" x2="562" y2="774" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#55749E"/><stop offset=".44" stop-color="#90B1DC"/><stop offset="1" stop-color="#BDD8F3"/>
+    </linearGradient>
+    <linearGradient id="letter" x1="500" y1="280" x2="500" y2="780" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/><stop offset="1" stop-color="#DAE9FF"/>
+    </linearGradient>
+    <path id="r" fill-rule="evenodd" d="M318 744V317C318 291 339 270 365 270H530C659 270 738 333 738 440C738 522 693 581 619 607L747 749C758 761 749 779 734 779H630C620 779 611 775 604 767L447 587V753C447 767 435 779 421 779H353C334 779 318 763 318 744ZM447 384V491H526C579 491 607 474 607 438C607 402 579 384 526 384Z"/>
+  </defs>
+  <g id="tile">
+    <rect x="100" y="108" width="824" height="824" rx="184" fill="#081225"/>
+    <rect x="100" y="96" width="824" height="824" rx="184" fill="url(#shell)"/>
+    <rect x="102" y="98" width="820" height="820" rx="182" fill="none" stroke="#CEE1FF" stroke-opacity=".13" stroke-width="2"/>
+  </g>
+  <g id="symbol">
+    <!-- Quiet metal pedestal, optically centered under the screen. -->
+    <path d="M480 654H544L550 739H474Z" fill="url(#stand)"/>
+    <path d="M426 740H598C613 740 626 751 630 766H394C398 751 411 740 426 740Z" fill="url(#stand)"/>
+    <path d="M397 766H627" stroke="#6985B0" stroke-width="7" stroke-linecap="round"/>
+    <!-- A single display, without cursor, waves or other pictograms. -->
+    <rect x="210" y="274" width="604" height="400" rx="54" fill="#071327"/>
+    <rect x="210" y="264" width="604" height="400" rx="54" fill="#142943" stroke="url(#bezel)" stroke-width="16"/>
+    <rect x="238" y="292" width="548" height="344" rx="28" fill="url(#screen)"/>
+    <rect x="239" y="293" width="546" height="342" rx="27" fill="none" stroke="#C2DCFF" stroke-opacity=".18" stroke-width="2"/>
+    <!-- Outlined geometry, so the R is independent of installed fonts. -->
+    <use href="#r" transform="translate(280 242) scale(.43)" fill="#162F77" opacity=".3"/>
+    <use href="#r" transform="translate(280 236) scale(.43)" fill="url(#letter)"/>
+  </g>
+</svg>

@@ -29,13 +29,13 @@ pub struct Palette {
 pub fn palette(dark: bool) -> Palette {
     if dark {
         Palette {
-            background: c(0x1E1E20),
-            surface: c(0x2A2A2E),
+            background: c(0x1C1D1F),
+            surface: c(0x26272A),
             overlay: ca(0x2A2A2ECC),
             border: ca(0xFFFFFF14),
             text_primary: c(0xF5F5F7),
-            text_secondary: ca(0xEBEBF599),
-            accent: c(0x0A84FF),
+            text_secondary: c(0xACACB5),
+            accent: c(0x528CF5),
             success: c(0x30D158),
             warning: c(0xFF9F0A),
             danger: c(0xFF453A),
@@ -47,8 +47,8 @@ pub fn palette(dark: bool) -> Palette {
             overlay: ca(0xFFFFFFF2),
             border: ca(0x00000012),
             text_primary: c(0x1D1D1F),
-            text_secondary: ca(0x3C3C4399),
-            accent: c(0x007AFF),
+            text_secondary: c(0x686870),
+            accent: c(0x2563D8),
             // In light mode status colors also serve as small text (status bar/tags); the stock
             // system colors lack contrast (2.2:1), so use darkened shades to reach ≥4.5:1 (WCAG AA).
             success: c(0x1F7A38),
@@ -81,9 +81,11 @@ pub fn apply(dark: bool, cx: &mut App) {
     t.secondary_foreground = p.text_primary;
     t.accent = p.accent;
     t.accent_foreground = c(0xFFFFFF);
-    t.primary = p.accent;
-    t.primary_hover = if dark { c(0x3398FF) } else { c(0x0066D6) };
-    t.primary_active = t.primary_hover;
+    // Filled buttons need stronger contrast for their small white labels than
+    // the accent used by focus rings and switches.
+    t.primary = if dark { c(0x3067C9) } else { p.accent };
+    t.primary_hover = if dark { c(0x3972D3) } else { c(0x2057C2) };
+    t.primary_active = if dark { c(0x285DB8) } else { c(0x1B4EAE) };
     t.primary_foreground = c(0xFFFFFF);
     t.danger = p.danger;
     t.danger_hover = p.danger;
@@ -109,12 +111,12 @@ pub fn apply(dark: bool, cx: &mut App) {
     t.ring = p.accent;
     t.selection = if dark { ca(0x0A84FF44) } else { ca(0x007AFF33) };
     t.list = p.background;
-    t.list_hover = if dark { c(0x2A2A2E) } else { c(0xF0F0F4) };
+    t.list_hover = if dark { c(0x2B2D31) } else { c(0xEAECEF) };
     t.list_active = if dark { c(0x3A3A40) } else { c(0xE4E4E9) };
     t.list_active_border = p.border;
     t.list_even = p.background;
     t.list_head = p.surface;
-    t.sidebar = p.surface;
+    t.sidebar = if dark { c(0x222326) } else { c(0xF3F3F5) };
     t.sidebar_foreground = p.text_primary;
     t.sidebar_border = p.border;
     t.sidebar_accent = if dark { c(0x323236) } else { c(0xEBEBEF) };
@@ -162,7 +164,8 @@ pub fn apply(dark: bool, cx: &mut App) {
     t.bullish = p.success;
     t.bearish = p.danger;
 
-    theme.radius = px(8.);
-    theme.radius_lg = px(12.);
+    theme.shadow = false;
+    theme.radius = px(6.);
+    theme.radius_lg = px(10.);
     theme.font_size = px(13.);
 }

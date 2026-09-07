@@ -13,12 +13,14 @@ use anyhow::Result;
 use gpui::{AppContext, KeyBinding};
 use gpui_component::TitleBar;
 use removent_core::{Theme as ThemePref, logging, paths::DataPaths};
-use ui::home::HomeEscape;
+use ui::connection::{ConnectionTab, ConnectionTabPrev};
+use ui::home::{HomeConnect, HomeEscape, HomeSearch, HomeSettings};
 use ui::viewer::{ViewerEscape, ViewerToggleFullscreen};
 
 rust_i18n::i18n!("locales");
 
 fn main() -> Result<()> {
+    let started = std::time::Instant::now();
     let paths = DataPaths::resolve();
     logging::init_logging(&paths);
     logging::install_panic_hook(&paths);
@@ -26,17 +28,15 @@ fn main() -> Result<()> {
     let settings = removent_core::Settings::load(&paths).unwrap_or_default();
     rust_i18n::set_locale(removent_core::resolve_locale(settings.language));
 
-    // The tray starts with the main app (skipped if already running; the main app
-    // exiting does not affect the tray).
-    autostart_tray();
-
     // Engine runtime (separate thread; the UI interacts via channels).
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(4)
         .enable_all()
         .build()?;
 
-    let engine = engine::Engine::new(rt, paths.clone());
+    let engine = engine::Engine::new(rt, paths.clone(), settings);
+    // Tray process lookup/launch must not delay the first window.
+    engine.rt.spawn_blocking(autostart_tray);
 
     // mDNS discovery is resident: device table changes → UiEvent.
     {
@@ -161,9 +161,14 @@ fn main() -> Result<()> {
             }
 
             cx.bind_keys([
-                KeyBinding::new("escape", ViewerEscape, Some("Viewer")),
-                KeyBinding::new("cmd-f", ViewerToggleFullscreen, Some("Viewer")),
+                KeyBinding::new("tab", ConnectionTab, Some("ConnectionDialog")),
+                KeyBinding::new("shift-tab", ConnectionTabPrev, Some("ConnectionDialog")),
+                KeyBinding::new("ctrl-cmd-escape", ViewerEscape, Some("Viewer")),
+                KeyBinding::new("ctrl-cmd-f", ViewerToggleFullscreen, Some("Viewer")),
                 KeyBinding::new("escape", HomeEscape, Some("Home")),
+                KeyBinding::new("cmd-,", HomeSettings, Some("Home")),
+                KeyBinding::new("cmd-l", HomeConnect, Some("Home")),
+                KeyBinding::new("cmd-f", HomeSearch, Some("Home")),
             ]);
 
             cx.open_window(
@@ -189,6 +194,14 @@ fn main() -> Result<()> {
                     // Note: the engine itself must be moved (events_rx can only be taken
                     // once; a clone holds an empty one).
                     let view = cx.new(|cx| ui::HomeView::new(engine_for_window, window, cx));
+                    window.on_next_frame(move |_, _| {
+                        // Preserve rollback until the new app has rendered a frame.
+                        updater::cleanup_stale_backup();
+                        tracing::info!(
+                            elapsed_ms = started.elapsed().as_millis(),
+                            "home first frame"
+                        );
+                    });
                     // gpui-component's Input/Dialog etc. require the window root to be Root.
                     cx.new(|cx| gpui_component::Root::new(gpui::AnyView::from(view), window, cx))
                 },

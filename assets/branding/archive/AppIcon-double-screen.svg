@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="base" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#16344E"/><stop offset="1" stop-color="#0B1425"/></linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#67E5CC"/><stop offset="1" stop-color="#299DD5"/></linearGradient>
+    <linearGradient id="front" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#F1FFFD"/><stop offset="1" stop-color="#BFE6EF"/></linearGradient>
+  </defs>
+  <rect x="96" y="108" width="832" height="820" rx="190" fill="#071122" opacity=".16"/>
+  <rect x="96" y="96" width="832" height="832" rx="190" fill="url(#base)"/>
+  <rect x="108" y="108" width="808" height="808" rx="180" fill="none" stroke="#A0DBEE" stroke-opacity=".12" stroke-width="2"/>
+  <rect x="230" y="270" width="404" height="296" rx="52" fill="#183B50" stroke="url(#glass)" stroke-width="30"/>
+  <rect x="376" y="410" width="404" height="296" rx="52" fill="#0E2439" stroke="url(#front)" stroke-width="30"/>
+  <path d="M464 561h220m-57-57 57 57-57 57" fill="none" stroke="url(#glass)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M547 719v43" fill="none" stroke="url(#front)" stroke-width="24" stroke-linecap="round"/>
+  <path d="M502 762h90" fill="none" stroke="url(#front)" stroke-width="24" stroke-linecap="round"/>
+</svg>

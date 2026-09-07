@@ -62,7 +62,7 @@ pub(super) async fn write_framebuffer_request(
 
 pub(super) async fn read_frames(
     mut stream: OwnedReadHalf,
-    frame_tx: mpsc::Sender<DecodedFrame>,
+    frame_tx: removent_core::latest::Sender<DecodedFrame>,
     signal_tx: mpsc::Sender<FrameSignal>,
     dimensions: Arc<RwLock<FrameSize>>,
     format: PixelFormat,
@@ -102,7 +102,7 @@ pub(super) async fn read_frames(
                 height: size.height,
                 pts_us: started.elapsed().as_micros() as i64,
             };
-            let _ = frame_tx.try_send(frame);
+            let _ = frame_tx.send(frame);
             if signal_tx.send(FrameSignal::Updated).await.is_err() {
                 break;
             }

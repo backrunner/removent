@@ -535,6 +535,7 @@ pub struct VideoEncoder {
     height: usize,
     param_sets: Option<Vec<Vec<u8>>>,
     force_keyframe_pending: bool,
+    surface: Option<IOSurface>,
 }
 
 impl VideoEncoder {
@@ -570,6 +571,7 @@ impl VideoEncoder {
             height,
             param_sets: None,
             force_keyframe_pending: false,
+            surface: None,
         })
     }
 
@@ -634,29 +636,50 @@ impl VideoEncoder {
         }
         let force_keyframe = std::mem::take(&mut self.force_keyframe_pending);
 
-        let surface = IOSurface::create(self.width, self.height, BGRA_FOURCC, 4)
-            .ok_or_else(|| VideoError::Surface("create failed".into()))?;
+        // encode waits for CompleteFrames, so the surface can be reused once
+        // each call returns instead of allocating a new IOSurface every frame.
+        if self.surface.is_none() {
+            self.surface = Some(
+                IOSurface::create(self.width, self.height, BGRA_FOURCC, 4)
+                    .ok_or_else(|| VideoError::Surface("create failed".into()))?,
+            );
+        }
+        let surface = self.surface.as_ref().expect("encoder surface");
         {
             let mut guard = surface
                 .lock_read_write()
                 .map_err(|e| VideoError::Surface(format!("lock failed: {e}")))?;
+            let stride = guard.bytes_per_row();
+            if stride < bpr_expected {
+                return Err(VideoError::Surface("row stride smaller than input".into()));
+            }
             // SAFETY: base_address is valid while locked; sizes already checked.
             let dst = guard
                 .base_address_mut()
                 .ok_or_else(|| VideoError::Surface("no base address".into()))?;
             // SAFETY: both memory regions are owned by this function and lengths match.
             unsafe {
-                std::ptr::copy_nonoverlapping(bgra.as_ptr(), dst, bgra.len());
+                for row in 0..self.height {
+                    std::ptr::copy_nonoverlapping(
+                        bgra.as_ptr().add(row * bpr_expected),
+                        dst.add(row * stride),
+                        bpr_expected,
+                    );
+                }
             }
         }
 
-        let Some(raw) = encode_maybe_forced(force_keyframe, |force| {
+        let encoded = encode_maybe_forced(force_keyframe, |force| {
             self.session
                 .as_ref()
                 .expect("VT session")
-                .encode(&surface, pts_us, force)
-        })?
-        else {
+                .encode(surface, pts_us, force)
+        });
+        if encoded.is_err() {
+            // An errored completion may still retain this surface in VT.
+            self.surface = None;
+        }
+        let Some(raw) = encoded? else {
             return Ok(Vec::new());
         };
 
@@ -785,7 +808,7 @@ pub struct VideoDecoder {
     /// effectively single-task, so contention is nil.
     rx: std::sync::Mutex<mpsc::Receiver<DecodedBgra>>,
     av1: std::sync::Mutex<Option<Av1Decoder>>,
-    av1_tx: Option<mpsc::Sender<DecodedBgra>>,
+    output: Arc<dyn Fn(DecodedBgra) + Send + Sync>,
     hevc: bool,
     width: usize,
     height: usize,
@@ -803,17 +826,35 @@ impl VideoDecoder {
         height: usize,
         param_sets: &[Vec<u8>],
     ) -> Result<Self, VideoError> {
+        let (tx, rx) = mpsc::channel();
+        let mut decoder = Self::with_output(codec, width, height, param_sets, move |frame| {
+            let _ = tx.send(frame);
+        })?;
+        decoder.rx = std::sync::Mutex::new(rx);
+        Ok(decoder)
+    }
+
+    /// Live playback output. The callback must not block and should replace
+    /// unread frames; this bypasses the lossless queue used by offline callers.
+    pub fn with_output(
+        codec: removent_proto::CodecId,
+        width: usize,
+        height: usize,
+        param_sets: &[Vec<u8>],
+        output: impl Fn(DecodedBgra) + Send + Sync + 'static,
+    ) -> Result<Self, VideoError> {
         if codec != removent_proto::CodecId::Av1 && param_sets.is_empty() {
             return Err(VideoError::NoParameterSets);
         }
-        let (tx, rx) = mpsc::channel::<DecodedBgra>();
+        let (_, rx) = mpsc::channel();
+        let output: Arc<dyn Fn(DecodedBgra) + Send + Sync> = Arc::new(output);
         if codec == removent_proto::CodecId::Av1 {
             return Ok(Self {
                 _format_desc: None,
                 session: None,
                 rx: std::sync::Mutex::new(rx),
                 av1: std::sync::Mutex::new(Some(Av1Decoder::new(width, height)?)),
-                av1_tx: Some(tx),
+                output,
                 hevc: false,
                 width,
                 height,
@@ -851,6 +892,7 @@ impl VideoDecoder {
 
         let format_desc = apple_cf::cm::CMFormatDescription::from_raw(desc.cast())
             .expect("non-null format description");
+        let callback = output.clone();
         let session = CompatibleDecompressionSession::new(&format_desc, move |frame| {
             let Some(pb) = frame.image_buffer else { return };
             if frame.status != 0 {
@@ -860,7 +902,7 @@ impl VideoDecoder {
             // presentation_time is (value, timescale); normalized to microseconds.
             let pts_us = scale_to_us(frame.presentation_time);
             if let Some(bgra) = pixel_buffer_to_bgra(&pb) {
-                let _ = tx.send(DecodedBgra { data: bgra, pts_us });
+                callback(DecodedBgra { data: bgra, pts_us });
             }
         })?;
         Ok(Self {
@@ -868,7 +910,7 @@ impl VideoDecoder {
             session: Some(session),
             rx: std::sync::Mutex::new(rx),
             av1: std::sync::Mutex::new(None),
-            av1_tx: None,
+            output,
             hevc,
             width,
             height,
@@ -891,9 +933,8 @@ impl VideoDecoder {
             return Ok(());
         };
         let frames = decoder.flush()?;
-        let tx = self.av1_tx.as_ref().expect("AV1 output sender");
         for frame in frames {
-            let _ = tx.send(frame);
+            (self.output)(frame);
         }
         Ok(())
     }
@@ -909,9 +950,8 @@ impl VideoDecoder {
             .as_mut()
         {
             let frames = decoder.decode(annexb, pts_us)?;
-            let tx = self.av1_tx.as_ref().expect("AV1 output sender").clone();
             for frame in frames {
-                let _ = tx.send(frame);
+                (self.output)(frame);
             }
             return Ok(());
         }

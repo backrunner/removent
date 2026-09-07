@@ -38,6 +38,31 @@ pub struct DaemonState {
     pub shutdown: CancellationToken,
 }
 
+/// Also resolves the prompt when an outer timeout or service shutdown drops
+/// request_admission before its own timeout can run.
+struct PendingAdmission<'a> {
+    state: &'a DaemonState,
+    request_id: u64,
+}
+
+impl Drop for PendingAdmission<'_> {
+    fn drop(&mut self) {
+        if self
+            .state
+            .pending_admissions
+            .lock()
+            .unwrap()
+            .remove(&self.request_id)
+            .is_some()
+        {
+            self.state.broadcast(IpcEvent::AdmissionResolved {
+                request_id: self.request_id,
+                allow: false,
+            });
+        }
+    }
+}
+
 impl DaemonState {
     pub fn new(paths: DataPaths, settings: Settings, fp_short: String) -> Self {
         let enabled = settings.host_enabled;
@@ -144,32 +169,19 @@ impl DaemonState {
             .lock()
             .unwrap()
             .insert(request_id, tx);
+        let _pending = PendingAdmission {
+            state: self,
+            request_id,
+        };
         self.broadcast(IpcEvent::AdmissionRequest {
             request_id,
             peer_name,
             peer_fp16,
         });
-        let allowed = match tokio::time::timeout(self.admission_timeout, rx).await {
+        match tokio::time::timeout(self.admission_timeout, rx).await {
             Ok(Ok(allow)) => allow,
             _ => false,
-        };
-        // Timeout path: clean up the placeholder; a late reply will get "unknown
-        // request_id". If the placeholder is still present, reply_admission never
-        // ran — broadcast resolved(false) so management ends (app dialog / tray
-        // fallback) can close their UI in time.
-        if self
-            .pending_admissions
-            .lock()
-            .unwrap()
-            .remove(&request_id)
-            .is_some()
-        {
-            self.broadcast(IpcEvent::AdmissionResolved {
-                request_id,
-                allow: false,
-            });
         }
-        allowed
     }
 
     /// Deliver a management-end AdmissionReply; returns whether the pending request existed.

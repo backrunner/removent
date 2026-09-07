@@ -207,3 +207,55 @@ fn opus_conceal_produces_output() {
     let plc = dec.conceal().expect("conceal");
     assert_eq!(plc.len(), 960);
 }
+
+/// Narrow even widths exercise IOSurface row alignment as well as reuse.
+#[test]
+fn reused_surface_preserves_padded_rows_and_callback_output() {
+    let (w, h) = (318, 242);
+    let mut encoder = VideoEncoder::new(CodecId::H264, w, h, 4000, 30).unwrap();
+    let mut frame = vec![0u8; w * h * 4];
+    for pixel in frame.as_chunks_mut::<4>().0 {
+        pixel.copy_from_slice(&[20, 40, 220, 255]);
+    }
+    let encoded = encoder.encode_bgra(&frame, 0).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let decoder = VideoDecoder::with_output(
+        CodecId::H264,
+        w,
+        h,
+        encoder.parameter_sets().unwrap(),
+        move |frame| {
+            tx.send(frame).unwrap();
+        },
+    )
+    .unwrap();
+    for packet in encoded {
+        decoder.decode_annexb(&packet.data, packet.pts_us).unwrap();
+    }
+    let first = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(first.data.len(), w * h * 4);
+    for pixel in first.data.as_chunks::<4>().0 {
+        assert!(
+            pixel[2] > 180 && pixel[0] < 60,
+            "red pixels must retain BGRA order across row padding"
+        );
+    }
+    for pixel in frame.as_chunks_mut::<4>().0 {
+        pixel.copy_from_slice(&[220, 40, 20, 255]);
+    }
+    for packet in encoder.encode_bgra(&frame, 33_333).unwrap() {
+        decoder.decode_annexb(&packet.data, packet.pts_us).unwrap();
+    }
+    let second = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    for pixel in second.data.as_chunks::<4>().0 {
+        assert!(
+            pixel[0] > 180 && pixel[2] < 60,
+            "reused surface must show the new blue frame"
+        );
+    }
+    assert_eq!(second.pts_us, 33_333);
+    assert!(
+        decoder.try_recv_decoded().is_none(),
+        "callback mode must not also queue frames"
+    );
+}

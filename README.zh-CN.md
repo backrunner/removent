@@ -16,13 +16,14 @@ Mac —— 无中转服务器、无账号，流量不出局域网。
 ## 系统要求
 
 - macOS 13.0 或更高版本，Apple Silicon（arm64）
-- 两台 Mac 处于同一局域网（通过 mDNS 自动发现）
+- 使用 Removent 原生协议时，两台 Mac 处于同一局域网（通过 mDNS 自动发现）
+- 使用兼容连接时，远端提供可访问的 VNC 或 RDP 服务
 
 ## 快速开始
 
 ### 方式一：下载 DMG
 
-从 [最新 release](https://github.com/backrunner/removent/releases/latest) 下载
+从 [最新 release](https://github.com/backrunner/removent/releases) 下载
 `Removent-<版本>-macos-arm64.dmg`，打开后把 **Removent.app** 拖进「应用程序」。安装包
 已经过 Developer ID 签名和 Apple 公证，打开时不会有 Gatekeeper 警告。
 
@@ -50,24 +51,43 @@ macOS 会请求两项权限 —— 共享本机时都必需：
 且可信的局域网。VNC 兼容层提供 Raw framebuffer 和键鼠输入，不提供 Removent 的配对、剪贴板、
 音频、自适应编码等 RVP 功能。
 
-在 Removent 主控端手动输入 `IP:5900` 可连接外部 VNC/屏幕共享服务器。标准 VNC 服务使用 VNC
-密码；宣告 RFB `003.889` 的 Apple Remote Desktop / macOS「屏幕共享」服务使用设置中的 macOS
-用户名和密码，并执行 Apple type-30/type-35 Diffie-Hellman/AES 认证。
+在 Removent 主控端点击「添加连接」，先选择 VNC，再填写地址、端口（默认 `5900`）和本次连接
+的凭据。标准 VNC 服务只需密码；Apple Remote Desktop / macOS「屏幕共享」使用 macOS 用户名
+和密码，并执行 Apple type-30/type-35 Diffie-Hellman/AES 认证。地址支持主机名、IPv4 和 IPv6，
+端口独立填写，协议不再由端口号推断。
+
+### RDP 兼容连接
+
+「添加连接」的第一级弹窗可选择 Removent、VNC 或 RDP，第二级填写连接参数；返回按钮或 Esc
+返回协议选择，连接期间可取消。RDP 默认端口为 `3389`，填写远端用户名、密码和可选域名后，
+通过 IronRDP 在应用内查看和控制远程桌面，支持 TLS、NLA/CredSSP、画面、键盘及鼠标。
+
+RDP 默认验证服务器证书。自签名证书可导入系统信任，或在本次连接中显式开启「允许不受信任的
+服务器证书」。连接弹窗中的密码不写入设置文件。当前 RDP 兼容范围为主控端连接；不提供 RDP
+被控服务、音频、剪贴板、文件重定向或自动重连。Windows 被控端需启用远程桌面并允许该账户登录。
 
 ## 从源码构建
 
-需要 stable Rust 工具链（1.85+）和带 Swift 的 Xcode 命令行工具。
+需要 stable Rust 工具链（1.89+，IronRDP 要求）和完整 Xcode（包含 Swift、Metal 工具链）。
 
 ```bash
 git clone https://github.com/backrunner/removent.git
 cd removent
 
-# 调试模式运行
-cargo run -p removent-app
+# 增量构建并启动开发版 app、daemon 和托盘
+scripts/dev.sh
+
+# 复用已有 debug 二进制快速重启
+scripts/dev.sh --no-build
 
 # 或打包 .app + zip 到 dist/（本地 ad-hoc 签名）
 scripts/package.sh
 ```
+
+开发脚本默认使用独立的 `userdata/dev`（可用 `REMOVENT_DATA_DIR` 覆盖），跳过定时更新
+检查；Ctrl-C 会停止本次启动的进程。`--no-tray` 跳过托盘，`--build-only` 只构建不启动，
+`--help` 查看选项。首次需要编译依赖，后续为增量构建。
+审查发现、验证和性能实测见 [review 报告](docs/review-2026-09-06.md)。
 
 测试：`cargo test --workspace`；托盘集成测试：`bash tray/Tests/run_integration_test.sh`。
 
@@ -135,3 +155,5 @@ Removent 在启动 30 秒后、之后每 24 小时从 GitHub Releases 拉取一�
 ## 开源协议
 
 [Apache-2.0](LICENSE)
+
+Beta 构建会检查后续 beta 和正式版；正式版只检查正式更新。发布与签名配置见 [发布指南](docs/release-pipeline.md)。

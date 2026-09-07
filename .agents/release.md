@@ -1,5 +1,7 @@
 # 发版渠道与自动更新（GitHub Releases 开源路线）
 
+历史设计记录（部分描述已过时）：当前实现与发布命令以 [发布指南](../docs/release-pipeline.md) 为准。
+
 版本：v1.0（2026-08-22） · 上游：[architecture.md §9](./architecture.md)
 
 ## 1. 渠道与产物

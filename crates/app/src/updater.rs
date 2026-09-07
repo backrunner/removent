@@ -8,7 +8,7 @@
 //! `UiEvent::UpdateStatus`.
 
 use crate::engine::UiEvent;
-use ed25519_dalek::{Verifier, VerifyingKey};
+use ed25519_dalek::VerifyingKey;
 use removent_core::{DataPaths, Settings};
 use rust_i18n::t;
 use serde::Deserialize;
@@ -21,15 +21,19 @@ use std::sync::{Arc, Mutex};
 pub const DEFAULT_MANIFEST_URL: &str =
     "https://github.com/backrunner/removent/releases/latest/download/latest.json";
 
+/// GitHub's latest endpoint excludes prereleases. Beta builds discover immutable
+/// per-release manifests through the releases API, including a later stable release.
+pub const BETA_RELEASES_URL: &str =
+    "https://api.github.com/repos/backrunner/removent/releases?per_page=100";
+
 /// Release-signing public key (Ed25519, hex). The private key only lives in the
 /// CI secrets of the release pipeline (release.md §2).
 const RELEASE_PUBLIC_KEY_HEX: &str =
     "2b51160721f9eee916944e4603e6540c628247e5284a79b099392f086a3def0c";
 
-/// Expected Apple Developer Team ID for the codesign check. Releases are not yet
-/// signed with a Developer ID certificate — fill in the Team ID once they are;
-/// `None` skips the TeamID comparison.
-const EXPECTED_TEAM_ID: Option<&str> = None;
+/// Developer ID team used for the official distribution. Never accept ad-hoc
+/// signatures or another developer's valid signature as an official update.
+const EXPECTED_TEAM_ID: &str = "PB8H83VL3Z";
 
 /// Update manifest contract (`latest.json`, shared with the release pipeline —
 /// field names must not change).
@@ -118,7 +122,11 @@ impl UpdateShared {
 pub fn manifest_endpoint(settings: &Settings) -> String {
     let custom = settings.update_endpoint.trim();
     if custom.is_empty() {
-        DEFAULT_MANIFEST_URL.to_string()
+        if parse_version(env!("CARGO_PKG_VERSION")).is_some_and(|v| !v.pre.is_empty()) {
+            BETA_RELEASES_URL.to_string()
+        } else {
+            DEFAULT_MANIFEST_URL.to_string()
+        }
     } else {
         custom.to_string()
     }
@@ -135,25 +143,48 @@ fn set_status(
 
 // ---- pure logic (unit-tested) ----
 
-/// Parse a three-segment numeric version ("1.2.3", optional leading "v").
-pub fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
-    let s = s.trim().trim_start_matches('v');
-    let mut parts = s.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    let patch = parts.next()?.parse().ok()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    Some((major, minor, patch))
+/// Strict SemVer including beta identifiers (beta.10 sorts after beta.2).
+pub fn parse_version(s: &str) -> Option<semver::Version> {
+    semver::Version::parse(s.trim().strip_prefix('v').unwrap_or(s.trim())).ok()
 }
 
-/// Semver-ish comparison: strictly newer three-segment version.
 pub fn is_newer(remote: &str, local: &str) -> bool {
     match (parse_version(remote), parse_version(local)) {
-        (Some(r), Some(l)) => r > l,
+        (Some(r), Some(l)) => r.cmp_precedence(&l).is_gt(),
         _ => false,
     }
+}
+
+#[derive(Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    draft: bool,
+    assets: Vec<GithubAsset>,
+}
+
+#[derive(Deserialize)]
+struct GithubAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+fn beta_manifest_url(body: &str) -> Result<Option<String>, String> {
+    let releases: Vec<GithubRelease> = serde_json::from_str(body)
+        .map_err(|e| t!("update.err.bad_manifest", err = e.to_string()).to_string())?;
+    Ok(releases
+        .into_iter()
+        .filter(|r| !r.draft)
+        .filter_map(|r| {
+            let version = parse_version(&r.tag_name)?;
+            // Beta users can graduate to stable; never opt them into alpha/nightly.
+            if !version.pre.is_empty() && !version.pre.as_str().starts_with("beta.") {
+                return None;
+            }
+            let asset = r.assets.into_iter().find(|a| a.name == "latest.json")?;
+            Some((version, asset.browser_download_url))
+        })
+        .max_by(|a, b| a.0.cmp_precedence(&b.0))
+        .map(|(_, url)| url))
 }
 
 /// Ed25519 signature payload: `"{version}\n{url}\n{sha256}\n{min_compatible_proto}"`
@@ -177,7 +208,7 @@ pub fn verify_manifest_signature(m: &UpdateManifest, key: &VerifyingKey) -> bool
         return false;
     };
     let sig = ed25519_dalek::Signature::from_bytes(&sig_arr);
-    key.verify(&signature_payload(m), &sig).is_ok()
+    key.verify_strict(&signature_payload(m), &sig).is_ok()
 }
 
 /// The compiled-in release verification key (None only on a corrupted constant).
@@ -199,7 +230,8 @@ pub fn run_check(
     events: std::sync::mpsc::Sender<UiEvent>,
 ) {
     {
-        let status = &shared.lock().unwrap().status;
+        let mut state = shared.lock().unwrap();
+        let status = &state.status;
         // Never interrupt in-flight work. A staged update (ReadyToInstall)
         // survives even a manual re-check — overwriting it would orphan the
         // staged bundle and force a re-download; scheduled checks also leave
@@ -210,8 +242,9 @@ pub fn run_check(
         {
             return;
         }
+        state.status = UpdateStatus::Checking;
+        let _ = events.send(UiEvent::UpdateStatus(UpdateStatus::Checking));
     }
-    set_status(&shared, &events, UpdateStatus::Checking);
     match fetch_and_validate(&endpoint) {
         Ok(Some(m)) => {
             let available = UpdateStatus::Available {
@@ -229,6 +262,14 @@ pub fn run_check(
 /// Fetch and validate the manifest; Ok(Some) = a newer compatible version exists.
 fn fetch_and_validate(endpoint: &str) -> Result<Option<UpdateManifest>, String> {
     let body = curl_get(endpoint)?;
+    let body = if endpoint == BETA_RELEASES_URL {
+        let Some(url) = beta_manifest_url(&body)? else {
+            return Ok(None);
+        };
+        curl_get(&url)?
+    } else {
+        body
+    };
     let m: UpdateManifest = serde_json::from_str(&body)
         .map_err(|e| t!("update.err.bad_manifest", err = e.to_string()).to_string())?;
     // Signature before anything else: a tampered or unsigned manifest is
@@ -236,6 +277,17 @@ fn fetch_and_validate(endpoint: &str) -> Result<Option<UpdateManifest>, String> 
     let key = release_verifying_key().ok_or_else(|| t!("update.err.signature").to_string())?;
     if !verify_manifest_signature(&m, &key) {
         return Err(t!("update.err.signature").to_string());
+    }
+    if parse_version(&m.version).is_none()
+        || !m.url.starts_with("https://")
+        || m.sha256.len() != 64
+        || hex::decode(&m.sha256).is_err()
+    {
+        return Err(t!(
+            "update.err.bad_manifest",
+            err = "invalid version, URL or digest"
+        )
+        .to_string());
     }
     // Protocol floor above ours: installing would break interconnection — tell
     // the user to upgrade both ends together instead of installing.
@@ -360,6 +412,18 @@ fn download_and_stage(
     let app = find_app_bundle(&stage)
         .ok_or_else(|| t!("update.err.unpack", err = "no .app").to_string())?;
     codesign_verify(&app)?;
+    let version = Command::new("/usr/libexec/PlistBuddy")
+        .args(["-c", "Print :RemoventReleaseVersion"])
+        .arg(app.join("Contents/Info.plist"))
+        .output()
+        .map_err(|e| t!("update.err.unpack", err = e.to_string()).to_string())?;
+    if !version.status.success() || String::from_utf8_lossy(&version.stdout).trim() != m.version {
+        return Err(t!(
+            "update.err.unpack",
+            err = "bundle version does not match signed manifest"
+        )
+        .to_string());
+    }
     Ok(app)
 }
 
@@ -407,7 +471,24 @@ pub fn run_install(
                 std::thread::sleep(std::time::Duration::from_millis(300));
             }
             set_status(&shared, &events, UpdateStatus::Relaunching);
-            relaunch(&bundle);
+            if let Err(error) = relaunch(&bundle) {
+                let backup = bundle.with_extension("app.old");
+                let failed = bundle.with_extension("app.failed");
+                let restored = std::fs::rename(&bundle, &failed)
+                    .and_then(|()| std::fs::rename(&backup, &bundle));
+                let reason = if restored.is_ok() {
+                    let _ = std::fs::remove_dir_all(failed);
+                    t!("update.err.swap", err = error.to_string()).to_string()
+                } else {
+                    t!(
+                        "update.err.swap_rollback",
+                        err = error.to_string(),
+                        backup = backup.display().to_string()
+                    )
+                    .to_string()
+                };
+                set_status(&shared, &events, UpdateStatus::Failed(reason));
+            }
         }
         Err(reason) => set_status(&shared, &events, UpdateStatus::Failed(reason)),
     }
@@ -420,35 +501,48 @@ fn swap_bundle(staged_app: &Path) -> Result<PathBuf, String> {
         // Not running from a .app (cargo run / target dir): refuse to install.
         return Err(t!("update.err.not_in_bundle").to_string());
     };
+    replace_bundle(staged_app, &bundle)?;
+    Ok(bundle)
+}
+
+/// Stage on the destination volume before moving the running app. A failed
+/// cross-volume copy must never leave a partial new bundle blocking rollback.
+fn replace_bundle(staged_app: &Path, bundle: &Path) -> Result<(), String> {
+    let incoming = bundle.with_extension("app.incoming");
     let backup = bundle.with_extension("app.old");
-    let _ = std::fs::remove_dir_all(&backup);
-    std::fs::rename(&bundle, &backup)
-        .map_err(|e| t!("update.err.swap", err = e.to_string()).to_string())?;
-    if let Err(e) = move_into_place(staged_app, &bundle) {
-        // Roll back: the old bundle must never be left parked aside. If even
-        // the rollback fails, name the backup path so the user can restore it
-        // manually instead of silently sitting on `Removent.app.old`.
-        if std::fs::rename(&backup, &bundle).is_err() {
+    let fail = |e: std::io::Error| t!("update.err.swap", err = e.to_string()).to_string();
+    if incoming.exists() {
+        std::fs::remove_dir_all(&incoming).map_err(fail)?;
+    }
+    if let Err(error) = move_into_place(staged_app, &incoming) {
+        let _ = std::fs::remove_dir_all(&incoming);
+        return Err(fail(error));
+    }
+    // Copying has completed. Only the two same-volume renames happen while
+    // the original application path is temporarily unavailable.
+    if backup.exists() {
+        std::fs::remove_dir_all(&backup).map_err(fail)?;
+    }
+    std::fs::rename(bundle, &backup).map_err(fail)?;
+    if let Err(error) = std::fs::rename(&incoming, bundle) {
+        if std::fs::rename(&backup, bundle).is_err() {
             return Err(t!(
                 "update.err.swap_rollback",
-                err = e.to_string(),
+                err = error.to_string(),
                 backup = backup.display().to_string()
             )
             .to_string());
         }
-        return Err(t!("update.err.swap", err = e.to_string()).to_string());
+        return Err(fail(error));
     }
-    Ok(bundle)
+    Ok(())
 }
 
-/// Move the staged bundle into the running bundle's place. rename(2) cannot
-/// cross devices (EXDEV — e.g. the .app lives on an external volume while the
-/// update cache is on the system volume), so fall back to copy + delete.
 fn move_into_place(staged: &Path, bundle: &Path) -> std::io::Result<()> {
     match std::fs::rename(staged, bundle) {
         Ok(()) => Ok(()),
         Err(e) if e.raw_os_error() == Some(libc::EXDEV) => {
-            let copied = Command::new("ditto")
+            let copied = Command::new("/usr/bin/ditto")
                 .arg(staged)
                 .arg(bundle)
                 .stdout(std::process::Stdio::null())
@@ -457,22 +551,30 @@ fn move_into_place(staged: &Path, bundle: &Path) -> std::io::Result<()> {
             if !copied.success() {
                 return Err(std::io::Error::other(format!("ditto exit {copied}")));
             }
-            std::fs::remove_dir_all(staged)
+            // Failure to remove the cache must not invalidate a successful copy.
+            let _ = std::fs::remove_dir_all(staged);
+            Ok(())
         }
         Err(e) => Err(e),
     }
 }
 
 /// Restart the daemon (it ships inside the bundle; best-effort — it may not be
-/// loaded at all), open the new app and exit this process. Never returns.
-fn relaunch(bundle: &Path) -> ! {
+/// loaded at all), open the new app and exit only if Launch Services accepts it.
+fn relaunch(bundle: &Path) -> std::io::Result<()> {
     let uid = unsafe { libc::getuid() };
     let _ = Command::new("launchctl")
         .args(["kickstart", "-k", &format!("gui/{uid}/com.removent.daemon")])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();
-    let _ = Command::new("open").arg("-n").arg(bundle).status();
+    let opened = Command::new("/usr/bin/open")
+        .arg("-n")
+        .arg(bundle)
+        .status()?;
+    if !opened.success() {
+        return Err(std::io::Error::other(format!("open exit {opened}")));
+    }
     std::process::exit(0);
 }
 
@@ -506,7 +608,23 @@ pub fn cleanup_stale_backup() {
 
 fn curl_get(url: &str) -> Result<String, String> {
     let out = Command::new("curl")
-        .args(["-fsSL", "--max-time", "30", url])
+        .args([
+            "-fsSL",
+            "--proto",
+            "=https",
+            "--proto-redir",
+            "=https",
+            "--connect-timeout",
+            "10",
+            "--max-time",
+            "30",
+            "--max-filesize",
+            "2097152",
+            "--user-agent",
+            "Removent-Updater",
+            "--url",
+            url,
+        ])
         .output()
         .map_err(|e| t!("update.err.fetch", err = e.to_string()).to_string())?;
     if !out.status.success() {
@@ -524,6 +642,20 @@ fn curl_get(url: &str) -> Result<String, String> {
 fn curl_download(url: &str, part: &Path, resume: bool) -> bool {
     let mut cmd = Command::new("curl");
     cmd.arg("-fSL")
+        .args([
+            "--proto",
+            "=https",
+            "--proto-redir",
+            "=https",
+            "--connect-timeout",
+            "15",
+            "--speed-limit",
+            "1024",
+            "--speed-time",
+            "30",
+            "--max-filesize",
+            "1073741824",
+        ])
         .arg("--max-time")
         .arg("600")
         .arg("-o")
@@ -531,7 +663,8 @@ fn curl_download(url: &str, part: &Path, resume: bool) -> bool {
     if resume {
         cmd.arg("-C").arg("-");
     }
-    cmd.arg(url)
+    cmd.arg("--url")
+        .arg(url)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -550,15 +683,17 @@ fn sha256_file(path: &Path) -> Result<String, String> {
 
 /// The release zip holds a single top-level `Removent.app`.
 fn find_app_bundle(stage: &Path) -> Option<PathBuf> {
-    std::fs::read_dir(stage).ok()?.find_map(|entry| {
-        let path = entry.ok()?.path();
-        (path.extension().is_some_and(|e| e == "app") && path.is_dir()).then_some(path)
-    })
+    let app = stage.join("Removent.app");
+    let metadata = std::fs::symlink_metadata(&app).ok()?;
+    (metadata.is_dir() && !metadata.file_type().is_symlink()).then_some(app)
 }
 
 fn codesign_verify(app: &Path) -> Result<(), String> {
-    let ok = Command::new("codesign")
-        .args(["--verify", "--deep", "--strict"])
+    let requirement = format!(
+        "anchor apple generic and identifier \"io.removent.app\" and certificate leaf[subject.OU] = \"{EXPECTED_TEAM_ID}\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+    );
+    let ok = Command::new("/usr/bin/codesign")
+        .args(["--verify", "--deep", "--strict", "-R", &requirement])
         .arg(app)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -567,19 +702,6 @@ fn codesign_verify(app: &Path) -> Result<(), String> {
         .unwrap_or(false);
     if !ok {
         return Err(t!("update.err.codesign").to_string());
-    }
-    if let Some(team) = EXPECTED_TEAM_ID {
-        // codesign prints the details (incl. TeamIdentifier=…) on stderr.
-        let out = Command::new("codesign")
-            .args(["-dv", "--verbose=4"])
-            .arg(app)
-            .output()
-            .map_err(|e| t!("update.err.codesign", err = e.to_string()).to_string())?;
-        let details = String::from_utf8_lossy(&out.stderr);
-        let expected = format!("TeamIdentifier={team}");
-        if !details.lines().any(|l| l.trim() == expected) {
-            return Err(t!("update.err.codesign_team").to_string());
-        }
     }
     Ok(())
 }
@@ -603,9 +725,15 @@ mod tests {
 
     #[test]
     fn version_parse_and_compare() {
-        assert_eq!(parse_version("1.2.3"), Some((1, 2, 3)));
-        assert_eq!(parse_version("v0.10.2"), Some((0, 10, 2)));
-        assert_eq!(parse_version(" 1.0.0 "), Some((1, 0, 0)));
+        assert_eq!(parse_version("1.2.3"), Some(semver::Version::new(1, 2, 3)));
+        assert_eq!(
+            parse_version("v0.10.2"),
+            Some(semver::Version::new(0, 10, 2))
+        );
+        assert_eq!(
+            parse_version(" 1.0.0 "),
+            Some(semver::Version::new(1, 0, 0))
+        );
         assert_eq!(parse_version("1.2"), None);
         assert_eq!(parse_version("1.2.3.4"), None);
         assert_eq!(parse_version("a.b.c"), None);
@@ -616,6 +744,76 @@ mod tests {
         assert!(!is_newer("0.1.0", "0.1.0"));
         assert!(!is_newer("0.1.0", "0.1.1"));
         assert!(!is_newer("garbage", "0.1.0"));
+        assert!(is_newer("0.1.0-beta.2", "0.1.0-beta.1"));
+        assert!(is_newer("0.1.0-beta.10", "0.1.0-beta.2"));
+        assert!(is_newer("0.1.0", "0.1.0-beta.10"));
+        assert!(!is_newer("0.1.0-beta.10", "0.1.0"));
+        assert!(!is_newer("0.1.0+build2", "0.1.0+build1"));
+    }
+
+    #[test]
+    fn beta_feed_selects_semver_and_excludes_drafts_and_missing_assets() {
+        let release = |tag: &str, draft: bool, asset: &str| {
+            serde_json::json!({
+                "tag_name": tag, "draft": draft,
+                "assets": [{"name": asset, "browser_download_url": format!("https://example.com/{tag}")}]
+            })
+        };
+        let mut feed = vec![
+            release("v0.1.0-beta.2", false, "latest.json"),
+            release("v0.1.0-beta.10", false, "latest.json"),
+            release("v2.0.0", true, "latest.json"),
+            release("v3.0.0-alpha.1", false, "latest.json"),
+            release("v4.0.0", false, "other.json"),
+        ];
+        assert_eq!(
+            beta_manifest_url(&serde_json::to_string(&feed).unwrap()).unwrap(),
+            Some("https://example.com/v0.1.0-beta.10".into())
+        );
+        feed.push(release("v0.1.0", false, "latest.json"));
+        assert_eq!(
+            beta_manifest_url(&serde_json::to_string(&feed).unwrap()).unwrap(),
+            Some("https://example.com/v0.1.0".into())
+        );
+        assert_eq!(beta_manifest_url("[]").unwrap(), None);
+        assert!(beta_manifest_url("{}").is_err());
+    }
+
+    #[test]
+    fn staging_failure_preserves_installed_bundle_and_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("Removent.app");
+        let backup = bundle.with_extension("app.old");
+        std::fs::create_dir(&bundle).unwrap();
+        std::fs::write(bundle.join("version"), "current").unwrap();
+        std::fs::create_dir(&backup).unwrap();
+        assert!(replace_bundle(&dir.path().join("missing.app"), &bundle).is_err());
+        assert_eq!(
+            std::fs::read_to_string(bundle.join("version")).unwrap(),
+            "current"
+        );
+        assert!(backup.exists());
+    }
+
+    #[test]
+    fn successful_swap_keeps_previous_version_for_rollback() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("Removent.app");
+        let staged = dir.path().join("stage.app");
+        for (path, version) in [(&bundle, "old"), (&staged, "new")] {
+            std::fs::create_dir(path).unwrap();
+            std::fs::write(path.join("version"), version).unwrap();
+        }
+        replace_bundle(&staged, &bundle).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(bundle.join("version")).unwrap(),
+            "new"
+        );
+        assert_eq!(
+            std::fs::read_to_string(bundle.with_extension("app.old").join("version")).unwrap(),
+            "old"
+        );
+        assert!(!staged.exists());
     }
 
     #[test]

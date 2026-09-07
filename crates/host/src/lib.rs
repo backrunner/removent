@@ -1,6 +1,7 @@
 //! removent-host: controlled-side service engine.
 
 pub mod admission;
+pub mod delivery;
 pub mod frame_dedup;
 pub mod input_sink;
 pub mod runner;

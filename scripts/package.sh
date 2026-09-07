@@ -7,25 +7,17 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# GPUI compiles Metal shaders, which needs a full Xcode toolchain — the Command Line
-# Tools alone don't ship `metal`. Fall back to an installed Xcode when necessary.
-if ! xcrun -f metal >/dev/null 2>&1; then
-    for XCODE in /Applications/Xcode.app /Applications/Xcode-beta.app; do
-        if [ -d "$XCODE" ]; then
-            export DEVELOPER_DIR="$XCODE/Contents/Developer"
-            break
-        fi
-    done
-fi
-
-VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+source scripts/macos_env.sh
+VERSION=$(python3 scripts/release_meta.py version)
+BASE_VERSION=$(python3 scripts/release_meta.py base)
+BUILD_VERSION=$(python3 scripts/release_meta.py build)
 APP_NAME="Removent"
 BUNDLE="dist/${APP_NAME}.app"
 ZIP="dist/${APP_NAME}-${VERSION}-macos-arm64.zip"
 IDENTITY="${APPLE_SIGNING_IDENTITY:-}"
 
 echo "==> build release"
-cargo build --release -p removent-app -p removent-daemon
+cargo build --locked --release -p removent-app -p removent-daemon
 
 echo "==> build tray"
 "$(dirname "$0")/build_tray.sh"
@@ -39,7 +31,11 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
-    <key>CFBundleExecutable</key><string>removent</string>
+    <key>CFBundleExecutable</key><string>removent-launcher</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+    <key>RemoventReleaseVersion</key><string>${VERSION}</string>
     <key>CFBundleIdentifier</key><string>io.removent.app</string>
     <key>CFBundleLocalizations</key>
     <array>
@@ -47,10 +43,16 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
         <string>zh-Hans</string>
     </array>
     <key>CFBundleName</key><string>${APP_NAME}</string>
-    <key>CFBundleVersion</key><string>${VERSION}</string>
-    <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+    <key>CFBundleVersion</key><string>${BUILD_VERSION}</string>
+    <key>CFBundleShortVersionString</key><string>${BASE_VERSION}</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Removent uses your local network to discover nearby Macs and connect to devices you choose.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_removent._udp</string>
+    </array>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Removent needs Screen Recording permission to share your screen with peers you approve.</string>
     <key>NSAccessibilityUsageDescription</key>
@@ -63,9 +65,13 @@ PLIST
 cat > "$BUNDLE/Contents/Resources/zh-Hans.lproj/InfoPlist.strings" <<'STRINGS'
 "NSScreenCaptureUsageDescription" = "Removent 需要屏幕录制权限以向您批准的对方共享屏幕。";
 "NSAccessibilityUsageDescription" = "Removent 需要辅助功能权限以在本机被控制时注入键鼠输入。";
+"NSLocalNetworkUsageDescription" = "Removent 需要访问本地网络以发现附近的 Mac，并连接您选择的设备。";
 STRINGS
 
 cp target/release/removent "$BUNDLE/Contents/MacOS/removent"
+xcrun swiftc -O -target arm64-apple-macosx13.0 scripts/launcher.swift \
+    -o "$BUNDLE/Contents/MacOS/removent-launcher"
+cp assets/branding/AppIcon.icns "$BUNDLE/Contents/Resources/AppIcon.icns"
 # The daemon ships inside the bundle: the app locates removentd next to its own executable.
 cp target/release/removentd "$BUNDLE/Contents/MacOS/removentd"
 

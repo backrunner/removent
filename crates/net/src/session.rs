@@ -33,6 +33,16 @@ pub type ControlSource = Framed<quinn::RecvStream, ControlCodec>;
 pub type PairSink = Framed<quinn::SendStream, PairCodec>;
 pub type PairSource = Framed<quinn::RecvStream, PairCodec>;
 
+/// A live transport can keep acknowledging keepalives while its application
+/// never consumes control bytes. Bound writes separately from QUIC idle time.
+/// On error the caller must end the stream: a timed-out send may be partial.
+pub async fn send_control(sink: &mut ControlSink, msg: ControlMsg) -> Result<()> {
+    use futures::SinkExt;
+    tokio::time::timeout(Duration::from_secs(10), sink.send(msg))
+        .await
+        .map_err(|_| NetError::Timeout)?
+}
+
 /// Control-stream item: a normal message or a skipped unknown variant (protocol.md §8).
 #[derive(Debug, PartialEq)]
 pub enum ControlItem {

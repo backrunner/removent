@@ -123,6 +123,13 @@ impl AudioPlayer {
         })
     }
 
+    pub fn clear(&self) {
+        if let Ok(mut state) = self.inner.state.lock() {
+            state.samples.clear();
+            state.source_phase = 0.0;
+        }
+    }
+
     pub fn push(&self, pcm: Vec<i16>) {
         if pcm.len() < CHANNELS || !pcm.len().is_multiple_of(CHANNELS) {
             return;

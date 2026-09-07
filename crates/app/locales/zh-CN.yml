@@ -5,11 +5,9 @@ app.name: Removent
 
 home.name_placeholder: 在局域网中显示的名称
 home.pin_placeholder: 6 位数字
-home.search_placeholder: 搜索设备
-home.manual_placeholder: IP 地址，如 192.168.1.10（VNC 使用 :5900）
+home.search_placeholder: 搜索名称或 IP
+home.manual_placeholder: "192.168.1.10"
 
-titlebar.to_light: 切换到浅色
-titlebar.to_dark: 切换到深色
 
 status.ready: 就绪
 status.host_starting: 正在启动被控服务…
@@ -37,7 +35,7 @@ status.host_session_ended: 对端会话结束：%{reason}
 status.admission_expired: 准入请求已超时或被其他端处理
 status.host_running: 被控服务运行中
 status.host_stopped: 被控服务已停止
-status.daemon_offline: 服务守护进程（removentd）未连接
+status.daemon_offline: "屏幕共享暂不可用"
 status.daemon_offline_short: 服务守护进程未连接
 status.admission_mode_updated: 准入模式已更新
 status.vnc_updated: VNC 设置已更新（重启被控服务后生效）
@@ -45,6 +43,7 @@ status.vnc_updated: VNC 设置已更新（重启被控服务后生效）
 err.session_in_progress: 已有进行中的会话
 err.frame_channel_missing: 帧通道缺失
 
+session.input_overloaded: 输入传输阻塞，连接已关闭。请重新连接。
 session.peer_disconnected: 对端已断开
 session.internal_error: 会话内部错误，已终止
 session.manually_disconnected: 已手动断开
@@ -58,26 +57,18 @@ manual.invalid_addr: 地址格式无效，如 192.168.1.10 或 192.168.1.10:7890
 
 device.paired: 已配对
 device.unpaired: 未配对
-device.searching: 正在搜索局域网设备
-device.searching_hint: 对方开启被控服务后自动出现
+device.searching: "暂无附近设备"
+device.searching_hint: "其他 Mac 开启屏幕共享后会显示在这里。"
 device.no_match: 没有匹配的设备
-device.count: 设备 · %{count}
-device.manual_tooltip: 手动连接 IP
 device.online: 在线 · 可连接
-device.files_tooltip: 文件传输将在后续版本提供
 device.info: 设备信息
 device.address: 地址
 device.fingerprint: 指纹
 device.trust: 信任状态
 
-empty.control_title: 控制其他设备
-empty.control_desc: 从左侧列表选择设备即可查看详情并连接。
-empty.hint_search: 在左侧列表搜索局域网设备
-empty.hint_manual: 点列表头的 + 手动输入 IP 连接
-empty.controlled_title: 被他人控制
-empty.copy_fp_tooltip: 复制指纹
+sharing.title: 共享本机
+device.copy_fingerprint: 复制指纹
 
-host.service: 被控服务
 
 permissions.screen_capture: 屏幕录制
 permissions.accessibility: 辅助功能
@@ -97,16 +88,16 @@ settings.language: 语言
 settings.language.system: 跟随系统
 settings.security: 安全
 settings.admission: 接入控制
-settings.admission.ask: 每次询问
-settings.admission.trusted: 信任设备自动通过
-settings.admission.deny: 拒绝所有连接
+settings.admission.ask: "每次询问"
+settings.admission.trusted: "信任的设备"
+settings.admission.deny: "拒绝所有"
 settings.vnc: Apple Remote Desktop / VNC
 settings.vnc_enabled: 启用 VNC 兼容服务
 settings.vnc_username: macOS 用户名
 settings.vnc_username_placeholder: Apple 远程桌面使用的账户名
 settings.vnc_password: VNC 密码
 settings.vnc_password_placeholder: 留空表示无需密码
-settings.vnc_hint: 使用标准 RFB 端口 5900；Apple 远程桌面使用上面的用户名和密码。
+settings.vnc_hint: 此密码用于通过 VNC 共享本机（端口 5900）。远程设备的凭据请在「添加连接」中填写。
 settings.data: 数据
 settings.data_dir: 数据目录
 
@@ -147,7 +138,6 @@ action.deny: 拒绝
 action.open: 打开
 action.save: 保存
 action.back: 返回
-action.files: 文件
 
 pairing.request_title: 配对请求
 pairing.display_desc: 对方设备正在请求配对，请告知 PIN（5 分钟内有效）：
@@ -157,10 +147,30 @@ pairing.entry_desc: 请输入对方屏幕上显示的 6 位数字：
 admission.title: 连接请求
 admission.desc: 允许后对方可以观看并控制本机屏幕。30 秒未响应将自动拒绝。
 
-viewer.fullscreen_tooltip: 全屏 (⌘F)
-viewer.disconnect_tooltip: 断开连接 (Esc)
+viewer.fullscreen_tooltip: 全屏 (Ctrl+Cmd+F)
+viewer.disconnect_tooltip: 断开连接 (Ctrl+Cmd+Esc)
 viewer.waiting: 等待视频流
 viewer.waiting_stream: 等待视频流…
 viewer.ended_title: 连接已断开
 viewer.ended_desc: 对端关闭了会话，或网络连接中断。
 viewer.close_window: 关闭窗口
+
+device.section: "设备"
+device.this_mac: "本机"
+connection.title: "远程连接"
+connection.add: "添加连接"
+connection.address: "主机地址"
+connection.host_placeholder: "IP 地址或主机名"
+connection.port: "端口"
+connection.username: "用户名"
+connection.vnc_username: "macOS 用户名（可选）"
+connection.password: "密码"
+connection.domain: "域"
+connection.optional: "可选"
+connection.certificate_exception: "允许不受信任的服务器证书（仅本次连接）"
+connection.connecting: "正在连接..."
+connection.invalid_host: "请输入 IP 地址或主机名，端口请填写在单独的端口栏中。"
+connection.invalid_port: "请输入 1 到 65535 之间的端口。"
+connection.username_required: "请输入 RDP 用户名。"
+sharing.description: "允许你批准的设备查看和控制本机屏幕。"
+permissions.granted: "已允许"

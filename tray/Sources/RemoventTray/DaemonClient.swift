@@ -7,7 +7,7 @@ func trayLog(_ message: String) {
 
 // MARK: - Protocol models
 
-struct Session: Codable {
+struct Session: Codable, Equatable {
     let id: Int
     let peer_name: String
     let peer_fp16: String
@@ -15,7 +15,7 @@ struct Session: Codable {
     let video_codec: String
 }
 
-struct StatusResponse: Codable {
+struct StatusResponse: Codable, Equatable {
     let running: Bool
     let port: Int
     let device_name: String

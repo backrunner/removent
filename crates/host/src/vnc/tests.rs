@@ -16,6 +16,14 @@ fn vnc_password_matches_standard_des_vector() {
 
 #[test]
 fn keysyms_cover_common_macos_keys() {
+    for (keysym, vk) in [
+        (0xff08, 0x33),
+        (0xff09, 0x30),
+        (0xff0d, 0x24),
+        (0xff1b, 0x35),
+    ] {
+        assert_eq!(key_for_keysym(keysym).unwrap().0, vk);
+    }
     assert_eq!(key_for_keysym('a' as u32).unwrap().0, 0x00);
     assert_eq!(key_for_keysym(0xff51).unwrap().0, 0x7b);
     assert_eq!(key_for_keysym(0xffe1).unwrap().1, Some(KeyModifiers::SHIFT));

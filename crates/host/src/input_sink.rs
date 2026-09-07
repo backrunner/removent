@@ -194,6 +194,18 @@ impl InputReleaseTracker {
         }
     }
 
+    /// Keep teardown's button-up at the same physical position when the viewer
+    /// acknowledges a resize without sending another mouse event.
+    pub fn rescale_position(&mut self, old: (u32, u32), new: (u32, u32)) {
+        if old.0 > 0
+            && old.1 > 0
+            && let Some((_, x, y)) = &mut self.last_pos
+        {
+            *x *= new.0 as f32 / old.0 as f32;
+            *y *= new.1 as f32 / old.1 as f32;
+        }
+    }
+
     /// Injects key-up / button-up for everything currently held, then clears
     /// the tracked state. Injection errors are ignored (teardown path).
     pub fn release_all(&mut self, sink: &dyn InputSink) {
@@ -306,6 +318,24 @@ impl InputSink for RecorderInputSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_after_resize_keeps_the_same_relative_position() {
+        let sink = RecorderInputSink::default();
+        let mut tracker = InputReleaseTracker::default();
+        tracker.note_mouse(1, 160., 120., MouseKind::LeftDown);
+        tracker.rescale_position((320, 240), (160, 120));
+        tracker.release_all(&sink);
+        assert!(matches!(
+            sink.events.lock().unwrap()[0],
+            RecordedInput::Mouse {
+                x: 80.,
+                y: 60.,
+                kind: MouseKind::LeftUp,
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn moved_with_left_button_becomes_left_drag() {

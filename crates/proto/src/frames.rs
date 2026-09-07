@@ -155,7 +155,7 @@ pub fn parse_audio_header(buf: &[u8]) -> Result<(AudioPacketHeader, usize), Fram
 }
 
 /// Total number of ControlMsg variants (protocol discipline: append only at the enum tail, protocol.md §8).
-pub const CONTROL_MSG_VARIANTS: u64 = 26;
+pub const CONTROL_MSG_VARIANTS: u64 = 27;
 
 /// Parse a postcard varint (LEB128). Returns (value, bytes consumed).
 pub fn parse_varint(buf: &[u8]) -> Option<(u64, usize)> {
@@ -240,6 +240,20 @@ mod tests {
             height: 1440,
             payload_len: 5,
         }
+    }
+
+    #[test]
+    fn geometry_is_appended_and_roundtrips() {
+        let msg = ControlMsg::FrameGeometry {
+            width: 960,
+            height: 540,
+        };
+        let wire = encode_control(&msg).unwrap();
+        assert_eq!(wire[4], 26);
+        assert_eq!(
+            decode_control(&wire).unwrap().0,
+            ControlDecodeOutcome::Msg(Box::new(msg))
+        );
     }
 
     #[test]

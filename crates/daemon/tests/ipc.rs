@@ -237,3 +237,28 @@ async fn kick_session_unimplemented_and_shutdown() {
     ));
     assert!(d.state.shutdown.is_cancelled());
 }
+
+#[tokio::test]
+async fn cancelling_admission_resolves_prompt_and_rejects_late_reply() {
+    let d = spawn_daemon_with(None).await;
+    let mut events = d.state.events.subscribe();
+    let state = d.state.clone();
+    let task = tokio::spawn(async move {
+        state
+            .request_admission("peer".into(), "0123456789abcdef".into())
+            .await
+    });
+    let IpcEvent::AdmissionRequest { request_id, .. } = events.recv().await.unwrap() else {
+        panic!("expected admission request");
+    };
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    let event = tokio::time::timeout(Duration::from_secs(1), events.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(event, IpcEvent::AdmissionResolved { request_id: id, allow: false } if id == request_id)
+    );
+    assert!(!d.state.reply_admission(request_id, true));
+}

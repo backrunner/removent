@@ -108,7 +108,7 @@ struct AudioState {
 }
 
 struct SckOutput {
-    video_tx: mpsc::Sender<(Vec<u8>, i64)>,
+    video_tx: removent_core::latest::Sender<(Vec<u8>, i64)>,
     /// None for the screen-only output (audio capture disabled or this handler
     /// is the video one); audio callbacks are ignored then.
     audio_tx: Option<mpsc::Sender<AudioFrame>>,
@@ -222,7 +222,7 @@ impl SckOutput {
         let Some((bgra, pts)) = copy_screen_bgra(sb) else {
             return;
         };
-        let _ = self.video_tx.try_send((bgra, pts));
+        let _ = self.video_tx.send((bgra, pts));
     }
 
     fn on_audio(&self, sb: &CMSampleBuffer) {
@@ -304,7 +304,7 @@ pub fn start_display_capture(
     display_id: u32,
     width: u32,
     height: u32,
-    video_tx: mpsc::Sender<(Vec<u8>, i64)>,
+    video_tx: removent_core::latest::Sender<(Vec<u8>, i64)>,
     audio_tx: Option<mpsc::Sender<AudioFrame>>,
 ) -> Result<SckCapture, CaptureError> {
     let content = SCShareableContent::get().map_err(|e| CaptureError::Sc(e.to_string()))?;

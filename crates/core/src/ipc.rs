@@ -120,6 +120,7 @@ where
 const MAX_IPC_LINE_BYTES: usize = 1 << 20;
 
 /// Read one JSON Lines message; returns Ok(None) on EOF.
+/// Use a persistent [`MessageReader`] when the read may be cancelled and retried.
 ///
 /// Blank lines are skipped (a stray `\n` is not a disconnect); lines longer than
 /// [`MAX_IPC_LINE_BYTES`] are rejected with an error.
@@ -128,25 +129,51 @@ where
     R: AsyncBufRead + Unpin,
     T: for<'de> Deserialize<'de>,
 {
-    loop {
-        let mut line = String::new();
-        let n = r.read_line(&mut line).await?;
-        if n == 0 {
-            return Ok(None);
+    MessageReader::default().read(r).await
+}
+
+/// Retains partial JSON Lines across cancellation (for use inside `select!`).
+#[derive(Default)]
+pub struct MessageReader {
+    line: Vec<u8>,
+}
+
+impl MessageReader {
+    pub async fn read<R, T>(&mut self, r: &mut R) -> std::io::Result<Option<T>>
+    where
+        R: AsyncBufRead + Unpin,
+        T: for<'de> Deserialize<'de>,
+    {
+        loop {
+            let chunk = r.fill_buf().await?;
+            let eof = chunk.is_empty();
+            let end = chunk.iter().position(|b| *b == b'\n');
+            let len = end.map_or(chunk.len(), |i| i + 1);
+            if self.line.len() + len > MAX_IPC_LINE_BYTES {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "ipc line too long",
+                ));
+            }
+            self.line.extend_from_slice(&chunk[..len]);
+            r.consume(len);
+            if !eof && end.is_none() {
+                continue;
+            }
+            let line = std::mem::take(&mut self.line);
+            let text = std::str::from_utf8(&line)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                if eof {
+                    return Ok(None);
+                }
+                continue;
+            }
+            return serde_json::from_str(trimmed)
+                .map(Some)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e));
         }
-        if line.len() > MAX_IPC_LINE_BYTES {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "ipc line too long",
-            ));
-        }
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let value = serde_json::from_str(trimmed)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        return Ok(Some(value));
     }
 }
 
@@ -165,6 +192,41 @@ pub async fn connect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cancelled_read_retains_partial_utf8_and_json() {
+        let (mut writer, reader) = tokio::io::duplex(128);
+        let mut reader = tokio::io::BufReader::new(reader);
+        let mut messages = MessageReader::default();
+        let json = "{\"name\":\"中\"}\n".as_bytes();
+        let split = 10; // In the middle of the three-byte UTF-8 character.
+        writer.write_all(&json[..split]).await.unwrap();
+        tokio::select! {
+            biased;
+            result = messages.read::<_, serde_json::Value>(&mut reader) => panic!("partial message completed: {result:?}"),
+            _ = std::future::ready(()) => {}
+        }
+        writer.write_all(&json[split..]).await.unwrap();
+        let value: serde_json::Value = messages.read(&mut reader).await.unwrap().unwrap();
+        assert_eq!(value["name"], "中");
+    }
+
+    #[tokio::test]
+    async fn oversized_unterminated_line_is_rejected_without_waiting_for_eof() {
+        let (mut writer, reader) = tokio::io::duplex(MAX_IPC_LINE_BYTES + 1);
+        let mut reader = tokio::io::BufReader::new(reader);
+        writer
+            .write_all(&vec![b'x'; MAX_IPC_LINE_BYTES + 1])
+            .await
+            .unwrap();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            read_msg::<_, IpcResponse>(&mut reader),
+        )
+        .await
+        .expect("must reject before the sender closes or sends a newline");
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+    }
 
     #[tokio::test]
     async fn json_lines_roundtrip() {
@@ -240,8 +302,7 @@ mod tests {
         // concurrently with the read (writing first would deadlock).
         let writer = tokio::spawn(async move {
             let big = vec![b'x'; MAX_IPC_LINE_BYTES + 1];
-            bw.write_all(&big).await.unwrap();
-            bw.write_all(b"\n").await.unwrap();
+            let _ = bw.write_all(&big).await;
         });
         let got: std::io::Result<Option<IpcResponse>> = read_msg(&mut ar).await;
         assert!(got.is_err());

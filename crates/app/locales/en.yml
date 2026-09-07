@@ -5,11 +5,9 @@ app.name: Removent
 
 home.name_placeholder: Name shown on the local network
 home.pin_placeholder: 6-digit code
-home.search_placeholder: Search devices
-home.manual_placeholder: IP address, e.g. 192.168.1.10 (use :5900 for VNC)
+home.search_placeholder: Search name or IP
+home.manual_placeholder: "192.168.1.10"
 
-titlebar.to_light: Switch to light
-titlebar.to_dark: Switch to dark
 
 status.ready: Ready
 status.host_starting: Starting host service…
@@ -37,7 +35,7 @@ status.host_session_ended: "Peer session ended: %{reason}"
 status.admission_expired: Admission request timed out or was handled elsewhere
 status.host_running: Host service running
 status.host_stopped: Host service stopped
-status.daemon_offline: Daemon (removentd) not connected
+status.daemon_offline: "Screen sharing is unavailable"
 status.daemon_offline_short: Daemon not connected
 status.admission_mode_updated: Admission mode updated
 status.vnc_updated: VNC settings updated (restart the host service to apply)
@@ -45,6 +43,7 @@ status.vnc_updated: VNC settings updated (restart the host service to apply)
 err.session_in_progress: A session is already in progress
 err.frame_channel_missing: Frame channel missing
 
+session.input_overloaded: Connection closed because input delivery stalled. Please reconnect.
 session.peer_disconnected: Peer disconnected
 session.internal_error: Session internal error; terminated
 session.manually_disconnected: Disconnected manually
@@ -58,26 +57,18 @@ manual.invalid_addr: Invalid address format, e.g. 192.168.1.10 or 192.168.1.10:7
 
 device.paired: Paired
 device.unpaired: Not paired
-device.searching: Searching for devices on the LAN
-device.searching_hint: Devices appear once their host service is on
+device.searching: "No devices nearby"
+device.searching_hint: "Devices appear here when screen sharing is on."
 device.no_match: No matching devices
-device.count: "Devices · %{count}"
-device.manual_tooltip: Connect to IP manually
 device.online: Online · connectable
-device.files_tooltip: File transfer is coming in a future version
 device.info: Device Info
 device.address: Address
 device.fingerprint: Fingerprint
 device.trust: Trust
 
-empty.control_title: Control other devices
-empty.control_desc: Select a device from the list on the left to view details and connect.
-empty.hint_search: Search LAN devices in the list on the left
-empty.hint_manual: Use + in the list header to connect by IP
-empty.controlled_title: Be controlled by others
-empty.copy_fp_tooltip: Copy fingerprint
+sharing.title: Share this Mac
+device.copy_fingerprint: Copy fingerprint
 
-host.service: Host service
 
 permissions.screen_capture: Screen Recording
 permissions.accessibility: Accessibility
@@ -97,16 +88,16 @@ settings.language: Language
 settings.language.system: Follow System
 settings.security: Security
 settings.admission: Admission Control
-settings.admission.ask: Ask Every Time
-settings.admission.trusted: Auto-Allow Trusted Devices
-settings.admission.deny: Deny All Connections
+settings.admission.ask: "Ask each time"
+settings.admission.trusted: "Trusted devices"
+settings.admission.deny: "Block all"
 settings.vnc: Apple Remote Desktop / VNC
 settings.vnc_enabled: Enable VNC compatibility service
 settings.vnc_username: macOS Username
 settings.vnc_username_placeholder: Account name for Apple Remote Desktop
 settings.vnc_password: VNC Password
 settings.vnc_password_placeholder: Leave empty for no password
-settings.vnc_hint: Standard RFB port 5900; Apple Remote Desktop uses the username and password above.
+settings.vnc_hint: This password is for sharing this Mac over VNC (port 5900). Enter remote credentials in Add connection.
 settings.data: Data
 settings.data_dir: Data Directory
 
@@ -147,7 +138,6 @@ action.deny: Deny
 action.open: Open
 action.save: Save
 action.back: Back
-action.files: Files
 
 pairing.request_title: Pairing Request
 pairing.display_desc: "Another device is requesting to pair. Share this PIN (valid for 5 minutes):"
@@ -157,10 +147,30 @@ pairing.entry_desc: "Enter the 6-digit code shown on the peer's screen:"
 admission.title: Connection Request
 admission.desc: If allowed, the peer can view and control this screen. No response within 30 seconds will deny automatically.
 
-viewer.fullscreen_tooltip: "Fullscreen (⌘F)"
-viewer.disconnect_tooltip: "Disconnect (Esc)"
+viewer.fullscreen_tooltip: "Fullscreen (Ctrl+Cmd+F)"
+viewer.disconnect_tooltip: "Disconnect (Ctrl+Cmd+Esc)"
 viewer.waiting: Waiting for video stream
 viewer.waiting_stream: Waiting for video stream…
 viewer.ended_title: Connection Closed
 viewer.ended_desc: The peer closed the session, or the network connection was interrupted.
 viewer.close_window: Close Window
+
+device.section: "Devices"
+device.this_mac: "This Mac"
+connection.title: "Remote connections"
+connection.add: "Add connection"
+connection.address: "Host"
+connection.host_placeholder: "IP address or hostname"
+connection.port: "Port"
+connection.username: "Username"
+connection.vnc_username: "macOS username (optional)"
+connection.password: "Password"
+connection.domain: "Domain"
+connection.optional: "Optional"
+connection.certificate_exception: "Allow untrusted server certificates for this connection"
+connection.connecting: "Connecting..."
+connection.invalid_host: "Enter an IP address or hostname, with the port in its own field."
+connection.invalid_port: "Enter a port between 1 and 65535."
+connection.username_required: "Enter an RDP username."
+sharing.description: "Allow approved devices to view and control this screen."
+permissions.granted: "Allowed"

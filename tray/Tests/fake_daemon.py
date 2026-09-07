@@ -29,6 +29,8 @@ STATUS = {
     ],
     "pending_pin": "482913",
     "tray_connected": True,
+    "screen_recording_granted": True,
+    "accessibility_granted": True,
 }
 
 

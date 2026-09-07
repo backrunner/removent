@@ -1,7 +1,13 @@
-//! Shared UI widgets: icons, status dot, section label, health tri-state, segmented selector.
+//! Shared UI primitives: icons, status indicators, form groups and selectors.
 
-use gpui::{App, ClickEvent, Div, ElementId, Hsla, SharedString, Window, div, prelude::*, px};
-use gpui_component::{ActiveTheme, Icon, Sizable};
+use gpui::{
+    App, ClickEvent, Div, ElementId, Entity, Hsla, SharedString, Window, div, prelude::*, px,
+};
+use gpui_component::{
+    ActiveTheme, Icon, Sizable,
+    button::{Button, ButtonVariants},
+    input::{Input, InputState},
+};
 use std::rc::Rc;
 
 /// Segmented selector callback.
@@ -16,27 +22,6 @@ pub fn icon_16(name: &'static str) -> Icon {
     icon(name).small()
 }
 
-/// Connection health tri-state (ui-design §2.1: green/yellow/red).
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Health {
-    Good,
-    Fair,
-    Poor,
-    Unknown,
-}
-
-impl Health {
-    pub fn color(self, cx: &App) -> Hsla {
-        let t = &cx.theme().colors;
-        match self {
-            Self::Good => t.success,
-            Self::Fair => t.warning,
-            Self::Poor => t.danger,
-            Self::Unknown => t.muted_foreground,
-        }
-    }
-}
-
 /// 8px round status indicator.
 pub fn dot(color: Hsla) -> Div {
     div()
@@ -47,15 +32,16 @@ pub fn dot(color: Hsla) -> Div {
         .bg(color)
 }
 
-/// Small section label (11px, secondary color).
+/// Small section label (12px, secondary color).
 pub fn section_label(text: impl Into<SharedString>, cx: &App) -> Div {
     div()
-        .text_size(px(11.))
+        .text_size(px(12.))
+        .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(cx.theme().muted_foreground)
         .child(text.into())
 }
 
-/// Outlined segmented selector (used for admission mode / theme / language switching).
+/// Segmented selector for mutually exclusive preferences.
 pub fn segmented(
     id_prefix: &'static str,
     options: &[String],
@@ -64,46 +50,47 @@ pub fn segmented(
     cx: &App,
 ) -> Div {
     let t = cx.theme();
-    // The track must read as a separate layer from grouped_card (secondary background):
-    // dark mode uses the deeper window background as track; light mode uses a gray track
-    // with a white selected pill.
+    // A subtle shared track keeps the options visually related on a plain form surface.
     let (track, pill) = if t.is_dark() {
-        (t.background, t.secondary_active)
+        (t.secondary, t.secondary_active)
     } else {
         (t.list_active, t.popover)
     };
     let mut row = div()
         .flex()
+        .w_auto()
+        .max_w_full()
         // Narrow panes (settings at minimum window width) must wrap instead of clipping
         // the trailing segments.
         .flex_wrap()
         .items_center()
         .gap(px(2.))
         .p(px(2.))
-        .rounded(px(10.))
+        .rounded(px(6.))
         .bg(track);
+    row.style().align_self = Some(gpui::AlignSelf::FlexStart);
     for (i, label) in options.iter().enumerate() {
         let active = i == selected;
         let cb = on_select.clone();
-        let mut item = div()
-            .id(ElementId::Name(format!("{id_prefix}-{i}").into()))
-            .px_3()
-            .py_1()
-            .rounded(px(8.))
-            .text_size(px(12.))
-            .cursor_pointer()
-            .child(label.clone())
+        // Real buttons provide focus rings, Tab navigation and keyboard activation.
+        let item = Button::new(ElementId::Name(format!("{id_prefix}-{i}").into()))
+            .label(label.clone())
+            .ghost()
+            .small()
+            .h(px(24.))
+            .rounded(px(4.))
+            .when(active, |el| el.bg(pill).text_color(t.foreground))
+            .when(!active, |el| el.text_color(t.muted_foreground))
             .on_click(move |ev, window, app| cb(i, ev, window, app));
-        if active {
-            item = item.bg(pill).text_color(t.foreground).shadow_sm();
-        } else {
-            item = item
-                .text_color(t.muted_foreground)
-                .hover(|s| s.text_color(t.foreground));
-        }
         row = row.child(item);
     }
     row
+}
+
+/// Single-line Input::h only affects multiline editors; use Styled::h to align
+/// actual input borders with the 32px form buttons.
+pub fn form_input(state: &Entity<InputState>) -> Input {
+    Styled::h(Input::new(state), px(32.))
 }
 
 /// Floating frosted-glass toolbar container (viewer top bar / badge base), fully rounded pill.
@@ -117,25 +104,21 @@ pub fn overlay_chip() -> Div {
         .rounded(px(14.))
 }
 
-/// macOS inset-grouped card container: surface background, 12px radius, low-contrast border.
-/// Reused by the detail page metadata and the settings groups.
-pub fn grouped_card(cx: &App) -> Div {
-    let t = cx.theme();
+/// Plain form group with a hairline separating the heading from its rows.
+pub fn form_group(cx: &App) -> Div {
     div()
         .flex()
         .flex_col()
-        .rounded(px(12.))
-        .bg(t.secondary)
-        .border_1()
-        .border_color(t.border)
+        .border_t_1()
+        .border_color(cx.theme().border)
 }
 
-/// 11px secondary-color caption above a grouped card (macOS form group label).
-pub fn card_title(text: impl Into<SharedString>, cx: &App) -> Div {
+/// Form section heading, shared by device metadata and settings.
+pub fn group_title(text: impl Into<SharedString>, cx: &App) -> Div {
     div()
-        .px_1()
         .pb_1()
-        .text_size(px(11.))
-        .text_color(cx.theme().muted_foreground)
+        .text_size(px(13.))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(cx.theme().foreground)
         .child(text.into())
 }

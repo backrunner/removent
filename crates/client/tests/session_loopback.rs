@@ -107,7 +107,7 @@ async fn full_session_pair_negotiate_media() {
             dpi: 192,
             is_main: true,
         };
-        let (established, kf_rx, bitrate_rx, cmd_rx, sink, source) = serve_connection(
+        let (established, kf_rx, quality_rx, cmd_rx, sink, source) = serve_connection(
             conn.clone(),
             &host_id,
             &mut peers,
@@ -131,25 +131,25 @@ async fn full_session_pair_negotiate_media() {
                 window_ms: 250,
                 input: Some(recorder_for_pump),
                 local_clip: Some(host_clip_for_pump),
-                bitrate_tx: None,
+                quality_tx: None,
                 caps: established.peer_caps,
                 clip_state: established.clip_state.clone(),
                 cancel: established.cancel.clone(),
                 peer_fp: Some(established.peer_fp_hex.clone()),
-                downgrade_rx: None,
+                delivery: None,
             };
             removent_host::spawn_control_pump(source, sink, deps, cmd_rx);
         }
 
         // Media loops (order: video first, then audio; the client accepts in this order).
-        let (video_tx, video_rx) = mpsc::channel::<(Vec<u8>, i64)>(4);
+        let (video_tx, video_rx) = removent_core::latest::channel::<(Vec<u8>, i64)>();
         let (audio_tx, audio_rx) = mpsc::channel::<removent_media_capture::AudioFrame>(16);
         let vstream = conn.open_media_stream().await.unwrap();
         let vhandle = spawn_video_loop(
             vstream,
             video_rx,
             kf_rx,
-            bitrate_rx,
+            quality_rx,
             established.ack.video.codec,
             W,
             H,
@@ -173,7 +173,6 @@ async fn full_session_pair_negotiate_media() {
         for t in 0..10usize {
             if video_tx
                 .send((synthetic_bgra(t), (t as i64) * 33_333))
-                .await
                 .is_err()
             {
                 break;
@@ -282,9 +281,12 @@ async fn full_session_pair_negotiate_media() {
     );
 
     // ---- receive decoded output ----
+    // Video is latest-value: the clipboard wait above deliberately leaves the
+    // consumer idle longer than the host's video burst, so only its latest
+    // decoded frame is guaranteed to remain. Audio is still a FIFO.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     let (mut frames, mut pcm) = (0usize, 0usize);
-    while tokio::time::Instant::now() < deadline && (frames < 5 || pcm < 5) {
+    while tokio::time::Instant::now() < deadline && (frames < 1 || pcm < 5) {
         tokio::select! {
             maybe = session.decoded_bgra_rx.recv() => match maybe {
                 Some(frame) => {
@@ -301,7 +303,7 @@ async fn full_session_pair_negotiate_media() {
             _ = tokio::time::sleep(Duration::from_millis(30)) => {}
         }
     }
-    assert!(frames >= 5, "decoded frames {frames}");
+    assert!(frames >= 1, "decoded frames {frames}");
     assert!(pcm >= 5, "decoded pcm {pcm}");
 
     // ---- verify input injection ----
@@ -330,7 +332,7 @@ async fn full_session_pair_negotiate_media() {
             .send_stats(30.0, 8.0, 1_000, 40.0)
             .await
             .expect("stats send");
-        tokio::time::sleep(Duration::from_millis(120)).await;
+        tokio::time::sleep(Duration::from_millis(250)).await;
     }
     let dl2 = tokio::time::Instant::now() + Duration::from_secs(3);
     loop {
@@ -1028,7 +1030,7 @@ async fn audio_disabled_session_uses_single_media_stream() {
             video_bitrate_kbps: 3_000,
             video_fps: 30,
             input_sink: None,
-            local_clip: None,
+            local_clip: Some(removent_core::MemoryClipboard::new()),
         };
         let interactions = HostInteractions {
             show_pairing_pin: Box::new(|_| panic!("trusted peer must not pair")),
@@ -1044,7 +1046,7 @@ async fn audio_disabled_session_uses_single_media_stream() {
             dpi: 192,
             is_main: true,
         };
-        let (established, kf_rx, bitrate_rx, cmd_rx, sink, source) = serve_connection(
+        let (established, kf_rx, quality_rx, cmd_rx, sink, source) = serve_connection(
             conn.clone(),
             &host_id,
             &mut peers,
@@ -1055,6 +1057,10 @@ async fn audio_disabled_session_uses_single_media_stream() {
         .await
         .expect("serve");
 
+        assert!(
+            established.clip_state.is_none(),
+            "declined clipboard must not start a host poller"
+        );
         // The peer declined audio: exactly one media stream, no audio loop (§5.2).
         assert!(
             !established.ack.audio.enabled,
@@ -1066,22 +1072,22 @@ async fn audio_disabled_session_uses_single_media_stream() {
             window_ms: 250,
             input: None,
             local_clip: None,
-            bitrate_tx: None,
+            quality_tx: None,
             caps: established.peer_caps,
             clip_state: established.clip_state.clone(),
             cancel: established.cancel.clone(),
             peer_fp: Some(established.peer_fp_hex.clone()),
-            downgrade_rx: None,
+            delivery: None,
         };
         removent_host::spawn_control_pump(source, sink, deps, cmd_rx);
 
-        let (video_tx, video_rx) = mpsc::channel::<(Vec<u8>, i64)>(4);
+        let (video_tx, video_rx) = removent_core::latest::channel::<(Vec<u8>, i64)>();
         let vstream = conn.open_media_stream().await.unwrap();
         let vhandle = spawn_video_loop(
             vstream,
             video_rx,
             kf_rx,
-            bitrate_rx,
+            quality_rx,
             established.ack.video.codec,
             W,
             H,
@@ -1096,7 +1102,6 @@ async fn audio_disabled_session_uses_single_media_stream() {
         for t in 0..10usize {
             if video_tx
                 .send((synthetic_bgra(t), (t as i64) * 33_333))
-                .await
                 .is_err()
             {
                 break;
@@ -1122,6 +1127,7 @@ async fn audio_disabled_session_uses_single_media_stream() {
             device_name: "AudioOffClient".into(),
             caps: Caps {
                 audio: false,
+                clipboard: false,
                 ..Caps::all()
             },
             local_clip: None,
@@ -1140,20 +1146,108 @@ async fn audio_disabled_session_uses_single_media_stream() {
 
     // Video decodes over the single media stream.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    let mut frames = 0usize;
-    while tokio::time::Instant::now() < deadline && frames < 5 {
+    let mut latest_pts = None;
+    while tokio::time::Instant::now() < deadline && latest_pts != Some(9 * 33_333) {
         match tokio::time::timeout(Duration::from_millis(500), session.decoded_bgra_rx.recv()).await
         {
             Ok(Some(frame)) => {
                 assert_eq!(frame.data.len(), W * H * 4);
-                frames += 1;
+                latest_pts = Some(frame.pts_us);
             }
             Ok(None) => break,
             Err(_) => {}
         }
     }
-    assert!(frames >= 5, "decoded frames {frames}");
+    // Coalescing may skip intermediate captures. The final capture must still
+    // reach the viewer, including when no more callbacks arrive afterwards.
+    assert_eq!(latest_pts, Some(9 * 33_333));
 
     session.close().await.expect("close");
     host_task.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelling_connect_aborts_pairing_while_pin_dialog_is_still_open() {
+    let (client_id, _cd) = identity_for("CancelClient");
+    let (host_id, _hd) = identity_for("CancelHost");
+    let (server, _) = make_server_endpoint(
+        "127.0.0.1:0".parse().unwrap(),
+        &host_id,
+        PinState::new([], true),
+    )
+    .unwrap();
+    let addr = server.local_addr().unwrap();
+    let (shown_tx, shown_rx) = oneshot::channel();
+    let host = tokio::spawn(async move {
+        let conn = RvpConnection::new(server.accept().await.unwrap().await.unwrap());
+        let mut peers = PeersStore::in_memory();
+        let cfg = HostConfig {
+            device_name: "CancelHost".into(),
+            admission: AdmissionMode::AlwaysAsk,
+            video_bitrate_kbps: 3000,
+            video_fps: 30,
+            input_sink: None,
+            local_clip: None,
+        };
+        let interactions = HostInteractions {
+            show_pairing_pin: Box::new(move |_| {
+                let _ = shown_tx.send(());
+            }),
+            admission_prompt: Box::new(|_, _| Box::pin(async { false })),
+        };
+        let display = removent_proto::DisplayInfo {
+            id: 1,
+            w_px: W as u32,
+            h_px: H as u32,
+            scale: 1.,
+            dpi: 96,
+            is_main: true,
+        };
+        serve_connection(conn, &host_id, &mut peers, &cfg, interactions, display)
+            .await
+            .is_err()
+    });
+    let (endpoint, _) = make_client_endpoint(
+        "127.0.0.1:0".parse().unwrap(),
+        &client_id,
+        PinState::new([], true),
+    )
+    .unwrap();
+    let (prompt_tx, prompt_rx) = oneshot::channel();
+    let client = tokio::spawn(async move {
+        connect_session(
+            endpoint,
+            addr,
+            &client_id,
+            ClientConfig {
+                device_name: "CancelClient".into(),
+                caps: Caps::all(),
+                local_clip: None,
+            },
+            None,
+            None,
+            Some(Box::new(move |pin_tx| {
+                let _ = prompt_tx.send(pin_tx);
+            })),
+        )
+        .await
+    });
+    // Keep the PIN sender alive: cancellation must stop pairing independently
+    // of whether the UI has already destroyed the dialog.
+    let _pin_dialog = tokio::time::timeout(Duration::from_secs(5), prompt_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), shown_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    client.abort();
+    assert!(matches!(client.await, Err(e) if e.is_cancelled()));
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), host)
+            .await
+            .expect("cancelled pairing must release the host promptly")
+            .unwrap()
+    );
 }

@@ -39,13 +39,26 @@ impl CompatibleDecompressionSession {
             decompression_output_callback: decode_trampoline,
             decompression_output_ref_con: Arc::as_ptr(&state).cast::<c_void>().cast_mut(),
         };
+        // Let VideoToolbox perform its optimized YUV conversion. Without an
+        // output format it returns NV12, requiring a scalar per-pixel CPU pass.
+        let format_key = unsafe {
+            apple_cf::cf::CFType::from_raw_retained(
+                apple_cf::raw::kCVPixelBufferPixelFormatTypeKey
+                    .cast_mut()
+                    .cast(),
+            )
+        }
+        .expect("pixel format key");
+        let format =
+            apple_cf::cf::CFNumber::from_i64(i64::from(crate::video::BGRA_FOURCC)).into_cf_type();
+        let attributes = apple_cf::cf::CFDictionary::from_pairs(&[(&format_key, &format)]);
         let mut session = std::ptr::null_mut();
         let status = unsafe {
             ffi::VTDecompressionSessionCreate(
                 ffi::kCFAllocatorDefault,
                 format_description.as_ptr().cast(),
                 std::ptr::null(),
-                std::ptr::null(),
+                attributes.as_ptr().cast(),
                 &record,
                 &mut session,
             )

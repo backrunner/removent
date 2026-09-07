@@ -1,6 +1,8 @@
 //! removent-client: controller-side session engine.
 
+pub mod connection;
 pub mod jitter;
+pub mod rdp;
 pub mod session;
 pub mod vnc;
 

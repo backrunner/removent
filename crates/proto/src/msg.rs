@@ -324,4 +324,10 @@ pub enum ControlMsg {
     NegotiateReply {
         ack: Box<NegotiateAck>,
     },
+    /// Client → host: geometry currently displayed by the input-producing viewer.
+    /// Ordered with MouseEvent so resizing cannot reinterpret old coordinates.
+    FrameGeometry {
+        width: u32,
+        height: u32,
+    },
 }

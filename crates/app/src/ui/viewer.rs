@@ -12,11 +12,11 @@ use gpui_component::{
     ActiveTheme, TITLE_BAR_HEIGHT, TitleBar,
     button::{Button, ButtonVariants},
 };
+use removent_core::latest::Receiver;
 use removent_proto::{KeyKind, KeyModifiers, MouseKind, ScrollPhase};
 use rust_i18n::t;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 actions!(viewer, [ViewerEscape, ViewerToggleFullscreen]);
@@ -43,6 +43,7 @@ const MOD_KEYS: [(KeyModifiers, u16); 6] = [
 
 pub struct ViewerView {
     engine: Engine,
+    session_generation: usize,
     current: Option<Arc<RenderImage>>,
     width: u32,
     height: u32,
@@ -80,7 +81,7 @@ pub struct ViewerView {
 impl ViewerView {
     pub fn new(
         engine: Engine,
-        frames_rx: Receiver<VideoFrame>,
+        mut frames_rx: Receiver<VideoFrame>,
         peer_name: String,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -88,71 +89,39 @@ impl ViewerView {
         let focus = cx.focus_handle();
         window.focus(&focus);
 
-        // std::mpsc → async bridge: only wakes the UI when a new frame arrives.
-        // Previously this was a self-rescheduling on_next_frame poll per frame, which kept
-        // spinning at refresh rate even when idle or disconnected.
-        let (tx_async, mut rx_async) = futures::channel::mpsc::unbounded::<VideoFrame>();
-        let bridge = std::thread::Builder::new()
-            .name("viewer-frame-bridge".into())
-            .spawn(move || {
-                // After the peer disconnects, recv returns Err; the bridge thread exits and
-                // the async-side stream ends accordingly.
-                while let Ok(frame) = frames_rx.recv() {
-                    if tx_async.unbounded_send(frame).is_err() {
+        // The single-slot channel wakes GPUI directly. No polling thread or
+        // unbounded intermediary is needed while the window is busy.
+        cx.spawn_in(
+            window,
+            async move |this: gpui::WeakEntity<ViewerView>, cx| {
+                while let Some(frame) = frames_rx.recv().await {
+                    if this
+                        .update_in(&mut *cx, |this, window, cx| {
+                            this.handle_frame(frame, window);
+                            if this.last_fps_tick.elapsed() >= Duration::from_secs(1) {
+                                this.fps_shown = this.fps_counter;
+                                this.fps_counter = 0;
+                                this.last_fps_tick = Instant::now();
+                            }
+                            cx.notify();
+                            window.refresh();
+                        })
+                        .is_err()
+                    {
                         break;
                     }
                 }
-            });
-        // spawn_in + update_in: obtain the Window handle and refresh the window explicitly
-        // after handling (entity notify does not bubble up to the window root Root
-        // automatically; window.refresh() is required).
-        let mut ended = false;
-        match bridge {
-            Ok(_) => {
-                cx.spawn_in(
-                    window,
-                    async move |this: gpui::WeakEntity<ViewerView>, cx| {
-                        use futures::StreamExt;
-                        while let Some(first) = rx_async.next().await {
-                            // Keep only the latest frame (drop the backlog); render latency takes priority.
-                            let mut latest = first;
-                            while let Ok(f) = rx_async.try_recv() {
-                                latest = f;
-                            }
-                            let r = this.update_in(&mut *cx, |this, window, cx| {
-                                this.handle_frame(latest);
-                                if this.last_fps_tick.elapsed() >= Duration::from_secs(1) {
-                                    this.fps_shown = this.fps_counter;
-                                    this.fps_counter = 0;
-                                    this.last_fps_tick = Instant::now();
-                                }
-                                cx.notify();
-                                window.refresh();
-                            });
-                            if r.is_err() {
-                                break;
-                            }
-                        }
-                        // Stream ended: peer disconnected (bridge thread exited) or the view was destroyed.
-                        let _ = this.update_in(&mut *cx, |this, window, cx| {
-                            this.ended = true;
-                            this.clip_clear_task = None;
-                            this.pressed_keys.clear();
-                            this.buttons = 0;
-                            cx.notify();
-                            window.refresh();
-                        });
-                    },
-                )
-                .detach();
-            }
-            // Thread spawn failure is unrecoverable for this session: show the
-            // ended overlay instead of panicking the whole app.
-            Err(e) => {
-                tracing::error!(err=%e, "viewer frame bridge spawn failed");
-                ended = true;
-            }
-        }
+                let _ = this.update_in(&mut *cx, |this, window, cx| {
+                    this.ended = true;
+                    this.clip_clear_task = None;
+                    this.pressed_keys.clear();
+                    this.buttons = 0;
+                    cx.notify();
+                    window.refresh();
+                });
+            },
+        )
+        .detach();
 
         // Focus-loss handling: release inputs still held remotely (macOS delivers
         // key-up only to the key window) and arm the local-clipboard clear timer
@@ -180,6 +149,7 @@ impl ViewerView {
         });
 
         Self {
+            session_generation: engine.client_generation(),
             engine,
             current: None,
             width: 0,
@@ -190,7 +160,7 @@ impl ViewerView {
             peer_name,
             toolbar_until: None,
             toolbar_seq: 0,
-            ended,
+            ended: false,
             focus,
             buttons: 0,
             sent_modifiers: KeyModifiers::empty(),
@@ -202,17 +172,27 @@ impl ViewerView {
         }
     }
 
-    /// Apply one frame: BGRA → RGBA conversion and RenderImage construction.
-    fn handle_frame(&mut self, frame: VideoFrame) {
+    /// GPUI RenderImage consumes BGRA bytes, despite using an RgbaImage container.
+    fn handle_frame(&mut self, frame: VideoFrame, window: &mut Window) {
         if frame.width == 0 || frame.height == 0 {
             return;
         }
-        let mut rgba = frame.data;
-        for px4 in rgba.as_chunks_mut::<4>().0 {
-            px4.swap(0, 2); // BGRA → RGBA
-        }
-        if let Some(buf) = image::RgbaImage::from_raw(frame.width, frame.height, rgba) {
-            self.current = Some(Arc::new(RenderImage::new(vec![image::Frame::new(buf)])));
+        if let Some(buf) = image::RgbaImage::from_raw(frame.width, frame.height, frame.data) {
+            let next = Arc::new(RenderImage::new(vec![image::Frame::new(buf)]));
+            if let Some(previous) = self.current.replace(next) {
+                // RenderImage IDs are unique. GPUI's sprite atlas does not
+                // evict them when the Arc drops, so release each retired frame.
+                let _ = window.drop_image(previous);
+            }
+            if self.width > 0
+                && self.height > 0
+                && let Some((x, y)) = &mut self.last_mouse
+            {
+                *x *= frame.width as f32 / self.width as f32;
+                *y *= frame.height as f32 / self.height as f32;
+            }
+            self.engine
+                .set_frame_geometry(self.session_generation, frame.width, frame.height);
             self.width = frame.width;
             self.height = frame.height;
             self.fps_counter += 1;
@@ -223,13 +203,16 @@ impl ViewerView {
         self.clip_clear_task = None;
         self.pressed_keys.clear();
         self.buttons = 0;
-        self.engine.disconnect_client();
+        self.engine.disconnect_client_if(self.session_generation);
         window.remove_window();
     }
 
     /// Input is forwarded only while a live session is streaming frames.
     fn input_active(&self) -> bool {
-        !self.ended && self.width > 0 && self.height > 0
+        !self.ended
+            && self.engine.client_generation() == self.session_generation
+            && self.width > 0
+            && self.height > 0
     }
 
     /// Map a window point to remote frame pixels, accounting for the title bar and
@@ -293,7 +276,7 @@ impl ViewerView {
     /// (client layout wins), so vk_code only needs to be right for command and
     /// navigation keys.
     fn forward_key(&mut self, keystroke: &Keystroke, kind: KeyKind) {
-        if !self.input_active() {
+        if !self.input_active() || is_viewer_shortcut(keystroke) {
             return;
         }
         let key = keystroke.key.as_str();
@@ -312,8 +295,9 @@ impl ViewerView {
         else {
             return;
         };
+        let modifiers = key_modifiers(&keystroke.modifiers, self.sent_modifiers);
         self.engine
-            .send_input_key(vk_code, gpui_modifiers(&keystroke.modifiers), kind, unicode);
+            .send_input_key(vk_code, modifiers, kind, unicode);
         // Track forwarded-but-unreleased keys so a focus loss can release them
         // (auto-repeat Down events re-insert the same vk, which is idempotent).
         match kind {
@@ -332,6 +316,9 @@ impl ViewerView {
     /// window deactivates would stay stuck on the host: plain keys auto-repeat,
     /// and a stuck Command turns every local click into Cmd+click.
     fn release_held_inputs(&mut self) {
+        if self.engine.client_generation() != self.session_generation {
+            return;
+        }
         let modifiers = self.sent_modifiers;
         for vk_code in self.pressed_keys.drain() {
             self.engine
@@ -339,19 +326,18 @@ impl ViewerView {
         }
         // A modifier released while unfocused produces no ModifiersChanged here,
         // so release every bit still set (same FlagsChanged path as
-        // forward_modifiers, with an empty modifier state).
+        // forward_modifiers, clearing the held modifier flags).
         if !modifiers.is_empty() {
+            // Caps Lock is a toggle, not a held key. Keep it across focus loss
+            // so subsequent keystrokes retain the last observed lock state.
+            let released = modifiers & KeyModifiers::CAPS_LOCK;
             for (bit, vk) in MOD_KEYS {
-                if modifiers.contains(bit) {
-                    self.engine.send_input_key(
-                        vk,
-                        KeyModifiers::empty(),
-                        KeyKind::FlagsChanged,
-                        None,
-                    );
+                if bit != KeyModifiers::CAPS_LOCK && modifiers.contains(bit) {
+                    self.engine
+                        .send_input_key(vk, released, KeyKind::FlagsChanged, None);
                 }
             }
-            self.sent_modifiers = KeyModifiers::empty();
+            self.sent_modifiers = released;
         }
         if let Some((x, y)) = self.last_mouse {
             // (button bit, release kind); the bitmask shrinks as we go so the
@@ -472,15 +458,8 @@ impl ViewerView {
     fn render_badge(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors;
         let mono = cx.theme().mono_font_family.clone();
-        let health = if self.width == 0 {
-            Health::Unknown
-        } else if self.fps_shown >= 24 {
-            Health::Good
-        } else if self.fps_shown >= 10 {
-            Health::Fair
-        } else {
-            Health::Poor
-        };
+        // Static-frame dedup can produce 0–1 fps on a healthy connection.
+        // Render cadence alone cannot establish transport health.
         let label = if self.width == 0 {
             t!("viewer.waiting").to_string()
         } else {
@@ -491,7 +470,7 @@ impl ViewerView {
                 .bg(colors.overlay)
                 .border_1()
                 .border_color(colors.border)
-                .child(dot(health.color(cx)))
+                .child(dot(colors.muted_foreground))
                 .child(
                     div()
                         .text_size(px(11.))
@@ -515,16 +494,15 @@ impl ViewerView {
                 div()
                     .w(px(320.))
                     .p_5()
-                    .rounded(px(14.))
+                    .rounded(px(10.))
                     .bg(colors.popover)
                     .border_1()
                     .border_color(colors.border)
-                    .shadow_lg()
+                    .shadow_md()
                     .flex()
                     .flex_col()
                     .items_center()
                     .gap_3()
-                    .child(icon("alert-triangle").text_color(colors.warning))
                     .child(
                         div()
                             .text_size(px(15.))
@@ -559,7 +537,7 @@ impl Drop for ViewerView {
     fn drop(&mut self) {
         // Ensure the session task is terminated when the window is closed
         // (traffic lights / Esc / button).
-        self.engine.disconnect_client();
+        self.engine.disconnect_client_if(self.session_generation);
     }
 }
 
@@ -763,7 +741,18 @@ impl Render for ViewerView {
     }
 }
 
+/// Reserve only explicit local shortcuts; bare Escape and Cmd-F belong to
+/// the remote application. Suppress both key-down and key-up forwarding.
+fn is_viewer_shortcut(key: &Keystroke) -> bool {
+    key.modifiers.control && key.modifiers.platform && matches!(key.key.as_str(), "escape" | "f")
+}
+
 /// gpui modifiers → wire bitmask.
+fn key_modifiers(modifiers: &gpui::Modifiers, sent: KeyModifiers) -> KeyModifiers {
+    // GPUI Keystroke modifiers omit Caps Lock; its state arrives separately.
+    gpui_modifiers(modifiers) | (sent & KeyModifiers::CAPS_LOCK)
+}
+
 fn gpui_modifiers(m: &gpui::Modifiers) -> KeyModifiers {
     let mut out = KeyModifiers::empty();
     if m.shift {
@@ -899,4 +888,41 @@ pub fn open_viewer_window(
         },
     );
     handle.map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keystrokes_preserve_caps_lock_from_modifier_notifications() {
+        let modifiers = gpui::Modifiers {
+            shift: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            key_modifiers(&modifiers, KeyModifiers::CAPS_LOCK),
+            KeyModifiers::SHIFT | KeyModifiers::CAPS_LOCK
+        );
+        assert_eq!(
+            key_modifiers(&modifiers, KeyModifiers::empty()),
+            KeyModifiers::SHIFT
+        );
+    }
+
+    #[test]
+    fn escape_and_find_belong_to_remote_except_explicit_local_chords() {
+        for (key, local) in [
+            ("escape", false),
+            ("cmd-f", false),
+            ("ctrl-cmd-escape", true),
+            ("ctrl-cmd-f", true),
+        ] {
+            assert_eq!(
+                is_viewer_shortcut(&Keystroke::parse(key).unwrap()),
+                local,
+                "{key}"
+            );
+        }
+    }
 }

@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="shell" x1="220" y1="100" x2="804" y2="940" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/><stop offset=".46" stop-color="#F6F8FC"/><stop offset="1" stop-color="#E1E7F1"/>
+    </linearGradient>
+    <linearGradient id="tileEdge" x1="512" y1="98" x2="512" y2="924" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/><stop offset=".5" stop-color="#FFFFFF" stop-opacity=".5"/><stop offset="1" stop-color="#BBC8DF"/>
+    </linearGradient>
+    <linearGradient id="near" x1="256" y1="402" x2="599" y2="691" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6993FF"/><stop offset=".4" stop-color="#476EED"/><stop offset="1" stop-color="#5140CE"/>
+    </linearGradient>
+    <linearGradient id="nearEdge" x1="277" y1="406" x2="603" y2="678" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D5E5FF"/><stop offset=".5" stop-color="#7596F7"/><stop offset="1" stop-color="#A395F1"/>
+    </linearGradient>
+    <linearGradient id="far" x1="466" y1="326" x2="747" y2="604" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7BEBE2"/><stop offset=".44" stop-color="#47C9DA"/><stop offset="1" stop-color="#318DDA"/>
+    </linearGradient>
+    <linearGradient id="farEdge" x1="466" y1="328" x2="766" y2="600" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#DCFFF7"/><stop offset=".5" stop-color="#85E4ED"/><stop offset="1" stop-color="#87C6F4"/>
+    </linearGradient>
+    <!-- Two display-shaped apertures; their crossing is the connection. -->
+    <path id="local" fill-rule="evenodd" d="M311 411H506C558 411 599 452 599 504V591C599 643 558 684 506 684H311C259 684 218 643 218 591V504C218 452 259 411 311 411ZM311 471C292 471 278 485 278 504V591C278 610 292 624 311 624H506C525 624 539 610 539 591V504C539 485 525 471 506 471Z"/>
+    <path id="remote" fill-rule="evenodd" d="M512 325H707C759 325 800 366 800 418V505C800 557 759 598 707 598H512C460 598 419 557 419 505V418C419 366 460 325 512 325ZM512 385C493 385 479 399 479 418V505C479 524 493 538 512 538H707C726 538 740 524 740 505V418C740 399 726 385 707 385Z"/>
+    <clipPath id="crossing"><rect x="416" y="502" width="209" height="101"/></clipPath>
+  </defs>
+  <g id="tile">
+    <rect x="100" y="106" width="824" height="824" rx="184" fill="#ADBBD3"/>
+    <rect x="100" y="96" width="824" height="824" rx="184" fill="url(#shell)"/>
+    <rect x="102" y="98" width="820" height="820" rx="182" fill="none" stroke="url(#tileEdge)" stroke-width="3"/>
+  </g>
+  <g id="symbol" transform="rotate(-16 512 512)">
+    <use href="#remote" transform="translate(0 10)" fill="#276E9D"/>
+    <use href="#remote" fill="url(#far)" stroke="url(#farEdge)" stroke-width="2"/>
+    <use href="#local" transform="translate(0 10)" fill="#302A8D"/>
+    <use href="#local" fill="url(#near)" stroke="url(#nearEdge)" stroke-width="2"/>
+    <!-- Restore the front segment so the windows interlock rather than stack. -->
+    <g clip-path="url(#crossing)">
+      <use href="#remote" transform="translate(0 10)" fill="#245C94"/>
+      <use href="#remote" fill="url(#far)" stroke="url(#farEdge)" stroke-width="2"/>
+    </g>
+  </g>
+</svg>

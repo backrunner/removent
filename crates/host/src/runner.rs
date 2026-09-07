@@ -82,42 +82,44 @@ fn known_fingerprints(paths: &DataPaths) -> Vec<[u8; 32]> {
 /// The handshake read inside is bounded by the server-side accept timeout, so a
 /// stalled busy-path client cannot leak the spawned task either.
 pub fn reject_busy(conn: RvpConnection, device_name: String, paths: DataPaths) {
-    tokio::spawn(async move {
-        // Honest pairing hint, computed like serve_connection does: a trusted peer
-        // hitting a busy host must not see a PIN-popup flash.
-        let peer_known = conn
-            .peer_fingerprint()
-            .map(hex::encode)
-            .and_then(|fp| {
-                PeersStore::load(&paths)
-                    .ok()
-                    .map(|peers| peers.by_fingerprint(&fp).is_some())
-            })
-            .unwrap_or(false);
-        let hs = HandshakeServer {
-            proto_version: PROTO_VERSION,
-            // Honest declaration, same as serve_connection.
-            feature_bits: 0,
-            device_name,
-            resume_accepted: None,
-            peer_known,
-        };
-        match conn.accept_handshake(|_| hs).await {
-            Ok((_hello, mut sink, _source)) => {
-                let _ = sink
-                    .send(ControlMsg::SessionReject {
-                        reason: removent_proto::RejectReason::Busy,
-                    })
-                    .await;
-                // Hold the connection until the peer closes (bounded): an immediate
-                // drop sends CONNECTION_CLOSE, which can race ahead of the reject
-                // frame and leave the client with a bare "application closed".
-                let _ = tokio::time::timeout(Duration::from_secs(2), conn.inner().closed()).await;
-            }
-            Err(e) => tracing::warn!(err=%e, "busy-reject handshake failed"),
+    tokio::spawn(reject_busy_inner(conn, device_name, paths));
+}
+
+async fn reject_busy_inner(conn: RvpConnection, device_name: String, paths: DataPaths) {
+    // Honest pairing hint, computed like serve_connection does: a trusted peer
+    // hitting a busy host must not see a PIN-popup flash.
+    let peer_known = conn
+        .peer_fingerprint()
+        .map(hex::encode)
+        .and_then(|fp| {
+            PeersStore::load(&paths)
+                .ok()
+                .map(|peers| peers.by_fingerprint(&fp).is_some())
+        })
+        .unwrap_or(false);
+    let hs = HandshakeServer {
+        proto_version: PROTO_VERSION,
+        // Honest declaration, same as serve_connection.
+        feature_bits: 0,
+        device_name,
+        resume_accepted: None,
+        peer_known,
+    };
+    match conn.accept_handshake(|_| hs).await {
+        Ok((_hello, mut sink, _source)) => {
+            let _ = sink
+                .send(ControlMsg::SessionReject {
+                    reason: removent_proto::RejectReason::Busy,
+                })
+                .await;
+            // Hold the connection until the peer closes (bounded): an immediate
+            // drop sends CONNECTION_CLOSE, which can race ahead of the reject
+            // frame and leave the client with a bare "application closed".
+            let _ = tokio::time::timeout(Duration::from_secs(2), conn.inner().closed()).await;
         }
-        // The connection closes when dropped.
-    });
+        Err(e) => tracing::warn!(err=%e, "busy-reject handshake failed"),
+    }
+    // The connection closes when dropped.
 }
 
 /// Resets the mDNS busy bit when the session task exits (any path).
@@ -128,6 +130,41 @@ impl Drop for BusyGuard {
         if let Err(e) = self.0.set_busy(false) {
             tracing::warn!(err=%e, "mDNS busy-bit reset failed");
         }
+    }
+}
+
+/// Dropping a JoinHandle detaches it; session children must instead be aborted.
+#[derive(Default)]
+struct SessionTasks(Vec<tokio::task::JoinHandle<()>>);
+
+impl Drop for SessionTasks {
+    fn drop(&mut self) {
+        for task in &self.0 {
+            task.abort();
+        }
+    }
+}
+
+struct SessionExit {
+    cancel: CancellationToken,
+    active: Arc<std::sync::Mutex<Option<CancellationToken>>>,
+    cbs: Arc<HostCallbacks>,
+}
+
+impl Drop for SessionExit {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+        self.active.lock().unwrap().take();
+        (self.cbs.on_event)(HostEvent::SessionEnded {
+            reason: "peer disconnected".into(),
+        });
+    }
+}
+
+struct CloseConnection(RvpConnection);
+impl Drop for CloseConnection {
+    fn drop(&mut self) {
+        self.0.inner().close(0u32.into(), b"session ended");
     }
 }
 
@@ -176,10 +213,13 @@ pub async fn serve_forever(
     // share the same screen capture and input injection resources.
     let session_slot = Arc::new(tokio::sync::Semaphore::new(1));
 
+    let _shutdown_on_drop = shutdown.clone().drop_guard();
+    let mut connections = tokio::task::JoinSet::new();
+
     // Optional legacy RFB listener. It shares the host's input sink but has an
     // independent TCP lifecycle and framebuffer capture per VNC client.
     let vnc_shutdown = shutdown.child_token();
-    let mut vnc_task = if settings.vnc_enabled {
+    if settings.vnc_enabled {
         let vnc_cfg = VncConfig {
             bind_addr: SocketAddr::from(([0, 0, 0, 0], settings.vnc_port)),
             password: settings.vnc_password.clone(),
@@ -187,14 +227,12 @@ pub async fn serve_forever(
             shutdown: vnc_shutdown.clone(),
             session_slot: session_slot.clone(),
         };
-        Some(tokio::spawn(async move {
+        connections.spawn(async move {
             if let Err(e) = serve_vnc(vnc_cfg).await {
                 tracing::error!(err=%e, "VNC listener failed");
             }
-        }))
-    } else {
-        None
-    };
+        });
+    }
 
     let cbs = Arc::new(cbs);
     // Further RVP connections get SessionReject{Busy}; VNC connections are
@@ -209,27 +247,18 @@ pub async fn serve_forever(
         }
         let incoming = tokio::select! {
             _ = shutdown.cancelled() => break,
+            _ = connections.join_next(), if !connections.is_empty() => continue,
             incoming = ep_server.accept() => incoming,
         };
         let Some(incoming) = incoming else {
-            anyhow::bail!("endpoint closed");
+            break;
         };
-        let quinn_conn = match incoming.await {
-            Ok(c) => c,
-            // A failed handshake (peer gave up mid-handshake, TLS alert) must
-            // not kill the accept loop.
-            Err(e) => {
-                tracing::warn!(err=%e, "connection handshake failed");
-                continue;
-            }
-        };
-        let conn = RvpConnection::new(quinn_conn);
-
-        let Ok(permit) = session_slot.clone().try_acquire_owned() else {
-            reject_busy(conn, settings.device_name.clone(), cfg.paths.clone());
+        // Bound handshake/busy-reject tasks as well as established sessions.
+        // A slow TLS peer must not serialize acceptance of healthy peers.
+        if connections.len() >= 16 {
+            incoming.refuse();
             continue;
-        };
-
+        }
         let ctx = ConnectionCtx {
             paths: cfg.paths.clone(),
             settings: settings.clone(),
@@ -240,20 +269,44 @@ pub async fn serve_forever(
             advertiser: advertiser.clone(),
             active_session: active_session.clone(),
         };
-        tokio::spawn(run_connection(ctx, conn, permit));
+        let stop = shutdown.clone();
+        let slot = session_slot.clone();
+        connections.spawn(async move {
+            let work = async move {
+                let quinn_conn = match incoming.await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!(err=%e, "connection handshake failed");
+                        return;
+                    }
+                };
+                let conn = RvpConnection::new(quinn_conn);
+                let _close = CloseConnection(conn.clone());
+                let Ok(permit) = slot.try_acquire_owned() else {
+                    reject_busy_inner(conn, ctx.settings.device_name, ctx.paths).await;
+                    return;
+                };
+                run_connection(ctx, conn, permit).await;
+            };
+            tokio::select! {
+                biased;
+                _ = stop.cancelled() => {},
+                _ = work => {},
+            }
+        });
     }
 
-    // Graceful stop: cancel the active session so the control pump runs its
-    // teardown (release_all for held keys/buttons), and give it a short window
-    // before the endpoint and this process's runtime context go away.
-    let active_cancel = active_session.lock().unwrap().take();
-    if let Some(cancel) = active_cancel {
-        cancel.cancel();
-        tokio::time::sleep(Duration::from_millis(300)).await;
-    }
+    // Cancellation reaches pairing/admission as well as media sessions.
+    shutdown.cancel();
+    ep_server.close(0u32.into(), b"host stopped");
     vnc_shutdown.cancel();
-    if let Some(task) = vnc_task.take() {
-        let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+    if tokio::time::timeout(Duration::from_secs(1), async {
+        while connections.join_next().await.is_some() {}
+    })
+    .await
+    .is_err()
+    {
+        connections.shutdown().await;
     }
     drop(advertiser);
     Ok(())
@@ -318,7 +371,7 @@ async fn run_connection(
     )
     .await;
 
-    let (established, kf_rx, bitrate_rx, cmd_rx, sink, source) = match served {
+    let (established, kf_rx, quality_rx, cmd_rx, sink, source) = match served {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(err=%e, "connection closed before session established");
@@ -348,6 +401,12 @@ async fn run_connection(
     let _busy_guard = BusyGuard(ctx.advertiser.clone());
     // Expose the session stop token for the graceful-shutdown path.
     *ctx.active_session.lock().unwrap() = Some(established.cancel.clone());
+    let _exit = SessionExit {
+        cancel: established.cancel.clone(),
+        active: ctx.active_session.clone(),
+        cbs: ctx.cbs.clone(),
+    };
+    let mut tasks = SessionTasks::default();
 
     // Warn once if input injection would silently fail (Accessibility TCC).
     if host_cfg.input_sink.is_some() && !removent_input::accessibility_trusted() {
@@ -356,9 +415,8 @@ async fn run_connection(
         );
     }
 
-    // SendGate downgrades are routed through the pump's adaptation controller
-    // (single owner of bitrate state).
-    let (downgrade_tx, downgrade_rx) = tokio::sync::mpsc::channel::<()>(4);
+    // The control pump samples actual delivery and owns the complete quality state.
+    let delivery = Arc::new(crate::delivery::DeliveryHealth::new(conn.clone()));
 
     // Control pump: input injection / clipboard application / adaptive delivery
     // (trimmed by the peer's capabilities).
@@ -368,18 +426,18 @@ async fn run_connection(
         window_ms: 250,
         input: host_cfg.input_sink.clone(),
         local_clip: host_cfg.local_clip.clone(),
-        bitrate_tx: Some(established.bitrate_tx.clone()),
+        quality_tx: Some(established.quality_tx.clone()),
         caps: established.peer_caps,
         clip_state: established.clip_state.clone(),
         cancel: established.cancel.clone(),
         peer_fp: Some(established.peer_fp_hex.clone()),
-        downgrade_rx: Some(downgrade_rx),
+        delivery: Some(delivery.clone()),
     };
-    spawn_control_pump(source, sink, deps, cmd_rx);
+    tasks.0.push(spawn_control_pump(source, sink, deps, cmd_rx));
 
     // Media loops + SCK capture. The capture is aspect-fit into the 1920×1080
     // bounding box (independent clamping would stretch e.g. 16:10 panels).
-    let (video_tx, video_rx) = tokio::sync::mpsc::channel::<(Vec<u8>, i64)>(4);
+    let (video_tx, video_rx) = removent_core::latest::channel::<(Vec<u8>, i64)>();
     let (audio_tx, audio_rx) = tokio::sync::mpsc::channel::<removent_media_capture::AudioFrame>(32);
     let (cap_w, cap_h) = fit_capture_dims(display.w_px, display.h_px);
     let (w, h) = (cap_w as usize, cap_h as usize);
@@ -396,11 +454,11 @@ async fn run_connection(
             return;
         }
     };
-    let vhandle = spawn_video_loop(
+    tasks.0.push(spawn_video_loop(
         vstream,
         video_rx,
         kf_rx,
-        bitrate_rx,
+        quality_rx,
         established.ack.video.codec,
         w,
         h,
@@ -410,13 +468,13 @@ async fn run_connection(
         // Fatal encoder errors end the session explicitly (client is notified).
         Some(established.cmd_tx.clone()),
         display.id,
-        Some(downgrade_tx),
+        Some(delivery),
         host_cfg.input_sink.clone(),
-    );
+    ));
     // Audio follows the negotiation result: a peer that declined audio gets no
     // audio stream, no encode loop, and no audio capture (§5.2).
     let audio_enabled = established.ack.audio.enabled;
-    let ahandle = if audio_enabled {
+    if audio_enabled {
         let astream = match conn.open_media_stream().await {
             Ok(s) => s,
             Err(e) => {
@@ -425,15 +483,13 @@ async fn run_connection(
                 return;
             }
         };
-        Some(spawn_audio_loop(
+        tasks.0.push(spawn_audio_loop(
             astream,
             audio_rx,
             established.ack.audio.bitrate_kbps,
             established.cancel.clone(),
-        ))
-    } else {
-        None
-    };
+        ));
+    }
 
     let mut cap = removent_media_capture::start_display_capture(
         display.id as u32,
@@ -450,7 +506,7 @@ async fn run_connection(
             if let Some(mut stopped_rx) = cap.take_stopped_rx() {
                 let cmd_tx = established.cmd_tx.clone();
                 let cancel = established.cancel.clone();
-                tokio::spawn(async move {
+                tasks.0.push(tokio::spawn(async move {
                     if let Some(reason) = stopped_rx.recv().await {
                         tracing::error!(%reason, "capture stream stopped unexpectedly");
                         let _ = cmd_tx
@@ -458,9 +514,11 @@ async fn run_connection(
                                 reason: removent_proto::EndReason::InternalError,
                             })
                             .await;
+                        let _ =
+                            tokio::time::timeout(Duration::from_secs(1), cancel.cancelled()).await;
                         cancel.cancel();
                     }
-                });
+                }));
             }
         }
         Err(e) => {
@@ -474,17 +532,105 @@ async fn run_connection(
                     reason: removent_proto::EndReason::InternalError,
                 })
                 .await;
+            let _ =
+                tokio::time::timeout(Duration::from_secs(1), established.cancel.cancelled()).await;
             established.cancel.cancel();
         }
     }
 
-    let _ = vhandle.await;
-    if let Some(ah) = ahandle {
-        let _ = ah.await;
-    }
+    established.cancel.cancelled().await;
     drop(cap);
-    ctx.active_session.lock().unwrap().take();
-    (ctx.cbs.on_event)(HostEvent::SessionEnded {
-        reason: "peer disconnected".into(),
-    });
+    // Release input before returning the session permit. Drop handles safely
+    // on early return or cancellation as well.
+    tasks.0[0].abort();
+    let _ = (&mut tasks.0[0]).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use removent_proto::{HandshakeClient, Hello};
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn shutdown_reaps_connection_waiting_for_pairing() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths {
+            root: dir.path().to_owned(),
+        };
+        let id = identity::load_or_create(&paths, "shutdown-test").unwrap();
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let addr = socket.local_addr().unwrap();
+        drop(socket);
+        let stop = CancellationToken::new();
+        // Callbacks are retained by ConnectionCtx: a leaked negotiation task
+        // would keep this sentinel alive after serve_forever returns.
+        let sentinel = Arc::new(());
+        let weak = Arc::downgrade(&sentinel);
+        let cfg = HostRunnerConfig {
+            paths,
+            settings: Settings {
+                host_port: addr.port(),
+                vnc_enabled: false,
+                ..Settings::default()
+            },
+            input_sink: None,
+            local_clip: None,
+        };
+        let mut task = tokio::spawn(serve_forever(
+            cfg,
+            HostCallbacks {
+                show_pairing_pin: Box::new(|_| {}),
+                admission_prompt: Box::new(|_, _| Box::pin(async { true })),
+                on_event: Box::new(move |_| {
+                    let _keep = &sentinel;
+                }),
+            },
+            Arc::new(AtomicBool::new(true)),
+            stop.clone(),
+        ));
+        let (client, _) = removent_net::make_client_endpoint(
+            "127.0.0.1:0".parse().unwrap(),
+            &id,
+            PinState::new([], true),
+        )
+        .unwrap();
+        let conn = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.connect(addr, "removent").unwrap(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let conn = RvpConnection::new(conn);
+        let _control = conn
+            .connect_handshake(HandshakeClient {
+                magic: removent_proto::MAGIC,
+                proto_version: PROTO_VERSION,
+                feature_bits: 0,
+                hello: Hello {
+                    app_version: "test".into(),
+                    device_name: "test".into(),
+                    os_version: "test".into(),
+                    caps: Caps::all(),
+                    resume_token: None,
+                },
+            })
+            .await
+            .unwrap();
+        // No pairing stream arrives. Previously this task survived host stop
+        // for the full pairing deadline and retained the advertiser/resources.
+        stop.cancel();
+        tokio::time::timeout(Duration::from_secs(2), &mut task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(
+            weak.upgrade().is_none(),
+            "negotiation task retained runner callbacks"
+        );
+        tokio::time::timeout(Duration::from_secs(1), conn.inner().closed())
+            .await
+            .unwrap();
+    }
 }

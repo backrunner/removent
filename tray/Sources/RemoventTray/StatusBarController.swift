@@ -82,6 +82,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func handle(_ message: DaemonMessage) {
         switch message {
         case .status(let s):
+            guard status != s else { return }
             status = s
             pendingPin = s.pending_pin
             trayLog("status: \(s.running ? "running" : "stopped"), port \(s.port), device \(s.device_name), fingerprint \(s.fp_short), sessions \(s.sessions.count)")
@@ -149,7 +150,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     /// Whether the main app (GPUI window) is running: while running, admission
     /// and pairing alerts are preferably handled by the main app.
     private var mainAppRunning: Bool {
-        !NSRunningApplication.runningApplications(withBundleIdentifier: "io.removent.app").isEmpty
+        if let path = ProcessInfo.processInfo.environment["REMOVENT_DEV_APP"] {
+            return NSWorkspace.shared.runningApplications.contains { $0.executableURL?.path == path }
+        }
+        return !NSRunningApplication.runningApplications(withBundleIdentifier: "io.removent.app").isEmpty
     }
 
     /// Queue admission requests that arrive while an alert is being shown
@@ -367,6 +371,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func openMainApp() {
+        if let path = ProcessInfo.processInfo.environment["REMOVENT_DEV_APP"],
+           let app = NSWorkspace.shared.runningApplications.first(where: { $0.executableURL?.path == path }) {
+            app.activate(options: [.activateAllWindows])
+            return
+        }
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "io.removent.app") else {
             trayLog("main app not installed (bundle id io.removent.app not found)")
             showErrorAlert(messageText: String(localized: "alert.main_app_not_found", bundle: .module, comment: "Error alert: main app not installed"),

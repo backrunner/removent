@@ -60,7 +60,8 @@ fi
 
 export REMOVENT_DATA_DIR="${REMOVENT_DATA_DIR:-$PWD/userdata/dev}"
 mkdir -p "$REMOVENT_DATA_DIR"
-export REMOVENT_DATA_DIR="$(cd "$REMOVENT_DATA_DIR" && pwd)"
+REMOVENT_DATA_DIR="$(cd "$REMOVENT_DATA_DIR" && pwd)"
+export REMOVENT_DATA_DIR
 # Supervise the exact debug helpers here. Release autostart must not select
 # an older Swift release build, a packaged tray, or a different data directory.
 export REMOVENT_NO_TRAY=1

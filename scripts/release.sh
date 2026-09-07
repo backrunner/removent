@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Build → sign → notarize → staple → archive → sign manifest. No unsigned releases.
 set -euo pipefail
+# Signing keys are created securely by the caller before invoking this script.
+# Everything created here is a public build artifact (including stapled tickets).
+umask 022
 cd "$(dirname "$0")/.."
 source scripts/macos_env.sh
 VERSION=$(python3 scripts/release_meta.py version)

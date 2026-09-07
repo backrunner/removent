@@ -1144,8 +1144,10 @@ async fn audio_disabled_session_uses_single_media_stream() {
         "client ack must have audio disabled"
     );
 
-    // Video decodes over the single media stream.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    // Verify stream layout and delivery, not hardware startup latency. A cold
+    // VideoToolbox session on a busy machine can consume most of ten seconds.
+    // Keep a bounded wait while allowing initialization under build load.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     let mut latest_pts = None;
     while tokio::time::Instant::now() < deadline && latest_pts != Some(9 * 33_333) {
         match tokio::time::timeout(Duration::from_millis(500), session.decoded_bgra_rx.recv()).await

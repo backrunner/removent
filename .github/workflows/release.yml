@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing release tag, for example v0.1.0-beta.1'
+        description: 'Existing release tag, for example v0.1.0-beta.2'
         required: true
         type: string
 
@@ -32,10 +32,45 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
+      - name: Verify notarization credentials
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f "$RUNNER_TEMP/notary-check.p8" "$RUNNER_TEMP/notary-history.json"' EXIT
+          if [ -n "$APPLE_API_KEY_BASE64" ]; then
+              test -n "$APPLE_API_KEY_ID"
+              test -n "$APPLE_API_ISSUER"
+              printf '%s' "$APPLE_API_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/notary-check.p8"
+              xcrun notarytool history --key "$RUNNER_TEMP/notary-check.p8" \
+                  --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" \
+                  --output-format json > "$RUNNER_TEMP/notary-history.json"
+          else
+              test -n "$APPLE_ID"
+              test -n "$APPLE_PASSWORD"
+              test -n "$APPLE_TEAM_ID"
+              printf '%s\n' "$APPLE_PASSWORD" | xcrun notarytool history \
+                  --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+                  --output-format json > "$RUNNER_TEMP/notary-history.json"
+          fi
+          echo 'Apple notarization authentication passed'
+      - name: Import Developer ID certificate
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -56,11 +91,6 @@ jobs:
           cargo clippy --locked --workspace --all-targets -- -D warnings
           cargo test --locked --workspace -- --test-threads=1
           python3 scripts/gen_latest.py --self-test
-      - name: Import Developer ID certificate
-        uses: apple-actions/import-codesign-certs@v3
-        with:
-          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
-          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       - name: Build and notarize
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}

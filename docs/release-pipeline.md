@@ -1,6 +1,6 @@
 # Removent beta 发布指南
 
-首版：`0.1.0-beta.1`，Apple Silicon，macOS 13+。分发采用 Developer ID 签名、公证的 GitHub Releases；这不是 Mac App Store 提交流程。商店提交还需要独立评估沙盒、权限及审核要求，并使用商店更新渠道。
+首个公开版本：`0.1.0-beta.2`，Apple Silicon，macOS 13+。分发采用 Developer ID 签名、公证的 GitHub Releases；这不是 Mac App Store 提交流程。商店提交还需要独立评估沙盒、权限及审核要求，并使用商店更新渠道。
 
 ```mermaid
 flowchart LR

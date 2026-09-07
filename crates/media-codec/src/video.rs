@@ -639,9 +639,27 @@ impl VideoEncoder {
         // encode waits for CompleteFrames, so the surface can be reused once
         // each call returns instead of allocating a new IOSurface every frame.
         if self.surface.is_none() {
+            // VideoToolbox can import the surface as a Metal texture. An even
+            // width alone does not guarantee its required 16-byte row alignment
+            // (318 BGRA pixels occupy 1272 bytes). The default IOSurface allocator
+            // does not add padding on every driver, so request it explicitly.
+            let stride = bpr_expected
+                .checked_next_multiple_of(64)
+                .ok_or_else(|| VideoError::Surface("row stride overflow".into()))?;
+            let alloc_size = stride
+                .checked_mul(self.height)
+                .ok_or_else(|| VideoError::Surface("allocation size overflow".into()))?;
             self.surface = Some(
-                IOSurface::create(self.width, self.height, BGRA_FOURCC, 4)
-                    .ok_or_else(|| VideoError::Surface("create failed".into()))?,
+                IOSurface::create_with_properties(
+                    self.width,
+                    self.height,
+                    BGRA_FOURCC,
+                    4,
+                    stride,
+                    alloc_size,
+                    None,
+                )
+                .ok_or_else(|| VideoError::Surface("create failed".into()))?,
             );
         }
         let surface = self.surface.as_ref().expect("encoder surface");
@@ -1249,6 +1267,21 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
 
+    #[test]
+    fn encoder_surface_satisfies_metal_row_alignment() {
+        let (width, height) = (318, 242);
+        let mut encoder =
+            VideoEncoder::new(removent_proto::CodecId::H264, width, height, 4000, 30).unwrap();
+        encoder
+            .encode_bgra(&vec![128; width * height * 4], 0)
+            .unwrap();
+        let surface = encoder.surface.as_ref().unwrap();
+        assert_eq!((surface.width(), surface.height()), (width, height));
+        assert!(surface.bytes_per_row() >= width * 4);
+        // Assert the driver's texture requirement even on machines whose
+        // encoder happens not to import this surface through Metal.
+        assert_eq!(surface.bytes_per_row() % 16, 0);
+    }
     /// A force-keyframe attempt that fails must be retried as a regular frame:
     /// the frame is encoded, not dropped.
     #[test]

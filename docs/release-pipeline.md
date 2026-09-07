@@ -21,9 +21,10 @@ flowchart LR
 
 维护者直接在 `main` 提交发布代码，无需开 PR。检查通过后从 `main` 创建版本 tag，由发布工作流完成构建、签名、公证和发布。
 
-需要完整 Xcode（含 Metal 工具链）、Rust、Python 3.12+、Swift 和 GitHub CLI。脚本自动选择本机 Xcode，不修改全局 xcode-select。
+需要完整 Xcode（含 Metal 工具链）、Rust、Python 3.12+、Swift、OpenSSL 3 和 GitHub CLI。脚本自动选择本机 Xcode，不修改全局 xcode-select。签名脚本优先使用 Homebrew 的 OpenSSL 3，也可通过 `REMOVENT_OPENSSL` 指定可执行文件；不使用 macOS 自带的 LibreSSL。
 
 ```sh
+brew install openssl@3
 python3 -m venv .venv-release
 source .venv-release/bin/activate
 python3 -m pip install -r scripts/requirements-release.txt

@@ -995,6 +995,10 @@ async fn second_connection_gets_busy_reject() {
 /// media stream — the stream layout the app actually runs, previously untested.
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn audio_disabled_session_uses_single_media_stream() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("removent_host=debug,removent_client=debug")
+        .with_test_writer()
+        .try_init();
     let (client_id, _cd) = identity_for("AudioOffClient");
     let (host_id, _hd) = identity_for("AudioOffHost");
 

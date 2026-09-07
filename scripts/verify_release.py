@@ -7,7 +7,7 @@ import plistlib
 import subprocess
 import tempfile
 import zipfile
-from gen_latest import signing_payload, verify_payload
+from gen_latest import OPENSSL, signing_payload, verify_payload
 from release_meta import VERSION, BASE
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -50,7 +50,7 @@ def main():
         key = bytes.fromhex(re.search(r'RELEASE_PUBLIC_KEY_HEX: &str =\s*"([0-9a-f]{64})"', source).group(1))
         der = pathlib.Path(td) / 'key.der'
         der.write_bytes(bytes.fromhex('302a300506032b6570032100') + key)
-        run('openssl', 'pkey', '-pubin', '-inform', 'DER', '-in', str(der), '-out', str(public))
+        run(OPENSSL, 'pkey', '-pubin', '-inform', 'DER', '-in', str(der), '-out', str(public))
         assert verify_payload(signing_payload(manifest), manifest['signature'], str(public))
         with zipfile.ZipFile(zip_path) as archive:
             assert all(n.startswith('Removent.app/') or n.startswith('__MACOSX/') for n in archive.namelist())

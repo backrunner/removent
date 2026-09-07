@@ -16,10 +16,32 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import urllib.request
+
+
+def openssl_binary() -> str:
+    """macOS ships LibreSSL, whose pkeyutl does not support our Ed25519 flow."""
+    configured = os.environ.get("REMOVENT_OPENSSL")
+    candidates = [configured] if configured else [
+        "/opt/homebrew/opt/openssl@3/bin/openssl",
+        "/usr/local/opt/openssl@3/bin/openssl",
+        shutil.which("openssl"),
+    ]
+    for candidate in candidates:
+        if not candidate or not os.path.isfile(candidate):
+            continue
+        result = subprocess.run([candidate, "version"], capture_output=True, text=True)
+        version = re.match(r"OpenSSL (\d+)\.", result.stdout)
+        if result.returncode == 0 and version and int(version[1]) >= 3:
+            return candidate
+    raise RuntimeError("OpenSSL 3+ is required: brew install openssl@3, or set REMOVENT_OPENSSL to its executable")
+
+
+OPENSSL = openssl_binary()
 
 
 def sha256_of(path_or_url: str) -> str:
@@ -43,7 +65,7 @@ def sign_payload(payload: bytes, key_path: str) -> str:
         mf.write(payload)
         mf.flush()
         out = subprocess.run(
-            ["openssl", "pkeyutl", "-sign", "-rawin",
+            [OPENSSL, "pkeyutl", "-sign", "-rawin",
              "-inkey", key_path, "-in", mf.name],
             capture_output=True,
             check=True,
@@ -60,7 +82,7 @@ def verify_payload(payload: bytes, sig_hex: str, pub_path: str) -> bool:
         sf.write(bytes.fromhex(sig_hex))
         sf.flush()
         out = subprocess.run(
-            ["openssl", "pkeyutl", "-verify", "-rawin", "-pubin",
+            [OPENSSL, "pkeyutl", "-verify", "-rawin", "-pubin",
              "-inkey", pub_path, "-sigfile", sf.name, "-in", mf.name],
             capture_output=True,
         )
@@ -109,9 +131,9 @@ def self_test() -> int:
     with tempfile.TemporaryDirectory() as td:
         key = os.path.join(td, "key.pem")
         pub = os.path.join(td, "pub.pem")
-        subprocess.run(["openssl", "genpkey", "-algorithm", "ed25519",
+        subprocess.run([OPENSSL, "genpkey", "-algorithm", "ed25519",
                         "-out", key], capture_output=True, check=True)
-        subprocess.run(["openssl", "pkey", "-in", key, "-pubout",
+        subprocess.run([OPENSSL, "pkey", "-in", key, "-pubout",
                         "-out", pub], capture_output=True, check=True)
 
         artifact = os.path.join(td, "artifact.zip")
@@ -145,7 +167,7 @@ def self_test() -> int:
 
 
 def check_release_key(key_path: str) -> None:
-    public = subprocess.run(['openssl', 'pkey', '-in', key_path, '-pubout', '-outform', 'DER'],
+    public = subprocess.run([OPENSSL, 'pkey', '-in', key_path, '-pubout', '-outform', 'DER'],
                             capture_output=True, check=True).stdout
     # RFC 8410 SubjectPublicKeyInfo header for Ed25519, then exactly 32 bytes.
     if len(public) != 44 or public[:12].hex() != '302a300506032b6570032100':

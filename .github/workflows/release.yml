@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing release tag, for example v0.1.0-beta.2'
+        description: 'Existing release tag, for example v0.1.0-beta.3'
         required: true
         type: string
 
@@ -27,11 +27,16 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
+      - name: Require successful main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/wait_for_ci.py
       - name: Verify notarization credentials
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
@@ -71,6 +76,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+          shared-key: build
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -87,9 +93,8 @@ jobs:
           test "$RELEASE_TAG" = "$(python3 scripts/release_meta.py tag)"
           test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
           test -f "docs/releases/${RELEASE_TAG}.md"
-          cargo fmt --all --check
-          cargo clippy --locked --workspace --all-targets -- -D warnings
-          cargo test --locked --workspace -- --test-threads=1
+          # The exact SHA already passed formatting, Clippy, all tests and
+          # development packaging in main CI. Repeat the signing self-test here.
           python3 scripts/gen_latest.py --self-test
       - name: Build and notarize
         env:

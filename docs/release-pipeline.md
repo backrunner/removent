@@ -1,6 +1,6 @@
 # Removent beta 发布指南
 
-首个公开版本：`0.1.0-beta.2`，Apple Silicon，macOS 13+。分发采用 Developer ID 签名、公证的 GitHub Releases；这不是 Mac App Store 提交流程。商店提交还需要独立评估沙盒、权限及审核要求，并使用商店更新渠道。
+首个公开版本：`0.1.0-beta.3`，Apple Silicon，macOS 13+。分发采用 Developer ID 签名、公证的 GitHub Releases；这不是 Mac App Store 提交流程。商店提交还需要独立评估沙盒、权限及审核要求，并使用商店更新渠道。
 
 ```mermaid
 flowchart LR
@@ -61,7 +61,7 @@ Beta 标记为 prerelease，且 `--latest=false`，不会占用正式版 latest�
 
 公证 API key 可替换为 Apple ID 那组三个 secrets。私钥只在当前 job 临时文件中出现，退出时清除。不要导出整个钥匙串，只导出用于 Removent 发布的身份。签名 Team ID 固定为 `PB8H83VL3Z`，变更身份需要同时审查更新器和发布验收代码。
 
-CI 使用 `macos-15` arm64 runner、锁定的 Cargo.lock、串行测试、失败即停止。普通 CI 的 ZIP 明确标记 development/not-notarized，不能替代公开安装包。
+CI 使用 `macos-15` arm64 runner、锁定的 Cargo.lock、串行测试、失败即停止。发布任务要求同一提交在 main 的 push CI 中完整通过检查和开发打包，再复用构建缓存进行签名构建；不会使用其他提交的检查结果。普通 CI 的 ZIP 明确标记 development/not-notarized，不能替代公开安装包。
 
 ## 自动更新
 

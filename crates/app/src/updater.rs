@@ -688,10 +688,15 @@ fn find_app_bundle(stage: &Path) -> Option<PathBuf> {
     (metadata.is_dir() && !metadata.file_type().is_symlink()).then_some(app)
 }
 
+fn release_codesign_requirement() -> String {
+    // codesign treats -R as a filename unless the expression starts with '='.
+    format!(
+        "=anchor apple generic and identifier \"io.removent.app\" and certificate leaf[subject.OU] = \"{EXPECTED_TEAM_ID}\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+    )
+}
+
 fn codesign_verify(app: &Path) -> Result<(), String> {
-    let requirement = format!(
-        "anchor apple generic and identifier \"io.removent.app\" and certificate leaf[subject.OU] = \"{EXPECTED_TEAM_ID}\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
-    );
+    let requirement = release_codesign_requirement();
     let ok = Command::new("/usr/bin/codesign")
         .args(["--verify", "--deep", "--strict", "-R", &requirement])
         .arg(app)
@@ -710,6 +715,19 @@ fn codesign_verify(app: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
+
+    #[test]
+    fn release_requirement_is_accepted_as_inline_source() {
+        let result = Command::new("/usr/bin/csreq")
+            .args(["-r", &release_codesign_requirement(), "-t"])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
 
     fn manifest() -> UpdateManifest {
         UpdateManifest {

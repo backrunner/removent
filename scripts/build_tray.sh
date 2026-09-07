@@ -2,6 +2,7 @@
 # Build the RemoventTray release binary and package it as a minimal RemoventTray.app in dist/.
 # Idempotent: re-running overwrites previous artifacts.
 set -euo pipefail
+umask 022
 
 cd "$(dirname "$0")/.."
 

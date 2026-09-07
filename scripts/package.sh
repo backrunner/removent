@@ -5,6 +5,9 @@
 # every binary is signed with the hardened runtime, inside-out. Otherwise the bundle is
 # ad-hoc signed, which is only usable on the build machine (Gatekeeper rejects it elsewhere).
 set -euo pipefail
+# CI keeps signing keys under umask 077. Public app bundles must remain
+# readable/executable by every account when installed in /Applications.
+umask 022
 cd "$(dirname "$0")/.."
 
 source scripts/macos_env.sh

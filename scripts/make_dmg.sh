@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Assemble a Retina Finder installer without Finder automation (works in CI).
 set -euo pipefail
+umask 022
 cd "$(dirname "$0")/.."
 VERSION=$(python3 scripts/release_meta.py version)
 DMG="dist/Removent-${VERSION}-macos-arm64.dmg"

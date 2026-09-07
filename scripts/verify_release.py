@@ -5,6 +5,7 @@ import json
 import pathlib
 import plistlib
 import subprocess
+import sys
 import tempfile
 import zipfile
 from gen_latest import OPENSSL, signing_payload, verify_payload
@@ -13,10 +14,14 @@ from release_meta import VERSION, BASE
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DIST = ROOT / 'dist'
 TEAM = 'PB8H83VL3Z'
-REQUIREMENT = f'anchor apple generic and identifier "io.removent.app" and certificate leaf[subject.OU] = "{TEAM}" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
+REQUIREMENT = f'=anchor apple generic and identifier "io.removent.app" and certificate leaf[subject.OU] = "{TEAM}" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
 
 def run(*args):
-    return subprocess.run(args, check=True, capture_output=True).stdout
+    result = subprocess.run(args, capture_output=True)
+    if result.returncode:
+        sys.stderr.write(result.stderr.decode(errors='replace'))
+        result.check_returncode()
+    return result.stdout
 
 
 def verify_bundle(bundle):
@@ -26,10 +31,18 @@ def verify_bundle(bundle):
     assert p['CFBundleIdentifier'] == 'io.removent.app'
     assert p['CFBundleIconFile'] == 'AppIcon'
     assert (bundle / 'Contents/Resources/AppIcon.icns').stat().st_size > 1000
+    # The CI shell protects its private-key files with umask 077; those modes
+    # must not leak into the public app installed for multiple Mac accounts.
+    for path in [bundle, *bundle.rglob('*')]:
+        if path.is_symlink():
+            continue
+        required = 0o555 if path.is_dir() else 0o444
+        assert path.stat().st_mode & required == required, f'App permissions too restrictive: {path}'
     run('codesign', '--verify', '--deep', '--strict', '-R', REQUIREMENT, str(bundle))
     run('xcrun', 'stapler', 'validate', str(bundle))
     run('spctl', '--assess', '--type', 'execute', str(bundle))
     for binary in list((bundle / 'Contents/MacOS').iterdir()) + [bundle / 'Contents/Helpers/RemoventTray.app/Contents/MacOS/RemoventTray']:
+        assert binary.stat().st_mode & 0o111 == 0o111, binary
         assert run('lipo', '-archs', str(binary)).strip() == b'arm64', binary
         dependencies = run('otool', '-L', str(binary)).decode()
         assert '/opt/homebrew/' not in dependencies and '/usr/local/' not in dependencies, dependencies

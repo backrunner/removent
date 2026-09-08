@@ -10,6 +10,8 @@ pub mod ipc;
 pub mod logging;
 pub mod paths;
 pub mod peers;
+#[cfg(target_os = "macos")]
+pub mod service;
 pub mod settings;
 
 pub use adapt::{AdaptationController, QualityState, Sample};

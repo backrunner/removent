@@ -10,14 +10,19 @@ rust_i18n::i18n!("locales");
 
 fn main() -> anyhow::Result<()> {
     let paths = DataPaths::resolve();
-    paths.ensure_layout().context(t!("error.init_data_dir"))?;
     logging::init_logging(&paths);
     logging::install_panic_hook(&paths);
+    let result = start(paths);
+    if let Err(error) = &result {
+        tracing::error!(error = %format!("{error:#}"), "daemon exited with an error");
+    }
+    result
+}
 
-    let settings = Settings::load(&paths).unwrap_or_default();
+fn start(paths: DataPaths) -> anyhow::Result<()> {
+    paths.ensure_layout().context(t!("error.init_data_dir"))?;
+    let settings = Settings::load(&paths)?;
     rust_i18n::set_locale(removent_core::resolve_locale(settings.language));
-
-    ensure_host_permissions(settings.host_enabled);
 
     // Single instance: a daemon-specific lock, separate from the app's .lock.
     let _lock = match DataDirLock::acquire_at(&paths.daemon_lock_file()) {
@@ -34,6 +39,12 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
+    // Automatic launch must reach IPC readiness without waiting on a consent
+    // dialog. Status exposes missing grants; initial setup is interactive.
+    if !std::env::args().any(|arg| arg == "--background") {
+        ensure_host_permissions(settings.host_enabled);
+    }
+
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -42,7 +53,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn run(paths: DataPaths) -> anyhow::Result<()> {
-    let settings = Settings::load(&paths).unwrap_or_default();
+    let settings = Settings::load(&paths)?;
     let identity = identity::load_or_create(&paths, &settings.device_name)
         .context(t!("error.load_identity"))?;
     let state = Arc::new(DaemonState::new(
@@ -52,7 +63,7 @@ async fn run(paths: DataPaths) -> anyhow::Result<()> {
     ));
     tracing::info!(fp=%state.fp_short, enabled=%state.enabled.load(std::sync::atomic::Ordering::SeqCst), "removentd started");
 
-    let ipc = tokio::spawn(server::serve(state.clone()));
+    let mut ipc = tokio::spawn(server::serve(state.clone()));
     let mgr = tokio::spawn(hostmgr::run(state.clone()));
 
     // SIGTERM / SIGINT / IPC Shutdown all trigger graceful shutdown.
@@ -62,6 +73,12 @@ async fn run(paths: DataPaths) -> anyhow::Result<()> {
         _ = tokio::signal::ctrl_c() => {},
         _ = sigterm.recv() => {},
         _ = state.shutdown.cancelled() => {},
+        result = &mut ipc => {
+            state.shutdown.cancel();
+            let _ = mgr.await;
+            result.context("IPC task failed")??;
+            anyhow::bail!("IPC server stopped unexpectedly");
+        },
     }
     tracing::info!("removentd shutting down");
     state.shutdown.cancel();

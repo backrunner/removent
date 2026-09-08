@@ -89,6 +89,7 @@ final class DaemonClient {
 
     func requestStatus() { send(["type": "status"]) }
     func setEnabled(_ on: Bool) { send(["type": "set_enabled", "on": on]) }
+    func requestPermissions() { send(["type": "request_permissions"]) }
     func admissionReply(requestId: Int, allow: Bool) {
         send(["type": "admission_reply", "request_id": requestId, "allow": allow])
     }

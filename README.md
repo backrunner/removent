@@ -26,8 +26,8 @@ are working; expect rough edges).
 ### Option 1: Download the DMG
 
 Grab `Removent-<version>-macos-arm64.dmg` from the
-[latest release](https://github.com/backrunner/removent/releases), open it, and drag
-**Removent.app** into **Applications**. The app is Developer-ID signed and notarized, so it
+[latest release](https://github.com/backrunner/removent/releases), open it, and double-click
+**Removent.app** → **Install and Open**, or drag it into **Applications**. The app is Developer-ID signed and notarized, so it
 opens without Gatekeeper warnings.
 
 ### Option 2: One-line installer
@@ -63,6 +63,13 @@ Apple Remote Desktop / macOS Screen Sharing uses a macOS username and password w
 type-30/type-35 Diffie-Hellman/AES authentication. Hostnames, IPv4, IPv6, and custom ports are
 supported; the protocol is selected explicitly instead of inferred from the port.
 
+VNC sends input independently of framebuffer processing. Consecutive pointer moves retain the
+latest position, while keys, clicks, and scrolls stay ordered through temporary stalls. Performance
+info is hidden by default: move to the top window edge and click the toolbar's gauge icon, or press
+`Ctrl+Cmd+I`, to toggle a translucent panel at the upper left. It shows resolution, frame rate,
+session duration, and VNC receive rate, pixel processing time, and input queue measurements.
+Input send time is measured locally and excludes the remote response.
+
 ### RDP compatibility
 
 **Add connection** opens a two-level dialog: choose Removent, VNC, or RDP, then enter connection
@@ -74,6 +81,19 @@ Server certificates are verified by default. For self-signed certificates, use s
 explicitly allow untrusted certificates for that connection. Dialog passwords are not written to
 settings. RDP support is currently client-only, without audio, clipboard, file redirection, or
 automatic reconnection. Windows hosts must have Remote Desktop enabled and allow the account to log in.
+
+## Unattended hosting
+
+The packaged server runs independently under launchd. Quitting the main window or
+menu bar app leaves it running. **Start Server at Login** and **Show Menu Bar App
+at Login** are separate options; disabling sharing is persisted across restarts.
+Complete daemon privacy setup and device pairing before relying on unattended
+reconnections. Hosting requires a logged-in graphical session; FileVault preboot
+unlock and the initial login window are outside the current host's support.
+
+The bundle includes `Contents/MacOS/removent-cli` with `daemon start`,
+`daemon login-on` and `daemon status`. See the [macOS background service guide](docs/macos-background-service.md)
+for installation, server-only commands, permissions and verification.
 
 ## Build from source
 

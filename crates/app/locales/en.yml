@@ -58,7 +58,7 @@ manual.invalid_addr: Invalid address format, e.g. 192.168.1.10 or 192.168.1.10:7
 device.paired: Paired
 device.unpaired: Not paired
 device.searching: "No devices nearby"
-device.searching_hint: "Devices appear here when screen sharing is on."
+device.searching_hint: "Open Removent on another Mac to discover it here."
 device.no_match: No matching devices
 device.online: Online · connectable
 device.info: Device Info
@@ -148,6 +148,26 @@ admission.title: Connection Request
 admission.desc: If allowed, the peer can view and control this screen. No response within 30 seconds will deny automatically.
 
 viewer.fullscreen_tooltip: "Fullscreen (Ctrl+Cmd+F)"
+viewer.info_tooltip: "Show/hide performance info (Ctrl+Cmd+I)"
+viewer.info_title: Performance
+viewer.info_peer: Remote device
+viewer.info_protocol: Protocol / encoding
+viewer.info_duration: Session duration
+viewer.info_resolution: Remote resolution
+viewer.info_display_fps: Display rate
+viewer.info_frame_age: Last picture
+viewer.info_receive_fps: Receive rate
+viewer.info_receive_rate: Download
+viewer.info_received: Total received
+viewer.info_decode: Pixel processing
+viewer.info_update: Update receive + process
+viewer.info_input_pending: Queued inputs
+viewer.info_input_age: Oldest input waiting
+viewer.info_input_delay: Last input send time
+viewer.info_input_sent: Inputs sent
+viewer.info_coalesced: Pointer moves merged
+viewer.info_idle_hint: A still desktop can have a low frame rate on a healthy connection.
+viewer.info_input_hint: Send time measures local queuing through socket write, excluding the remote response. Only consecutive pointer moves are merged; keys and clicks stay ordered.
 viewer.disconnect_tooltip: "Disconnect (Ctrl+Cmd+Esc)"
 viewer.waiting: Waiting for video stream
 viewer.waiting_stream: Waiting for video stream…
@@ -174,3 +194,59 @@ connection.invalid_port: "Enter a port between 1 and 65535."
 connection.username_required: "Enter an RDP username."
 sharing.description: "Allow approved devices to view and control this screen."
 permissions.granted: "Allowed"
+
+settings.subtitle: "Make your connections and workspace feel at home."
+settings.sharing: "Sharing"
+settings.system: "System"
+settings.general_description: "Make this Mac easy to find on your network."
+settings.device_name_hint: "The name other Removent devices see on your network."
+settings.language_hint: "Choose your interface language. Changes apply immediately."
+settings.appearance_description: "A comfortable view of your workspace."
+settings.color_mode: "Color mode"
+settings.theme_hint: "Follow macOS or choose a light or dark appearance."
+settings.preview_hint: "Current appearance preview"
+settings.security_description: "Decide which devices can access this Mac."
+settings.admission_hint: "Applies to connections using the Removent protocol."
+settings.admission.ask_hint: "Approve each connection on this Mac. Recommended for most setups."
+settings.admission.trusted_hint: "Paired devices connect automatically. New devices still need approval."
+settings.admission.deny_hint: "Reject all new Removent connection requests."
+settings.sharing_description: "Share this Mac with compatible clients."
+settings.sharing_scope_hint: "This switch controls the VNC server on this Mac. To connect to another Mac, choose VNC in Add Connection. Restart sharing after changing these settings."
+settings.system_description: "Local data, diagnostics, and application updates."
+settings.data_hint: "Settings, device identity, and diagnostic logs stay on this Mac."
+connection.subtitle: "Choose the connection available on your remote device."
+connection.removent_hint: "Fast Mac-to-Mac connections · Secure pairing"
+connection.vnc_hint: "macOS Screen Sharing · Standard VNC servers"
+connection.rdp_hint: "Windows Remote Desktop · RDP servers"
+connection.credentials_hint: "For macOS Screen Sharing, enter the remote Mac’s short account name and login password. Leave the username empty only when using a dedicated VNC password."
+connection.welcome: "Your devices. Within reach."
+connection.welcome_hint: "Connect to a Mac or PC on your local network and get to work."
+connection.lan_badge: "Local network"
+
+connection.stage_resolving: "Resolving address…"
+connection.stage_connecting: "Connecting to remote device…"
+connection.stage_negotiating: "Negotiating connection…"
+connection.stage_pairing: "Waiting for pairing PIN…"
+connection.stage_authenticating: "Authenticating with remote device…"
+connection.stage_desktop: "Preparing remote desktop…"
+connection.elapsed: "%{seconds}s"
+connection.waiting_hint: "The remote device is taking longer to respond. You can cancel at any time."
+connection.cancel_attempt: "Cancel connection"
+connection.cancel_and_close: "Cancel connection and close"
+connection.cancelled: "Connection cancelled"
+connection.cancelled_hint: "Connection cancelled. Your details are ready to edit and reconnect."
+connection.retry: "Try again"
+
+connection.vnc_tcp: "TCP connection"
+connection.vnc_greeting: "server greeting"
+connection.vnc_negotiation: "security negotiation"
+connection.vnc_authentication: "authentication"
+connection.vnc_desktop: "desktop initialization"
+connection.vnc_timeout: "VNC timed out during %{stage} after %{seconds} seconds. Check that Screen Sharing is enabled on the remote device."
+connection.vnc_auth_failed: "VNC authentication failed. Check the remote Mac account name and login password, or the dedicated VNC password."
+connection.vnc_refused: "The remote device refused the VNC connection. Check that Screen Sharing is enabled and the port is correct."
+
+settings.logs: "Local diagnostics"
+settings.logs_hint: "Connection stages, errors, and crash reports are saved on this Mac. Logs rotate automatically; passwords, pairing PINs, and clipboard contents are excluded."
+settings.open_logs: "Open Logs Folder"
+settings.open_logs_failed: "Could not open the logs folder: %{err}"

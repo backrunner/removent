@@ -20,7 +20,7 @@ ZIP="dist/${APP_NAME}-${VERSION}-macos-arm64.zip"
 IDENTITY="${APPLE_SIGNING_IDENTITY:-}"
 
 echo "==> build release"
-cargo build --locked --release -p removent-app -p removent-daemon
+cargo build --locked --release -p removent-app -p removent-daemon -p removent-cli
 
 echo "==> build tray"
 "$(dirname "$0")/build_tray.sh"
@@ -77,6 +77,7 @@ xcrun swiftc -O -target arm64-apple-macosx13.0 scripts/launcher.swift \
 cp assets/branding/AppIcon.icns "$BUNDLE/Contents/Resources/AppIcon.icns"
 # The daemon ships inside the bundle: the app locates removentd next to its own executable.
 cp target/release/removentd "$BUNDLE/Contents/MacOS/removentd"
+cp target/release/removent-cli "$BUNDLE/Contents/MacOS/removent-cli"
 
 # Embed the tray: the main app auto-launches it on startup (main.rs autostart_tray looks in Contents/Helpers).
 mkdir -p "$BUNDLE/Contents/Helpers"
@@ -90,6 +91,8 @@ if [ -n "$IDENTITY" ]; then
         "$BUNDLE/Contents/Helpers/RemoventTray.app"
     codesign --force --options runtime --timestamp --sign "$IDENTITY" \
         "$BUNDLE/Contents/MacOS/removentd"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" \
+        "$BUNDLE/Contents/MacOS/removent-cli"
     codesign --force --options runtime --timestamp --sign "$IDENTITY" \
         "$BUNDLE/Contents/MacOS/removent"
     codesign --force --options runtime --timestamp --sign "$IDENTITY" "$BUNDLE"

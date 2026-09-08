@@ -1,20 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  com.removent.daemon.plist — removentd LaunchAgent template.
-
-  Install (the installer replaces @EXE@ with the absolute path of removentd and
-  @DATA@ with the absolute path of userdata, then drops the result into
-  ~/Library/LaunchAgents/ and loads it):
-
-    sed -e "s|@EXE@|/path/to/removentd|g" \
-        -e "s|@DATA@|/path/to/userdata|g" \
-        com.removent.daemon.plist > ~/Library/LaunchAgents/com.removent.daemon.plist
-    launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.removent.daemon.plist
-
-  Uninstall:
-
-    launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/com.removent.daemon.plist
--->
+<!-- Rendered by removent-core::service; do not substitute paths with sed. -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -23,6 +8,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>@EXE@</string>
+        <string>--background</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
@@ -33,6 +19,14 @@
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ExitTimeOut</key>
+    <integer>10</integer>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
     <key>StandardOutPath</key>
     <string>@DATA@/logs/removentd.out.log</string>
     <key>StandardErrorPath</key>

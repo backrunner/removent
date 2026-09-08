@@ -15,17 +15,27 @@ use gpui_component::TitleBar;
 use removent_core::{Theme as ThemePref, logging, paths::DataPaths};
 use ui::connection::{ConnectionTab, ConnectionTabPrev};
 use ui::home::{HomeConnect, HomeEscape, HomeSearch, HomeSettings};
-use ui::viewer::{ViewerEscape, ViewerToggleFullscreen};
+use ui::viewer::{ViewerEscape, ViewerToggleFullscreen, ViewerToggleInfo};
 
 rust_i18n::i18n!("locales");
 
 fn main() -> Result<()> {
-    let started = std::time::Instant::now();
     let paths = DataPaths::resolve();
     logging::init_logging(&paths);
     logging::install_panic_hook(&paths);
+    let result = run(paths);
+    if let Err(error) = &result {
+        tracing::error!(error = %format!("{error:#}"), "application exited with an error");
+    }
+    result
+}
 
-    let settings = removent_core::Settings::load(&paths).unwrap_or_default();
+fn run(paths: DataPaths) -> Result<()> {
+    let started = std::time::Instant::now();
+    let settings = removent_core::Settings::load(&paths).unwrap_or_else(|error| {
+        tracing::warn!(%error, "could not load settings; using defaults");
+        removent_core::Settings::default()
+    });
     rust_i18n::set_locale(removent_core::resolve_locale(settings.language));
 
     // Engine runtime (separate thread; the UI interacts via channels).
@@ -35,6 +45,7 @@ fn main() -> Result<()> {
         .build()?;
 
     let engine = engine::Engine::new(rt, paths.clone(), settings);
+    engine.start_background_daemon();
     // Tray process lookup/launch must not delay the first window.
     engine.rt.spawn_blocking(autostart_tray);
 
@@ -165,6 +176,7 @@ fn main() -> Result<()> {
                 KeyBinding::new("shift-tab", ConnectionTabPrev, Some("ConnectionDialog")),
                 KeyBinding::new("ctrl-cmd-escape", ViewerEscape, Some("Viewer")),
                 KeyBinding::new("ctrl-cmd-f", ViewerToggleFullscreen, Some("Viewer")),
+                KeyBinding::new("ctrl-cmd-i", ViewerToggleInfo, Some("Viewer")),
                 KeyBinding::new("escape", HomeEscape, Some("Home")),
                 KeyBinding::new("cmd-,", HomeSettings, Some("Home")),
                 KeyBinding::new("cmd-l", HomeConnect, Some("Home")),
@@ -175,11 +187,12 @@ fn main() -> Result<()> {
                 gpui::WindowOptions {
                     window_bounds: Some(gpui::WindowBounds::Windowed(gpui::Bounds::centered(
                         None,
-                        gpui::size(gpui::px(960.), gpui::px(640.)),
+                        gpui::size(gpui::px(1040.), gpui::px(700.)),
                         cx,
                     ))),
                     titlebar: Some(TitleBar::title_bar_options()),
-                    window_min_size: Some(gpui::size(gpui::px(720.), gpui::px(480.))),
+                    window_min_size: Some(gpui::size(gpui::px(860.), gpui::px(600.))),
+                    window_background: gpui::WindowBackgroundAppearance::Opaque,
                     ..Default::default()
                 },
                 move |window, cx| {

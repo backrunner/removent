@@ -110,10 +110,16 @@ impl DaemonState {
 
     /// Toggle the controlled-service switch and broadcast StateChanged (the host
     /// manager starts/stops the runner via the watch channel).
-    pub fn set_enabled(&self, on: bool) {
-        self.enabled.store(on, Ordering::SeqCst);
-        let _ = self.enabled_watch.send(on);
-        self.broadcast(IpcEvent::StateChanged { running: on });
+    pub fn set_enabled(&self, on: bool) -> removent_core::Result<()> {
+        // Save before acknowledging so a failed write cannot re-enable remote
+        // access after a reboot. Preserve settings changed by another client.
+        let mut settings = self.settings.lock().unwrap();
+        *settings = Settings::update(&self.paths, |s| s.host_enabled = on)?;
+        if self.enabled.swap(on, Ordering::SeqCst) != on {
+            self.enabled_watch.send_replace(on);
+            self.broadcast(IpcEvent::StateChanged { running: on });
+        }
+        Ok(())
     }
 
     /// Pairing PIN display: stash and broadcast it for management ends to present.

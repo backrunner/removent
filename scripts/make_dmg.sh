@@ -27,6 +27,7 @@ hdiutil create -quiet -fs HFS+ -volname Removent -srcfolder "$WORK/stage" -forma
 hdiutil attach -quiet -nobrowse -noautoopen -mountpoint "$MOUNT" "$WORK/installer.dmg"
 MOUNTED=true
 python3 scripts/dmg_layout.py "$MOUNT"
+python3 scripts/verify_dmg_layout.py "$MOUNT"
 # Finder reads the root .DS_Store; bless --openfolder is unsupported on Apple Silicon.
 hdiutil detach -quiet "$MOUNT"
 MOUNTED=false

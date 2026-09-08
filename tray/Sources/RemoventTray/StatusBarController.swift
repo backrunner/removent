@@ -13,6 +13,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private var status: StatusResponse?
     private var pendingPin: String?
     private var pollTimer: Timer?
+    private var serviceBusy = false
+    private var loginEnabled = false
+    private var enableOnConnect = false
 
     /// Admission requests deferred while the main app is running: if no
     /// admissionResolved broadcast arrives within 8 seconds, the tray shows
@@ -42,6 +45,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             guard let self else { return }
             let changed = self.connected != isConnected
             self.connected = isConnected
+            if isConnected && self.enableOnConnect {
+                self.enableOnConnect = false
+                self.client.setEnabled(true)
+            }
             if !isConnected {
                 self.status = nil
                 self.pendingPin = nil
@@ -54,6 +61,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             self.updateIcon()
         }
         client.start()
+        refreshServiceStatus()
 
         // 2s status poll as a fallback
         pollTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
@@ -93,6 +101,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             client.requestStatus()
         case .error(let message):
             trayLog("daemon returned error: \(message)")
+            showServiceError(message)
         case .stateChanged(let running):
             trayLog("service state changed: \(running ? "running" : "stopped")")
             client.requestStatus()
@@ -223,6 +232,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     // MARK: - Menu
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        refreshServiceStatus()
         // Rebuild when the menu opens so session durations etc. are up to date.
         rebuildMenu()
     }
@@ -313,16 +323,35 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             : String(localized: "menu.enable_service", bundle: .module, comment: "Menu item: enable service")
         let toggleItem = NSMenuItem(title: toggleTitle, action: #selector(toggleService), keyEquivalent: "")
         toggleItem.target = self
-        toggleItem.isEnabled = connected
+        toggleItem.isEnabled = !serviceBusy
         toggleItem.image = symbolImage("power")
         menu.addItem(toggleItem)
 
         // 5. Launch at login
         let loginItem = NSMenuItem(title: String(localized: "menu.launch_at_login", bundle: .module, comment: "Menu item: launch at login"), action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         loginItem.target = self
-        loginItem.state = launchAgentInstalled() ? .on : .off
+        loginItem.state = loginEnabled ? .on : .off
+        loginItem.isEnabled = !serviceBusy && serviceCLI != nil
         loginItem.image = symbolImage("arrow.up.circle")
         menu.addItem(loginItem)
+
+        let restartItem = NSMenuItem(title: String(localized: "menu.restart_service", bundle: .module), action: #selector(restartService), keyEquivalent: "")
+        restartItem.target = self
+        restartItem.isEnabled = !serviceBusy && (status?.sessions.isEmpty ?? true) && serviceCLI != nil
+        menu.addItem(restartItem)
+
+        let permissionsItem = NSMenuItem(title: String(localized: "menu.setup_permissions", bundle: .module), action: #selector(setupPermissions), keyEquivalent: "")
+        permissionsItem.target = self
+        permissionsItem.isEnabled = connected
+        menu.addItem(permissionsItem)
+
+        let trayLogin = NSMenuItem(title: String(localized: "menu.tray_at_login", bundle: .module), action: #selector(toggleTrayAtLogin), keyEquivalent: "")
+        trayLogin.target = self
+        trayLogin.state = FileManager.default.fileExists(atPath: trayLoginURL.path) ? .on : .off
+        trayLogin.isEnabled = serviceCLI != nil
+        menu.addItem(trayLogin)
+
+        menu.addItem(infoItem(String(localized: "menu.unattended_hint", bundle: .module)))
 
         menu.addItem(.separator())
 
@@ -367,7 +396,19 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     @objc private func toggleService() {
         let target = !(status?.running ?? false)
         trayLog("requesting service \(target ? "enable" : "disable")")
-        client.setEnabled(target)
+        if connected {
+            client.setEnabled(target)
+        } else {
+            enableOnConnect = true
+            runServiceCommand("start") { [weak self] success in
+                guard let self else { return }
+                if !success { self.enableOnConnect = false }
+                if success && self.connected {
+                    self.enableOnConnect = false
+                    self.client.setEnabled(true)
+                }
+            }
+        }
     }
 
     @objc private func openMainApp() {
@@ -404,154 +445,106 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         NSApp.terminate(nil)
     }
 
-    // MARK: - Launch at login (LaunchAgent)
+    // MARK: - Background service (shared with the app and CLI)
 
-    private var launchAgentURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents/com.removent.daemon.plist")
+    private var outerBundle: URL {
+        Bundle.main.bundleURL.deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
     }
 
-    /// Installed = the plist exists AND launchctl knows the service, so a
-    /// leftover plist cannot desync the menu checkbox from reality.
-    private func launchAgentInstalled() -> Bool {
-        guard FileManager.default.fileExists(atPath: launchAgentURL.path) else { return false }
-        return runLaunchctl(["print", "gui/\(getuid())/com.removent.daemon"])
+    private var serviceCLI: URL? {
+        let url = outerBundle.appendingPathComponent("Contents/MacOS/removent-cli")
+        return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
     }
 
-    private func daemonExecutablePath() -> String {
-        // The tray is embedded at Removent.app/Contents/Helpers/RemoventTray.app while the
-        // daemon ships beside the main executable at Removent.app/Contents/MacOS/removentd —
-        // resolve relative to the OUTER bundle, not the tray's own bundle.
-        let bundled = Bundle.main.bundleURL
-            .deletingLastPathComponent()  // Contents/Helpers/
-            .deletingLastPathComponent()  // Contents/
-            .appendingPathComponent("MacOS/removentd").path
-        if FileManager.default.isExecutableFile(atPath: bundled) { return bundled }
-        // Then look it up on PATH
-        if let found = which("removentd") { return found }
-        for candidate in ["/opt/homebrew/bin/removentd", "/usr/local/bin/removentd"]
-        where FileManager.default.isExecutableFile(atPath: candidate) {
-            return candidate
+    private func showServiceError(_ message: String) {
+        showErrorAlert(messageText: String(localized: "alert.service_failed", bundle: .module), informativeText: message)
+    }
+
+    private func refreshServiceStatus() {
+        guard !serviceBusy, serviceCLI != nil else { return }
+        runServiceCommand("service-status", reportError: false)
+    }
+
+    /// Process waits stay off the UI thread. All service mutations go through
+    /// the packaged CLI; the tray never spawns a second daemon or guesses paths.
+    private func runServiceCommand(_ action: String, reportError: Bool = true, completion: ((Bool) -> Void)? = nil) {
+        guard let cli = serviceCLI else {
+            showServiceError(String(localized: "alert.daemon_not_found_detail", bundle: .module))
+            completion?(false)
+            return
         }
-        return "/usr/local/bin/removentd"
-    }
-
-    private func which(_ name: String) -> String? {
-        let task = Process()
-        let pipe = Pipe()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        task.arguments = ["which", name]
-        task.standardOutput = pipe
-        task.standardError = FileHandle.nullDevice
-        guard let _ = try? task.run() else { return nil }
-        task.waitUntilExit()
-        guard task.terminationStatus == 0 else { return nil }
-        let path = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return path.isEmpty ? nil : path
-    }
-
-    private func launchAgentPlist(daemonPath: String, dataDir: String) -> String {
-        func escape(_ s: String) -> String {
-            s.replacingOccurrences(of: "&", with: "&amp;")
-                .replacingOccurrences(of: "<", with: "&lt;")
-                .replacingOccurrences(of: ">", with: "&gt;")
+        serviceBusy = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let task = Process()
+            let output = Pipe()
+            task.executableURL = cli
+            task.arguments = ["daemon", action]
+            var environment = ProcessInfo.processInfo.environment
+            environment["REMOVENT_DATA_DIR"] = DaemonClient.dataDirectory().path
+            task.environment = environment
+            task.standardOutput = output
+            task.standardError = output
+            var success = false
+            var message = ""
+            do {
+                try task.run()
+                let data = output.fileHandleForReading.readDataToEndOfFile()
+                task.waitUntilExit()
+                success = task.terminationStatus == 0
+                message = String(decoding: data, as: UTF8.self)
+            } catch { message = error.localizedDescription }
+            let result = success
+            let detail = message
+            DispatchQueue.main.async {
+                self.serviceBusy = false
+                if result, let data = detail.data(using: .utf8),
+                   let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    self.loginEnabled = status["launch_at_login"] as? Bool ?? false
+                } else if !result && reportError {
+                    self.showServiceError(detail)
+                }
+                completion?(result)
+                self.rebuildMenu()
+            }
         }
-        return """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>Label</key>
-            <string>com.removent.daemon</string>
-            <key>ProgramArguments</key>
-            <array>
-                <string>\(escape(daemonPath))</string>
-            </array>
-            <key>EnvironmentVariables</key>
-            <dict>
-                <key>REMOVENT_DATA_DIR</key>
-                <string>\(escape(dataDir))</string>
-            </dict>
-            <key>RunAtLoad</key>
-            <true/>
-            <key>KeepAlive</key>
-            <true/>
-            <key>StandardOutPath</key>
-            <string>\(escape(dataDir))/logs/removentd.out.log</string>
-            <key>StandardErrorPath</key>
-            <string>\(escape(dataDir))/logs/removentd.err.log</string>
-        </dict>
-        </plist>
-        """
     }
 
     @objc private func toggleLaunchAtLogin() {
-        let uid = getuid()
-        if launchAgentInstalled() {
-            runLaunchctl(["bootout", "gui/\(uid)/com.removent.daemon"])
-            try? FileManager.default.removeItem(at: launchAgentURL)
-            trayLog("launch at login disabled")
-        } else {
-            let daemonPath = daemonExecutablePath()
-            // daemonExecutablePath falls back to /usr/local/bin, where the file
-            // may not exist; abort in that case without writing the plist.
-            guard FileManager.default.isExecutableFile(atPath: daemonPath) else {
-                trayLog("removentd not found (\(daemonPath)), launch at login not enabled")
-                showErrorAlert(messageText: String(localized: "alert.daemon_not_found", bundle: .module, comment: "Error alert: removentd missing"),
-                               informativeText: String(localized: "alert.daemon_not_found_detail", bundle: .module, comment: "Error alert body: removentd missing"))
-                rebuildMenu()
-                return
-            }
-            do {
-                // Pin the data dir explicitly so the launchd-started daemon resolves the
-                // same userdata/ location as the app and tray regardless of environment.
-                let dataDir = DaemonClient.dataDirectory().path
-                try FileManager.default.createDirectory(
-                    at: launchAgentURL.deletingLastPathComponent(),
-                    withIntermediateDirectories: true)
-                // launchd opens the log paths before exec; the logs dir must exist first.
-                try FileManager.default.createDirectory(
-                    atPath: "\(dataDir)/logs",
-                    withIntermediateDirectories: true)
-                try launchAgentPlist(daemonPath: daemonPath, dataDir: dataDir)
-                    .write(to: launchAgentURL, atomically: true, encoding: .utf8)
-                if runLaunchctl(["bootstrap", "gui/\(uid)", launchAgentURL.path]) {
-                    trayLog("launch at login enabled, daemon path: \(daemonPath)")
-                } else {
-                    // A failed bootstrap may be caused by a stale old instance;
-                    // bootout first and retry once.
-                    trayLog("launchctl bootstrap failed, retrying after bootout")
-                    runLaunchctl(["bootout", "gui/\(uid)/com.removent.daemon"])
-                    if runLaunchctl(["bootstrap", "gui/\(uid)", launchAgentURL.path]) {
-                        trayLog("launch at login enabled (retry succeeded), daemon path: \(daemonPath)")
-                    } else {
-                        // Still failing: remove the plist just written so the
-                        // menu checkbox matches the actual state.
-                        try? FileManager.default.removeItem(at: launchAgentURL)
-                        trayLog("launchctl bootstrap retry still failed, removed \(launchAgentURL.path)")
-                    }
-                }
-            } catch {
-                trayLog("failed to write LaunchAgent: \(error.localizedDescription)")
-            }
-        }
-        rebuildMenu()
+        runServiceCommand(loginEnabled ? "login-off" : "login-on")
     }
 
-    @discardableResult
-    private func runLaunchctl(_ arguments: [String]) -> Bool {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        task.arguments = arguments
-        task.standardOutput = FileHandle.nullDevice
-        task.standardError = FileHandle.nullDevice
+    @objc private func restartService() {
+        runServiceCommand("restart")
+    }
+
+    @objc private func setupPermissions() {
+        client.requestPermissions()
+    }
+
+    // The tray is optional at login. launchd opens it once via Launch Services;
+    // quitting it never causes a respawn and never stops the server.
+    private var trayLoginURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/com.removent.tray.plist")
+    }
+
+    @objc private func toggleTrayAtLogin() {
         do {
-            try task.run()
-            task.waitUntilExit()
-            return task.terminationStatus == 0
-        } catch {
-            return false
-        }
+            if FileManager.default.fileExists(atPath: trayLoginURL.path) {
+                try FileManager.default.removeItem(at: trayLoginURL)
+            } else {
+                let plist: [String: Any] = [
+                    "Label": "com.removent.tray",
+                    "ProgramArguments": ["/usr/bin/open", "-g", Bundle.main.bundleURL.path],
+                    "RunAtLoad": true,
+                    "LimitLoadToSessionType": "Aqua"
+                ]
+                let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+                try FileManager.default.createDirectory(at: trayLoginURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try data.write(to: trayLoginURL, options: .atomic)
+            }
+        } catch { showServiceError(error.localizedDescription) }
+        rebuildMenu()
     }
 }

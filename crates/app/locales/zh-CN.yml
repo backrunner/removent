@@ -58,7 +58,7 @@ manual.invalid_addr: 地址格式无效，如 192.168.1.10 或 192.168.1.10:7890
 device.paired: 已配对
 device.unpaired: 未配对
 device.searching: "暂无附近设备"
-device.searching_hint: "其他 Mac 开启屏幕共享后会显示在这里。"
+device.searching_hint: "在另一台 Mac 上开启 Removent，即可发现设备。"
 device.no_match: 没有匹配的设备
 device.online: 在线 · 可连接
 device.info: 设备信息
@@ -148,6 +148,26 @@ admission.title: 连接请求
 admission.desc: 允许后对方可以观看并控制本机屏幕。30 秒未响应将自动拒绝。
 
 viewer.fullscreen_tooltip: 全屏 (Ctrl+Cmd+F)
+viewer.info_tooltip: 显示／隐藏性能信息 (Ctrl+Cmd+I)
+viewer.info_title: 性能信息
+viewer.info_peer: 远程设备
+viewer.info_protocol: 协议／编码
+viewer.info_duration: 会话时长
+viewer.info_resolution: 远程分辨率
+viewer.info_display_fps: 显示帧率
+viewer.info_frame_age: 距上次画面
+viewer.info_receive_fps: 接收帧率
+viewer.info_receive_rate: 接收速率
+viewer.info_received: 累计接收
+viewer.info_decode: 像素处理
+viewer.info_update: 单帧接收与处理
+viewer.info_input_pending: 排队输入
+viewer.info_input_age: 最早输入已等待
+viewer.info_input_delay: 最近输入发送耗时
+viewer.info_input_sent: 已发送输入
+viewer.info_coalesced: 已合并鼠标移动
+viewer.info_idle_hint: 静止画面帧率会降低，不代表连接异常。
+viewer.info_input_hint: 发送耗时是从本地排队到写入连接的时间，不含远端响应。仅合并连续鼠标移动，保留按键与点击顺序。
 viewer.disconnect_tooltip: 断开连接 (Ctrl+Cmd+Esc)
 viewer.waiting: 等待视频流
 viewer.waiting_stream: 等待视频流…
@@ -174,3 +194,59 @@ connection.invalid_port: "请输入 1 到 65535 之间的端口。"
 connection.username_required: "请输入 RDP 用户名。"
 sharing.description: "允许你批准的设备查看和控制本机屏幕。"
 permissions.granted: "已允许"
+
+settings.subtitle: "按你的习惯，调整连接与工作空间。"
+settings.sharing: "共享"
+settings.system: "系统"
+settings.general_description: "让局域网中的设备更容易找到你。"
+settings.device_name_hint: "其他 Removent 设备看到的本机名称。"
+settings.language_hint: "选择应用界面使用的语言，即时生效。"
+settings.appearance_description: "为你的工作空间选择舒适的外观。"
+settings.color_mode: "主题模式"
+settings.theme_hint: "跟随 macOS，或固定使用深色、浅色主题。"
+settings.preview_hint: "当前主题预览"
+settings.security_description: "由你决定哪些设备可以接入本机。"
+settings.admission_hint: "应用于 Removent 原生协议的远程连接。"
+settings.admission.ask_hint: "每次连接都需要你在本机确认，适合大多数场景。"
+settings.admission.trusted_hint: "已配对的可信设备可直接接入；新设备仍需确认。"
+settings.admission.deny_hint: "拒绝所有新的 Removent 连接请求。"
+settings.sharing_description: "通过兼容协议共享这台 Mac。"
+settings.sharing_scope_hint: "此开关仅控制本机的 VNC 服务。连接其他 Mac 无需开启；请在「添加连接」中选择 VNC。修改后需重启被控服务。"
+settings.system_description: "管理本地数据、诊断日志与应用更新。"
+settings.data_hint: "设置、设备身份与诊断日志保存在本机。"
+connection.subtitle: "选择远端设备使用的连接方式。"
+connection.removent_hint: "Mac 之间的高速连接 · 安全配对"
+connection.vnc_hint: "macOS 屏幕共享 · 标准 VNC 服务"
+connection.rdp_hint: "Windows 远程桌面 · RDP 服务"
+connection.credentials_hint: "连接 macOS 屏幕共享时，请填写远端 Mac 的账户短名称与登录密码。仅使用 VNC 专用密码时，用户名留空。"
+connection.welcome: "你的设备，触手可及。"
+connection.welcome_hint: "连接局域网中的 Mac 或 PC，在这里开启远程工作。"
+connection.lan_badge: "局域网直连"
+
+connection.stage_resolving: "正在解析地址…"
+connection.stage_connecting: "正在连接远端设备…"
+connection.stage_negotiating: "正在协商连接协议…"
+connection.stage_pairing: "等待输入配对 PIN…"
+connection.stage_authenticating: "正在验证远端身份…"
+connection.stage_desktop: "正在准备远程桌面…"
+connection.elapsed: "%{seconds} 秒"
+connection.waiting_hint: "远端响应时间较长，你可以随时取消连接。"
+connection.cancel_attempt: "取消连接"
+connection.cancel_and_close: "取消连接并关闭"
+connection.cancelled: "已取消连接"
+connection.cancelled_hint: "连接已取消。填写的信息已保留，可以修改后重新连接。"
+connection.retry: "重试连接"
+
+connection.vnc_tcp: "建立网络连接"
+connection.vnc_greeting: "等待远端握手信息"
+connection.vnc_negotiation: "协商认证方式"
+connection.vnc_authentication: "身份验证"
+connection.vnc_desktop: "初始化桌面"
+connection.vnc_timeout: "VNC 在「%{stage}」阶段超时，已等待 %{seconds} 秒。请确认远端屏幕共享服务正常运行。"
+connection.vnc_auth_failed: "VNC 身份验证失败。请检查远端 Mac 的账户短名称和登录密码，或专用 VNC 密码。"
+connection.vnc_refused: "远端拒绝了 VNC 连接。请检查屏幕共享是否开启，以及端口是否正确。"
+
+settings.logs: "本地诊断日志"
+settings.logs_hint: "连接阶段、错误与崩溃报告保存在本机，自动轮转清理；不记录密码、配对码和剪贴板内容。"
+settings.open_logs: "打开日志文件夹"
+settings.open_logs_failed: "无法打开日志文件夹：%{err}"

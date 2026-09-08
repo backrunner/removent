@@ -7,6 +7,7 @@
 use anyhow::Result;
 use futures::FutureExt;
 use removent_client::connect_session;
+use removent_client::connection::{ConnectionProgress, ConnectionStage};
 use removent_client::connection::{ConnectionProtocol, ConnectionRequest};
 use removent_core::ipc::{IpcEvent, IpcRequest, IpcResponse, StatusReport};
 use removent_core::{DataPaths, DeviceIdentity, PeersStore, Settings};
@@ -17,6 +18,7 @@ use rust_i18n::t;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use tracing::Instrument;
 
 use crate::audio::AudioPlayer;
 use crate::updater::{self, UpdateShared, UpdateStatus};
@@ -47,6 +49,10 @@ pub enum UiEvent {
     ClientNeedsPin {
         generation: usize,
         tx: tokio::sync::oneshot::Sender<String>,
+    },
+    ConnectionProgress {
+        generation: usize,
+        stage: ConnectionStage,
     },
     SessionReady {
         generation: usize,
@@ -99,6 +105,7 @@ impl UiEvent {
     pub fn belongs_to_client(&self, current: usize) -> bool {
         match self {
             Self::ClientNeedsPin { generation, .. }
+            | Self::ConnectionProgress { generation, .. }
             | Self::SessionReady { generation, .. }
             | Self::ConnectFailed { generation, .. }
             | Self::SessionClosed { generation, .. } => *generation == current,
@@ -114,7 +121,41 @@ struct ClientChannels {
     generation: usize,
     geometry: Option<(u32, u32)>,
     frames: Option<removent_core::latest::Receiver<VideoFrame>>,
-    cmd: Option<tokio::sync::mpsc::Sender<ControlMsg>>,
+    cmd: Option<ClientCommands>,
+    codec: String,
+}
+
+enum ClientCommands {
+    Standard(tokio::sync::mpsc::Sender<ControlMsg>),
+    Vnc(
+        removent_client::vnc::InputSender,
+        Arc<removent_client::vnc::VncStats>,
+    ),
+}
+
+impl From<tokio::sync::mpsc::Sender<ControlMsg>> for ClientCommands {
+    fn from(tx: tokio::sync::mpsc::Sender<ControlMsg>) -> Self {
+        Self::Standard(tx)
+    }
+}
+
+impl ClientCommands {
+    fn try_send(
+        &self,
+        message: ControlMsg,
+    ) -> Result<(), tokio::sync::mpsc::error::TrySendError<ControlMsg>> {
+        match self {
+            Self::Standard(tx) => enqueue_input(tx, message),
+            Self::Vnc(tx, _) => tx.try_send(message),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct ClientDiagnostics {
+    pub codec: String,
+    pub input: Option<removent_client::vnc::InputSnapshot>,
+    pub vnc: Option<removent_client::vnc::VncSnapshot>,
 }
 
 impl ClientChannels {
@@ -123,6 +164,7 @@ impl ClientChannels {
         self.frames = None;
         self.geometry = None;
         self.cmd = None;
+        self.codec.clear();
         self.generation
     }
 }
@@ -130,14 +172,34 @@ impl ClientChannels {
 #[derive(Clone)]
 struct ClientAttempt {
     generation: usize,
+    started: std::time::Instant,
     channels: Arc<Mutex<ClientChannels>>,
     events: std::sync::mpsc::Sender<UiEvent>,
 }
 
 impl ClientAttempt {
+    fn progress(&self, stage: ConnectionStage) {
+        if self.channels.lock().unwrap().generation == self.generation {
+            tracing::info!(
+                attempt = self.generation,
+                ?stage,
+                elapsed_ms = self.started.elapsed().as_millis() as u64,
+                "connection progress"
+            );
+            let _ = self.events.send(UiEvent::ConnectionProgress {
+                generation: self.generation,
+                stage,
+            });
+        }
+    }
+    fn progress_sink(&self) -> ConnectionProgress {
+        let attempt = self.clone();
+        Arc::new(move |stage| attempt.progress(stage))
+    }
+
     fn publish(
         &self,
-        cmd: tokio::sync::mpsc::Sender<ControlMsg>,
+        cmd: impl Into<ClientCommands>,
         codec: String,
     ) -> Result<removent_core::latest::Sender<VideoFrame>> {
         let mut channels = self.channels.lock().unwrap();
@@ -148,7 +210,9 @@ impl ClientAttempt {
         let (tx, rx) = removent_core::latest::channel();
         channels.frames = Some(rx);
         channels.geometry = None;
-        channels.cmd = Some(cmd);
+        channels.cmd = Some(cmd.into());
+        channels.codec = codec.clone();
+        tracing::info!(attempt = self.generation, elapsed_ms = self.started.elapsed().as_millis() as u64, %codec, "remote session ready");
         let _ = self.events.send(UiEvent::SessionReady {
             generation: self.generation,
             codec,
@@ -170,7 +234,7 @@ impl ClientAttempt {
             "Connection cancelled"
         );
         channels.geometry = None;
-        channels.cmd = Some(cmd);
+        channels.cmd = Some(cmd.into());
         Ok(())
     }
 
@@ -181,14 +245,24 @@ impl ClientAttempt {
         }
         channels.cmd = None;
         let event = match error {
-            Some(error) => UiEvent::ConnectFailed {
-                generation: self.generation,
-                error,
-            },
-            None => UiEvent::SessionClosed {
-                generation: self.generation,
-                reason: t!("session.peer_disconnected").to_string(),
-            },
+            Some(error) => {
+                tracing::warn!(attempt = self.generation, elapsed_ms = self.started.elapsed().as_millis() as u64, %error, "connection or session failed");
+                UiEvent::ConnectFailed {
+                    generation: self.generation,
+                    error,
+                }
+            }
+            None => {
+                tracing::info!(
+                    attempt = self.generation,
+                    elapsed_ms = self.started.elapsed().as_millis() as u64,
+                    "remote session closed"
+                );
+                UiEvent::SessionClosed {
+                    generation: self.generation,
+                    reason: t!("session.peer_disconnected").to_string(),
+                }
+            }
         };
         let _ = self.events.send(event);
     }
@@ -276,8 +350,15 @@ fn known_fingerprints(paths: &DataPaths) -> Vec<[u8; 32]> {
 
 impl Engine {
     pub fn new(rt: tokio::runtime::Runtime, paths: DataPaths, settings: Settings) -> Self {
+        let engine = Self::with_state(rt, paths, settings);
+        engine.spawn_daemon_link();
+        engine.spawn_update_scheduler();
+        engine
+    }
+
+    fn with_state(rt: tokio::runtime::Runtime, paths: DataPaths, settings: Settings) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
-        let engine = Self {
+        Self {
             rt: Arc::new(rt),
             paths,
             settings: Arc::new(Mutex::new(settings)),
@@ -292,9 +373,23 @@ impl Engine {
             daemon_perms: Arc::new(Mutex::new(None)),
             update: UpdateShared::new(),
             host_sessions: Arc::new(AtomicUsize::new(0)),
-        };
-        engine.spawn_daemon_link();
-        engine.spawn_update_scheduler();
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_viewer_test(
+        paths: DataPaths,
+        cmd: tokio::sync::mpsc::Sender<ControlMsg>,
+    ) -> Self {
+        let engine = Self::with_state(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
+            paths,
+            Settings::default(),
+        );
+        engine.client_channels.lock().unwrap().cmd = Some(ClientCommands::Standard(cmd));
         engine
     }
 
@@ -307,13 +402,11 @@ impl Engine {
     pub fn update_settings(&self, f: impl FnOnce(&mut Settings)) -> Result<(), String> {
         {
             let mut s = self.settings.lock().unwrap();
-            let mut next = s.clone();
-            f(&mut next);
-            if let Err(e) = next.save(&self.paths) {
+            // The tray/CLI may change host_enabled while this window is open.
+            *s = Settings::update(&self.paths, f).map_err(|e| {
                 tracing::error!(err=%e, "settings save failed");
-                return Err(e.to_string());
-            }
-            *s = next;
+                e.to_string()
+            })?;
         }
         // Reload on the daemon side (the runner picks up the new settings on next restart).
         if let Some(tx) = self.daemon_req.lock().unwrap().as_ref() {
@@ -447,16 +540,18 @@ impl Engine {
             let _ = tx.send(IpcRequest::SetEnabled { on });
             return;
         }
-        // Daemon offline: send SetEnabled after spawning it.
-        if let Err(e) = self.spawn_daemon_process() {
-            let _ = self.events_tx.send(UiEvent::Notice(
-                t!("notice.daemon_spawn_failed", err = format!("{e:#}")).to_string(),
-            ));
-            return;
-        }
+        // launchctl readiness can take seconds; never wait on the UI thread.
+        let engine = self.clone();
         let slot = self.daemon_req.clone();
         let events = self.events_tx.clone();
         self.rt.spawn(async move {
+            let result = tokio::task::spawn_blocking(move || engine.spawn_daemon_process()).await;
+            if let Err(e) = result.map_err(anyhow::Error::from).and_then(|v| v) {
+                let _ = events.send(UiEvent::Notice(
+                    t!("notice.daemon_spawn_failed", err = format!("{e:#}")).to_string(),
+                ));
+                return;
+            }
             for _ in 0..25 {
                 if let Some(tx) = slot.lock().unwrap().as_ref() {
                     let _ = tx.send(IpcRequest::SetEnabled { on });
@@ -467,6 +562,28 @@ impl Engine {
             let _ = events.send(UiEvent::Notice(
                 t!("notice.daemon_start_timeout").to_string(),
             ));
+        });
+    }
+
+    /// Start IPC/hosting from the saved settings without changing the service
+    /// switch. The packaged app uses launchd; source builds retain dev.sh's lifecycle.
+    pub fn start_background_daemon(&self) {
+        let Some(bin) = Self::daemon_binary() else {
+            return;
+        };
+        if !bin
+            .ancestors()
+            .any(|p| p.extension().is_some_and(|e| e == "app"))
+        {
+            return;
+        }
+        let engine = self.clone();
+        self.rt.spawn_blocking(move || {
+            if let Err(e) = engine.spawn_daemon_process() {
+                let _ = engine.events_tx.send(UiEvent::Notice(
+                    t!("notice.daemon_spawn_failed", err = format!("{e:#}")).to_string(),
+                ));
+            }
         });
     }
 
@@ -499,6 +616,13 @@ impl Engine {
     fn spawn_daemon_process(&self) -> Result<()> {
         let bin = Self::daemon_binary()
             .ok_or_else(|| anyhow::anyhow!(t!("notice.daemon_binary_missing").to_string()))?;
+        #[cfg(target_os = "macos")]
+        if bin
+            .ancestors()
+            .any(|p| p.extension().is_some_and(|e| e == "app"))
+        {
+            return removent_core::service::Service::new(self.paths.clone(), bin)?.start();
+        }
         let mut child = std::process::Command::new(bin)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -607,27 +731,35 @@ impl Engine {
         let settings = self.settings.lock().unwrap().clone();
         let attempt = ClientAttempt {
             generation: self.client_channels.lock().unwrap().invalidate(),
+            started: std::time::Instant::now(),
             channels: self.client_channels.clone(),
             events: self.events_tx.clone(),
         };
-        let handle = self.rt.spawn(async move {
-            // catch_unwind: even a task panic must reset the UI (the connect button
-            // must not get stuck on "connecting…").
-            let result = std::panic::AssertUnwindSafe(run_requested_client(
-                identity,
-                request,
-                paths,
-                settings,
-                attempt.clone(),
-            ))
-            .catch_unwind()
-            .await;
-            attempt.finish(match result {
-                Ok(Ok(())) => None,
-                Ok(Err(e)) => Some(format!("{e:#}")),
-                Err(_) => Some(t!("session.internal_error").to_string()),
-            });
-        });
+        // Record only the destination and protocol, never the request/credentials.
+        let span = tracing::info_span!("client_connection", pid = std::process::id(), attempt = attempt.generation,
+            protocol = ?request.protocol, destination = %request.address);
+        tracing::info!(parent: &span, "connection requested");
+        let handle = self.rt.spawn(
+            async move {
+                // catch_unwind: even a task panic must reset the UI (the connect button
+                // must not get stuck on "connecting…").
+                let result = std::panic::AssertUnwindSafe(run_requested_client(
+                    identity,
+                    request,
+                    paths,
+                    settings,
+                    attempt.clone(),
+                ))
+                .catch_unwind()
+                .await;
+                attempt.finish(match result {
+                    Ok(Ok(())) => None,
+                    Ok(Err(e)) => Some(format!("{e:#}")),
+                    Err(_) => Some(t!("session.internal_error").to_string()),
+                });
+            }
+            .instrument(span),
+        );
         *task = Some(handle);
         Ok(())
     }
@@ -661,8 +793,15 @@ impl Engine {
             return;
         }
         // Also invalidate already-queued ready/PIN/error events from a finished task.
+        let previous = channels.generation;
         let generation = channels.invalidate();
         if let Some(task) = task.take() {
+            if !task.is_finished() {
+                tracing::info!(
+                    attempt = previous,
+                    "connection or session cancelled locally"
+                );
+            }
             task.abort();
             let _ = self
                 .events_tx
@@ -671,6 +810,22 @@ impl Engine {
     }
 
     // ---- viewer input / clipboard pass-through ----
+
+    pub fn client_diagnostics(&self, generation: usize) -> ClientDiagnostics {
+        let channels = self.client_channels.lock().unwrap();
+        if channels.generation != generation {
+            return ClientDiagnostics::default();
+        }
+        let mut diagnostics = ClientDiagnostics {
+            codec: channels.codec.clone(),
+            ..Default::default()
+        };
+        if let Some(ClientCommands::Vnc(input, stats)) = &channels.cmd {
+            diagnostics.input = Some(input.snapshot());
+            diagnostics.vnc = Some(stats.snapshot());
+        }
+        diagnostics
+    }
 
     /// Publish geometry on the same FIFO as input, and resend it after resume.
     pub fn set_frame_geometry(&self, generation: usize, width: u32, height: u32) {
@@ -696,22 +851,18 @@ impl Engine {
         }
     }
 
-    /// Reserve queue space for transitions. If a key/button event cannot be
-    /// delivered, close the session so the peer releases held inputs.
+    /// Buffer VNC transitions and coalesce motion; other transports reserve FIFO
+    /// space for transitions. A hard overflow closes the session explicitly
+    /// instead of silently losing a key/button release.
     fn try_send_cmd(&self, msg: ControlMsg) {
         let failed_generation = {
             let channels = self.client_channels.lock().unwrap();
-            channels
-                .cmd
-                .as_ref()
-                .and_then(|tx| match enqueue_input(tx, msg) {
-                    // The frame bridge owns disconnect/retry handling. A closed
-                    // old channel must not abort a reconnect that is starting.
-                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                        Some(channels.generation)
-                    }
-                    _ => None,
-                })
+            channels.cmd.as_ref().and_then(|tx| match tx.try_send(msg) {
+                // The frame bridge owns disconnect/retry handling. A closed
+                // old channel must not abort a reconnect that is starting.
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => Some(channels.generation),
+                _ => None,
+            })
         };
         if let Some(generation) = failed_generation {
             self.cancel_client(Some(generation), t!("session.input_overloaded").to_string());
@@ -950,6 +1101,7 @@ async fn run_client(
     // The PIN prompt is deferred until pairing actually starts: a trusted peer
     // never needs one (no popup flash on every connect).
     let pin_attempt = attempt.clone();
+    attempt.progress(ConnectionStage::Negotiating);
     let mut session = connect_session(
         ep_client,
         addr,
@@ -958,6 +1110,7 @@ async fn run_client(
         None,
         None,
         Some(Box::new(move |pin_tx| {
+            pin_attempt.progress(ConnectionStage::Pairing);
             let _ = pin_attempt.events.send(UiEvent::ClientNeedsPin {
                 generation: pin_attempt.generation,
                 tx: pin_tx,
@@ -1070,35 +1223,78 @@ async fn run_client(
     }
 }
 
+/// Translate common VNC failures while keeping uncommon protocol details available.
+fn vnc_failure_message(error: &removent_client::VncError) -> String {
+    use removent_client::VncError;
+    match error {
+        VncError::Timeout { stage, seconds } => {
+            let key = match *stage {
+                "TCP connection" => "connection.vnc_tcp",
+                "server greeting" => "connection.vnc_greeting",
+                "security negotiation" => "connection.vnc_negotiation",
+                "authentication challenge" | "authentication result" => {
+                    "connection.vnc_authentication"
+                }
+                "desktop initialization" => "connection.vnc_desktop",
+                _ => return error.to_string(),
+            };
+            t!("connection.vnc_timeout", stage = t!(key), seconds = seconds).to_string()
+        }
+        VncError::Authentication => t!("connection.vnc_auth_failed").to_string(),
+        VncError::Io(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
+            t!("connection.vnc_refused").to_string()
+        }
+        _ => error.to_string(),
+    }
+}
+
 /// Connect to a standard RFB/VNC server and bridge its raw frames into the
 /// same viewer bus used by RVP. VNC has no Removent pairing/resume channel, so
 /// a disconnect is reported directly to the UI.
 async fn run_vnc_client(request: ConnectionRequest, attempt: ClientAttempt) -> Result<()> {
-    let mut session = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        let addresses =
-            tokio::net::lookup_host((request.address.host.as_str(), request.address.port)).await?;
-        let mut last_error = anyhow::anyhow!("No addresses found for {}", request.address.host);
+    let target = request.address.to_string();
+    let progress = attempt.progress_sink();
+    attempt.progress(ConnectionStage::Resolving);
+    let mut session = tokio::time::timeout(std::time::Duration::from_secs(90), async {
+        let addresses = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            tokio::net::lookup_host((request.address.host.as_str(), request.address.port)),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("VNC host lookup timed out for {target}"))??;
+        let mut last_error = anyhow::anyhow!("No addresses found for {target}");
         for addr in addresses {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                removent_client::connect_vnc_with_credentials(
-                    addr,
-                    &request.username,
-                    &request.password,
-                ),
+            match removent_client::vnc::connect_vnc_with_progress(
+                addr,
+                &request.username,
+                &request.password,
+                Some(&progress),
             )
             .await
             {
-                Ok(Ok(session)) => return Ok(session),
-                Ok(Err(e)) => last_error = e.into(),
-                Err(e) => last_error = e.into(),
+                Ok(session) => return Ok(session),
+                Err(e) => {
+                    tracing::warn!(%addr, err = %e, "VNC connection failed");
+                    // Retrying another DNS address cannot fix account credentials.
+                    let authentication_failed =
+                        matches!(e, removent_client::VncError::Authentication);
+                    last_error = anyhow::anyhow!("{addr}: {}", vnc_failure_message(&e));
+                    if authentication_failed {
+                        break;
+                    }
+                }
             }
         }
         Err(last_error)
     })
     .await
-    .map_err(|_| anyhow::anyhow!("VNC connection timed out after 30 seconds"))??;
-    let ftx = attempt.publish(session.cmd_tx.clone(), "RFB/VNC".into())?;
+    .map_err(|_| {
+        anyhow::anyhow!("VNC connection to {target} exceeded 90 seconds during server negotiation")
+    })??;
+    let ftx = attempt.publish(
+        ClientCommands::Vnc(session.cmd_tx.clone(), session.stats.clone()),
+        "RFB/VNC · Raw BGRA".into(),
+    )?;
     while let Some(frame) = session.decoded_bgra_rx.recv().await {
         if ftx.send(frame).is_err() {
             break;
@@ -1116,6 +1312,7 @@ async fn run_requested_client(
 ) -> Result<()> {
     match request.protocol {
         ConnectionProtocol::Removent => {
+            attempt.progress(ConnectionStage::Resolving);
             let addr = tokio::time::timeout(
                 std::time::Duration::from_secs(10),
                 tokio::net::lookup_host((request.address.host.as_str(), request.address.port)),
@@ -1134,7 +1331,11 @@ async fn run_requested_client(
         }
         ConnectionProtocol::Vnc => run_vnc_client(request, attempt).await,
         ConnectionProtocol::Rdp => {
-            let mut session = removent_client::rdp::connect_rdp(request).await?;
+            let mut session = removent_client::rdp::connect_rdp_with_progress(
+                request,
+                Some(attempt.progress_sink()),
+            )
+            .await?;
             let ftx = attempt.publish(session.cmd_tx.clone(), "RDP".into())?;
             while let Some(frame) = session.decoded_bgra_rx.recv().await {
                 if ftx.send(frame).is_err() {
@@ -1158,6 +1359,7 @@ mod client_lifecycle_tests {
     ) -> ClientAttempt {
         ClientAttempt {
             generation: channels.lock().unwrap().invalidate(),
+            started: std::time::Instant::now(),
             channels: channels.clone(),
             events: events.clone(),
         }
@@ -1257,7 +1459,7 @@ mod client_lifecycle_tests {
     }
 
     #[test]
-    fn cancellation_invalidates_queued_ready_pin_and_failure_events() {
+    fn cancellation_invalidates_queued_progress_ready_pin_and_failure_events() {
         let channels = Arc::new(Mutex::new(ClientChannels::default()));
         let (events, rx) = std::sync::mpsc::channel();
         let old = attempt(&channels, &events);
@@ -1270,12 +1472,13 @@ mod client_lifecycle_tests {
                 tx,
             })
             .unwrap();
+        old.progress(ConnectionStage::Authenticating);
         old.finish(Some("old failure".into()));
 
         let cancelled = channels.lock().unwrap().invalidate();
         assert!(frames.is_closed());
         let queued: Vec<_> = rx.try_iter().collect();
-        assert_eq!(queued.len(), 3);
+        assert_eq!(queued.len(), 4);
         assert!(
             queued
                 .iter()
@@ -1294,16 +1497,11 @@ mod client_lifecycle_tests {
         let current_frames = current.publish(cmd.clone(), "RDP".into()).unwrap();
         assert!(old.publish(cmd.clone(), "VNC".into()).is_err());
         assert!(old.resume(cmd.clone()).is_err());
+        old.progress(ConnectionStage::PreparingDesktop);
         old.finish(Some("cancelled task failed".into()));
         assert!(!current_frames.is_closed());
         assert!(
-            channels
-                .lock()
-                .unwrap()
-                .cmd
-                .as_ref()
-                .unwrap()
-                .same_channel(&cmd)
+            matches!(channels.lock().unwrap().cmd.as_ref(), Some(ClientCommands::Standard(tx)) if tx.same_channel(&cmd))
         );
         assert_eq!(rx.try_iter().count(), 1);
         current.finish(None);

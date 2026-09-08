@@ -32,6 +32,26 @@ func run(_ executable: String, _ arguments: [String]) throws {
     }
 }
 
+func serviceIsRunning(_ cli: URL) throws -> Bool {
+    let task = Process()
+    let output = Pipe()
+    task.executableURL = cli
+    task.arguments = ["daemon", "service-status"]
+    task.standardOutput = output
+    task.standardError = FileHandle.nullDevice
+    try task.run()
+    let data = output.fileHandleForReading.readDataToEndOfFile()
+    task.waitUntilExit()
+    guard task.terminationStatus == 0,
+          let status = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let reachable = status["reachable"] as? Bool,
+          let managed = status["managed"] as? Bool else {
+        throw NSError(domain: "RemoventInstaller", code: 3, userInfo: [NSLocalizedDescriptionKey:
+            tr("Could not check the existing background service.", "无法检查现有后台服务的状态。")])
+    }
+    return reachable || managed
+}
+
 let readOnly = (try? source.resourceValues(forKeys: [.volumeIsReadOnlyKey]))?.volumeIsReadOnly == true
 if readOnly {
     let system = URL(fileURLWithPath: "/Applications", isDirectory: true)
@@ -51,12 +71,13 @@ if readOnly {
         // Replacing an active bundle could leave its daemon and tray on the old
         // version. Ask the user to quit instead of killing their sessions.
         let active = NSWorkspace.shared.runningApplications.contains {
-            $0.processIdentifier != getpid() && $0.bundleURL?.standardizedFileURL == destination.standardizedFileURL
+            guard $0.processIdentifier != getpid(), let url = $0.bundleURL?.standardizedFileURL else { return false }
+            return url == destination.standardizedFileURL || url.path.hasPrefix(destination.path + "/")
         }
         guard !active else {
             throw NSError(domain: "RemoventInstaller", code: 1, userInfo: [NSLocalizedDescriptionKey:
-                tr("Quit the installed Removent app before replacing it. For a running session, use Software Update after disconnecting.",
-                   "请先退出已安装的 Removent 再安装。若会话正在进行，请在断开后使用应用内软件更新。")])
+                tr("Quit the installed Removent app and menu bar app before replacing them. For an existing installation, use Software Update after disconnecting.",
+                   "请先退出已安装的 Removent 主窗口和菜单栏应用。已有安装建议在断开连接后使用应用内软件更新。")])
         }
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
         try run("/usr/bin/ditto", [source.path, staged.path])
@@ -65,12 +86,19 @@ if readOnly {
             guard (try destination.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink != true else {
                 throw NSError(domain: "RemoventInstaller", code: 2, userInfo: [NSLocalizedDescriptionKey: "Installation destination is a symbolic link"])
             }
+            // A launchd service can be alive even with both UIs closed. Do not
+            // silently replace its executable or leave old code serving peers.
+            if try serviceIsRunning(staged.appendingPathComponent("Contents/MacOS/removent-cli")) {
+                throw NSError(domain: "RemoventInstaller", code: 4, userInfo: [NSLocalizedDescriptionKey:
+                    tr("The background service is still running. Use Software Update, or stop it with removent-cli daemon stop before replacing the app.",
+                       "后台服务仍在运行。请使用应用内软件更新，或先执行 removent-cli daemon stop 再替换应用。")])
+            }
             try fm.moveItem(at: destination, to: backup)
             backedUp = true
         }
         try fm.moveItem(at: staged, to: destination)
         installed = true
-        try run("/usr/bin/open", ["-n", destination.path])
+        try run("/usr/bin/open", ["-n", destination.path, "--args"] + Array(CommandLine.arguments.dropFirst()))
         if backedUp { try? fm.removeItem(at: backup) }
         exit(0)
     } catch {
@@ -84,6 +112,23 @@ if readOnly {
         }
         _ = alert(tr("Installation could not finish", "安装未完成"), error.localizedDescription,
                   [tr("OK", "好")])
+        exit(1)
+    }
+}
+
+// A server-only entry point also works through `open --args --server` and
+// never constructs the GPUI client or requires the menu bar app to stay alive.
+if CommandLine.arguments.contains("--server") {
+    do {
+        let cli = source.appendingPathComponent("Contents/MacOS/removent-cli").path
+        try run(cli, ["daemon", CommandLine.arguments.contains("--login") ? "login-on" : "start"])
+        if CommandLine.arguments.contains("--tray") {
+            try run("/usr/bin/open", ["-g", source.appendingPathComponent("Contents/Helpers/RemoventTray.app").path])
+        }
+        exit(0)
+    } catch {
+        _ = alert(tr("Could not start the background service", "无法启动后台服务"),
+                  error.localizedDescription, [tr("OK", "好")])
         exit(1)
     }
 }

@@ -19,6 +19,8 @@ pub enum IpcRequest {
     Status,
     /// Enable/disable the host service (the daemon process stays resident).
     SetEnabled { on: bool },
+    /// Explicit interactive setup, requested in the daemon's own TCC identity.
+    RequestPermissions,
     /// Reload settings from disk (sent after the app settings page saves; takes effect on the runner's next restart).
     ReloadSettings,
     /// Admission decision reply (corresponds to the AdmissionRequest event).

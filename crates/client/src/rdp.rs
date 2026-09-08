@@ -17,10 +17,11 @@ use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio_native_tls::{TlsConnector, TlsStream, native_tls};
+use tracing::Instrument;
 use x509_cert::der::Decode;
 
 use crate::DecodedFrame;
-use crate::connection::ConnectionRequest;
+use crate::connection::{ConnectionProgress, ConnectionRequest, ConnectionStage, report_progress};
 
 mod input;
 
@@ -40,17 +41,31 @@ impl Drop for RdpSession {
 type RdpStream = TokioFramed<TlsStream<TcpStream>>;
 
 pub async fn connect_rdp(request: ConnectionRequest) -> Result<RdpSession> {
-    let (result, stream) = tokio::time::timeout(Duration::from_secs(30), handshake(request))
-        .await
-        .context("RDP connection timed out after 30 seconds")??;
+    connect_rdp_with_progress(request, None).await
+}
+
+pub async fn connect_rdp_with_progress(
+    request: ConnectionRequest,
+    progress: Option<ConnectionProgress>,
+) -> Result<RdpSession> {
+    let (result, stream) = tokio::time::timeout(
+        Duration::from_secs(30),
+        handshake(request, progress.as_ref()),
+    )
+    .await
+    .context("RDP connection timed out after 30 seconds")??;
+    report_progress(progress.as_ref(), ConnectionStage::PreparingDesktop);
     let image = new_image(result.desktop_size)?;
     let (cmd_tx, cmd_rx) = mpsc::channel(128);
     let (frame_tx, decoded_bgra_rx) = removent_core::latest::channel();
     let (done_tx, completion) = oneshot::channel();
-    let task = tokio::spawn(async move {
-        let result = run(result, stream, image, cmd_rx, frame_tx).await;
-        let _ = done_tx.send(result);
-    });
+    let task = tokio::spawn(
+        async move {
+            let result = run(result, stream, image, cmd_rx, frame_tx).await;
+            let _ = done_tx.send(result);
+        }
+        .in_current_span(),
+    );
     Ok(RdpSession {
         cmd_tx,
         decoded_bgra_rx,
@@ -59,7 +74,11 @@ pub async fn connect_rdp(request: ConnectionRequest) -> Result<RdpSession> {
     })
 }
 
-async fn handshake(request: ConnectionRequest) -> Result<(ConnectionResult, RdpStream)> {
+async fn handshake(
+    request: ConnectionRequest,
+    progress: Option<&ConnectionProgress>,
+) -> Result<(ConnectionResult, RdpStream)> {
+    report_progress(progress, ConnectionStage::Connecting);
     let host = request.address.host.clone();
     let tcp = TcpStream::connect((host.as_str(), request.address.port))
         .await
@@ -74,6 +93,7 @@ async fn handshake(request: ConnectionRequest) -> Result<(ConnectionResult, RdpS
         .context("RDP TLS configuration")?;
     let mut connector = connector::ClientConnector::new(connector_config(request), local_addr);
     let mut framed = TokioFramed::new(tcp);
+    report_progress(progress, ConnectionStage::Negotiating);
     let upgrade = ironrdp_tokio::connect_begin(&mut framed, &mut connector)
         .await
         .context("RDP negotiation")?;
@@ -82,6 +102,7 @@ async fn handshake(request: ConnectionRequest) -> Result<(ConnectionResult, RdpS
         leftover.is_empty(),
         "Unexpected data before RDP TLS handshake"
     );
+    report_progress(progress, ConnectionStage::Authenticating);
     let tls_stream = TlsConnector::from(tls)
         .connect(&host, tcp)
         .await

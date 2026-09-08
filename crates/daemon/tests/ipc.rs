@@ -142,6 +142,13 @@ async fn set_enabled_toggles_and_broadcasts() {
         IpcResponse::Ok
     ));
     assert!(!d.state.enabled.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(!Settings::load(&d.paths).unwrap().host_enabled);
+    let restarted = DaemonState::new(
+        d.paths.clone(),
+        Settings::load(&d.paths).unwrap(),
+        "a1b2c3d4".into(),
+    );
+    assert!(!restarted.snapshot().running);
 
     match watcher.next_event().await {
         IpcEvent::StateChanged { running } => assert!(!running),
@@ -152,6 +159,40 @@ async fn set_enabled_toggles_and_broadcasts() {
         IpcResponse::Status(report) => assert!(!report.running),
         other => panic!("expected Status, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn failed_switch_save_returns_error_and_preserves_running_state() {
+    let d = spawn_daemon_with(None).await;
+    std::fs::create_dir(d.paths.settings_file()).unwrap();
+    let mut c = Client::connect(&d.paths).await;
+    assert!(matches!(
+        c.request(IpcRequest::SetEnabled { on: false }).await,
+        IpcResponse::Error { .. }
+    ));
+    assert!(d.state.snapshot().running);
+}
+
+#[tokio::test]
+async fn repeated_enable_does_not_restart_host_and_preserves_other_settings() {
+    let d = spawn_daemon_with(None).await;
+    let settings = Settings {
+        device_name: "Updated by app".into(),
+        ..Settings::default()
+    };
+    settings.save(&d.paths).unwrap();
+    let mut watch = d.state.enabled_watch.subscribe();
+    watch.borrow_and_update();
+    let mut c = Client::connect(&d.paths).await;
+    assert!(matches!(
+        c.request(IpcRequest::SetEnabled { on: true }).await,
+        IpcResponse::Ok
+    ));
+    assert!(!watch.has_changed().unwrap());
+    assert_eq!(
+        Settings::load(&d.paths).unwrap().device_name,
+        "Updated by app"
+    );
 }
 
 #[tokio::test]

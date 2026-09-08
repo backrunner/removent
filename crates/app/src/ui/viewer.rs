@@ -1,6 +1,6 @@
-//! Viewer session window: immersive picture + floating toolbar + health badge (ui-design §4.2).
+//! Viewer session window: immersive picture, floating controls, optional diagnostics.
 
-use crate::engine::{Engine, VideoFrame};
+use crate::engine::{ClientDiagnostics, Engine, VideoFrame};
 use crate::ui::motion;
 use crate::ui::widgets::*;
 use gpui::{
@@ -8,10 +8,7 @@ use gpui::{
     MouseButton, ObjectFit, Point, Render, RenderImage, Subscription, Task, TouchPhase, Window,
     WindowOptions, actions, div, img, prelude::*, px, size,
 };
-use gpui_component::{
-    ActiveTheme, TITLE_BAR_HEIGHT, TitleBar,
-    button::{Button, ButtonVariants},
-};
+use gpui_component::{ActiveTheme, TITLE_BAR_HEIGHT, TitleBar};
 use removent_core::latest::Receiver;
 use removent_proto::{KeyKind, KeyModifiers, MouseKind, ScrollPhase};
 use rust_i18n::t;
@@ -19,7 +16,10 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-actions!(viewer, [ViewerEscape, ViewerToggleFullscreen]);
+actions!(
+    viewer,
+    [ViewerEscape, ViewerToggleFullscreen, ViewerToggleInfo]
+);
 
 const TOOLBAR_HIDE_AFTER: Duration = Duration::from_millis(800);
 /// Moving the mouse to the top window edge (y < 8px, window coordinates) reveals the toolbar.
@@ -48,8 +48,17 @@ pub struct ViewerView {
     width: u32,
     height: u32,
     fps_counter: u32,
-    fps_shown: u32,
+    fps_shown: f64,
     last_fps_tick: Instant,
+    info_visible: bool,
+    info_scroll: gpui::ScrollHandle,
+    started: Instant,
+    last_frame: Option<Instant>,
+    diagnostics: ClientDiagnostics,
+    received_bytes: u64,
+    received_frames: u64,
+    receive_rate: f64,
+    receive_fps: f64,
     peer_name: String,
     toolbar_until: Option<Instant>,
     /// Bumped each time the toolbar transitions hidden → visible: folded into the animation
@@ -98,18 +107,17 @@ impl ViewerView {
                     if this
                         .update_in(&mut *cx, |this, window, cx| {
                             this.handle_frame(frame, window);
-                            if this.last_fps_tick.elapsed() >= Duration::from_secs(1) {
-                                this.fps_shown = this.fps_counter;
-                                this.fps_counter = 0;
-                                this.last_fps_tick = Instant::now();
-                            }
                             cx.notify();
-                            window.refresh();
                         })
                         .is_err()
                     {
                         break;
                     }
+                    // Always return time to the UI event loop. The latest-frame
+                    // channel replaces stale pictures while key/mouse events run.
+                    cx.background_executor()
+                        .timer(Duration::from_millis(16))
+                        .await;
                 }
                 let _ = this.update_in(&mut *cx, |this, window, cx| {
                     this.ended = true;
@@ -121,6 +129,30 @@ impl ViewerView {
                 });
             },
         )
+        .detach();
+
+        // Sampling is independent of frame arrivals: idle desktops show 0 fps,
+        // and stalled updates still expose receive rate and queued input age.
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                if !this
+                    .update(cx, |this, cx| {
+                        if this.ended {
+                            return false;
+                        }
+                        this.sample_diagnostics();
+                        if this.info_visible {
+                            cx.notify();
+                        }
+                        true
+                    })
+                    .unwrap_or(false)
+                {
+                    break;
+                }
+            }
+        })
         .detach();
 
         // Focus-loss handling: release inputs still held remotely (macOS delivers
@@ -155,8 +187,17 @@ impl ViewerView {
             width: 0,
             height: 0,
             fps_counter: 0,
-            fps_shown: 0,
+            fps_shown: 0.,
             last_fps_tick: Instant::now(),
+            info_visible: false,
+            info_scroll: gpui::ScrollHandle::new(),
+            started: Instant::now(),
+            last_frame: None,
+            diagnostics: ClientDiagnostics::default(),
+            received_bytes: 0,
+            received_frames: 0,
+            receive_rate: 0.,
+            receive_fps: 0.,
             peer_name,
             toolbar_until: None,
             toolbar_seq: 0,
@@ -196,7 +237,31 @@ impl ViewerView {
             self.width = frame.width;
             self.height = frame.height;
             self.fps_counter += 1;
+            self.last_frame = Some(Instant::now());
         }
+    }
+
+    fn sample_diagnostics(&mut self) {
+        let seconds = self.last_fps_tick.elapsed().as_secs_f64().max(0.001);
+        self.fps_shown = self.fps_counter as f64 / seconds;
+        self.fps_counter = 0;
+        self.last_fps_tick = Instant::now();
+        self.diagnostics = self.engine.client_diagnostics(self.session_generation);
+        if let Some(stats) = self.diagnostics.vnc {
+            self.receive_rate =
+                stats.received_bytes.saturating_sub(self.received_bytes) as f64 / seconds;
+            self.receive_fps =
+                stats.received_frames.saturating_sub(self.received_frames) as f64 / seconds;
+            self.received_bytes = stats.received_bytes;
+            self.received_frames = stats.received_frames;
+        }
+    }
+
+    fn toggle_info(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.info_visible = !self.info_visible;
+        self.diagnostics = self.engine.client_diagnostics(self.session_generation);
+        window.focus(&self.focus);
+        cx.notify();
     }
 
     fn disconnect(&mut self, window: &mut Window) {
@@ -276,7 +341,7 @@ impl ViewerView {
     /// (client layout wins), so vk_code only needs to be right for command and
     /// navigation keys.
     fn forward_key(&mut self, keystroke: &Keystroke, kind: KeyKind) {
-        if !self.input_active() || is_viewer_shortcut(keystroke) {
+        if !self.input_active() || (kind != KeyKind::Up && is_viewer_shortcut(keystroke)) {
             return;
         }
         let key = keystroke.key.as_str();
@@ -295,6 +360,11 @@ impl ViewerView {
         else {
             return;
         };
+        // A local shortcut can be released after its modifiers. Only release
+        // physical keys whose down event was actually forwarded.
+        if kind == KeyKind::Up && !self.pressed_keys.contains(&vk_code) {
+            return;
+        }
         let modifiers = key_modifiers(&keystroke.modifiers, self.sent_modifiers);
         self.engine
             .send_input_key(vk_code, modifiers, kind, unicode);
@@ -418,12 +488,20 @@ impl ViewerView {
             .right_0()
             .flex()
             .justify_center()
+            .when(self.info_visible, |el| el.justify_end().pr_4())
             .child(
-                overlay_chip()
-                    .bg(colors.overlay)
-                    .border_1()
-                    .border_color(colors.border)
-                    .shadow_md()
+                overlay_chip(cx)
+                    .debug_selector(|| "viewer-toolbar-chip".into())
+                    .child(
+                        Button::new("toggle-info")
+                            .icon(icon_16("gauge"))
+                            .segment(self.info_visible)
+                            .compact()
+                            .tooltip(t!("viewer.info_tooltip").to_string())
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.toggle_info(window, cx);
+                            })),
+                    )
                     .child(
                         Button::new("toggle-fullscreen")
                             .icon(icon_16("maximize"))
@@ -438,8 +516,8 @@ impl ViewerView {
                     .child(div().w(px(1.)).h(px(16.)).mx_1().bg(colors.border))
                     .child(
                         Button::new("disconnect")
-                            .icon(icon_16("power").text_color(colors.danger))
-                            .ghost()
+                            .icon(icon_16("power"))
+                            .destructive()
                             .compact()
                             .tooltip(t!("viewer.disconnect_tooltip").to_string())
                             .on_click(cx.listener(|this, _, window, _cx| {
@@ -455,30 +533,200 @@ impl ViewerView {
             )
     }
 
-    fn render_badge(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = cx.theme().colors;
+    fn render_info(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let mono = cx.theme().mono_font_family.clone();
-        // Static-frame dedup can produce 0–1 fps on a healthy connection.
-        // Render cadence alone cannot establish transport health.
-        let label = if self.width == 0 {
-            t!("viewer.waiting").to_string()
-        } else {
-            format!("{}×{} · {} fps", self.width, self.height, self.fps_shown)
-        };
-        div().absolute().bottom(px(16.)).right(px(16.)).child(
-            overlay_chip()
-                .bg(colors.overlay)
-                .border_1()
-                .border_color(colors.border)
-                .child(dot(colors.muted_foreground))
-                .child(
-                    div()
-                        .text_size(px(11.))
-                        .font_family(mono)
-                        .text_color(colors.muted_foreground)
-                        .child(label),
+        let muted = gpui::white().opacity(0.65);
+        let mut rows = vec![
+            (t!("viewer.info_peer").to_string(), self.peer_name.clone()),
+            (
+                t!("viewer.info_protocol").to_string(),
+                self.diagnostics.codec.clone(),
+            ),
+            (
+                t!("viewer.info_duration").to_string(),
+                format_duration(self.started.elapsed()),
+            ),
+            (
+                t!("viewer.info_resolution").to_string(),
+                if self.width > 0 {
+                    format!("{} × {}", self.width, self.height)
+                } else {
+                    "—".into()
+                },
+            ),
+            (
+                t!("viewer.info_display_fps").to_string(),
+                format!("{:.1} fps", self.fps_shown),
+            ),
+            (
+                t!("viewer.info_frame_age").to_string(),
+                self.last_frame
+                    .map(|last| format!("{:.1} s", last.elapsed().as_secs_f64()))
+                    .unwrap_or_else(|| "—".into()),
+            ),
+        ];
+        if let Some(stats) = self.diagnostics.vnc {
+            rows.extend([
+                (
+                    t!("viewer.info_receive_fps").to_string(),
+                    format!("{:.1} fps", self.receive_fps),
                 ),
-        )
+                (
+                    t!("viewer.info_receive_rate").to_string(),
+                    format!("{:.2} MB/s", self.receive_rate / 1_000_000.),
+                ),
+                (
+                    t!("viewer.info_received").to_string(),
+                    format!("{:.1} MB", stats.received_bytes as f64 / 1_000_000.),
+                ),
+                (
+                    t!("viewer.info_decode").to_string(),
+                    if stats.received_frames > 0 {
+                        format!("{:.1} ms", stats.decode_us as f64 / 1000.)
+                    } else {
+                        "—".into()
+                    },
+                ),
+                (
+                    t!("viewer.info_update").to_string(),
+                    if stats.received_frames > 0 {
+                        format!("{:.1} ms", stats.update_us as f64 / 1000.)
+                    } else {
+                        "—".into()
+                    },
+                ),
+            ]);
+        }
+        if let Some(input) = self.diagnostics.input {
+            rows.extend([
+                (
+                    t!("viewer.info_input_pending").to_string(),
+                    input.pending.to_string(),
+                ),
+                (
+                    t!("viewer.info_input_age").to_string(),
+                    format_ms(input.oldest_pending),
+                ),
+                (
+                    t!("viewer.info_input_delay").to_string(),
+                    format_ms(input.dispatch_delay),
+                ),
+                (
+                    t!("viewer.info_input_sent").to_string(),
+                    input.sent.to_string(),
+                ),
+                (
+                    t!("viewer.info_coalesced").to_string(),
+                    input.coalesced.to_string(),
+                ),
+            ]);
+        }
+        let max_height =
+            (f32::from(window.viewport_size().height - TITLE_BAR_HEIGHT) - 32.).max(100.);
+        div()
+            .id("viewer-info")
+            .debug_selector(|| "viewer-info".into())
+            .absolute()
+            .top(px(16.))
+            .left(px(16.))
+            .w(px(280.))
+            .max_h(px(max_height))
+            .flex()
+            .flex_col()
+            .rounded(px(12.))
+            .bg(gpui::rgba(0x101418D1))
+            .border_1()
+            .border_color(gpui::white().opacity(0.14))
+            .text_color(gpui::white().opacity(0.92))
+            // Panel interaction is local. Mouse-up still bubbles so a remote
+            // drag ending on the panel releases its held button.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Middle, |_, _, cx| cx.stop_propagation())
+            .on_mouse_move(cx.listener(|this, _, _, cx| {
+                if this.buttons == 0 {
+                    cx.stop_propagation();
+                }
+            }))
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_3()
+                    .py_2()
+                    .flex_shrink_0()
+                    .child(icon_16("gauge").text_color(muted))
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_size(px(12.))
+                            .child(t!("viewer.info_title").to_string()),
+                    )
+                    .child(
+                        div()
+                            .id("close-viewer-info")
+                            .debug_selector(|| "close-viewer-info".into())
+                            .cursor_pointer()
+                            .p_1()
+                            .rounded(px(4.))
+                            .hover(|el| el.bg(gpui::white().opacity(0.12)))
+                            .child(icon_16("x").text_color(muted))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.toggle_info(window, cx);
+                                cx.stop_propagation();
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .id("viewer-info-rows")
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.info_scroll)
+                    .px_3()
+                    .pb_3()
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(muted)
+                            .mb_2()
+                            .child(t!("viewer.info_idle_hint").to_string()),
+                    )
+                    .children(rows.into_iter().map(|(label, value)| {
+                        div()
+                            .flex()
+                            .items_start()
+                            .gap_3()
+                            .py_1()
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .text_size(px(11.))
+                                    .text_color(muted)
+                                    .child(label),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_right()
+                                    .text_size(px(11.))
+                                    .font_family(mono.clone())
+                                    .child(value),
+                            )
+                    }))
+                    .when(self.diagnostics.input.is_some(), |el| {
+                        el.child(
+                            div()
+                                .text_size(px(11.))
+                                .text_color(muted)
+                                .mt_2()
+                                .child(t!("viewer.info_input_hint").to_string()),
+                        )
+                    }),
+            )
     }
 
     fn render_ended_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -494,11 +742,11 @@ impl ViewerView {
                 div()
                     .w(px(320.))
                     .p_5()
-                    .rounded(px(10.))
+                    .rounded(px(18.))
                     .bg(colors.popover)
                     .border_1()
                     .border_color(colors.border)
-                    .shadow_md()
+                    .shadow(crate::theme::popup_shadow(cx.theme().is_dark()))
                     .flex()
                     .flex_col()
                     .items_center()
@@ -542,7 +790,7 @@ impl Drop for ViewerView {
 }
 
 impl Render for ViewerView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let toolbar_visible = !self.ended
             && self
                 .toolbar_until
@@ -569,6 +817,9 @@ impl Render for ViewerView {
                     cx.notify();
                 }),
             )
+            .on_action(cx.listener(|this, _: &ViewerToggleInfo, window, cx| {
+                this.toggle_info(window, cx);
+            }))
             .on_mouse_move(cx.listener(|this, ev: &gpui::MouseMoveEvent, window, cx| {
                 let y = f32::from(ev.position.y);
                 let now = Instant::now();
@@ -590,7 +841,7 @@ impl Render for ViewerView {
                 // Pointer over the visible toolbar: swallow the move so the remote
                 // cursor does not jump to the top of the picture (down/up keep the
                 // existing toolbar click interception and release clamping).
-                if toolbar_visible && y < TOOLBAR_HOVER_AREA {
+                if toolbar_visible && y < TOOLBAR_HOVER_AREA && this.buttons == 0 {
                     return;
                 }
                 // Drag kinds are derived host-side from the buttons bitmask.
@@ -606,6 +857,9 @@ impl Render for ViewerView {
                     if !on_picture {
                         return;
                     }
+                    if this.frame_px(ev.position, window, false).is_none() {
+                        return;
+                    }
                     if this.toolbar_until.is_some() {
                         this.toolbar_until = None;
                         cx.notify();
@@ -617,6 +871,9 @@ impl Render for ViewerView {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, ev: &gpui::MouseDownEvent, window, _cx| {
+                    if this.frame_px(ev.position, window, false).is_none() {
+                        return;
+                    }
                     this.buttons |= 0x2;
                     this.forward_mouse(ev.position, MouseKind::RightDown, window);
                 }),
@@ -624,6 +881,9 @@ impl Render for ViewerView {
             .on_mouse_down(
                 MouseButton::Middle,
                 cx.listener(|this, ev: &gpui::MouseDownEvent, window, _cx| {
+                    if this.frame_px(ev.position, window, false).is_none() {
+                        return;
+                    }
                     this.buttons |= 0x4;
                     this.forward_mouse(ev.position, MouseKind::MiddleDown, window);
                 }),
@@ -631,6 +891,9 @@ impl Render for ViewerView {
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, ev: &gpui::MouseUpEvent, window, _cx| {
+                    if this.buttons & 0x1 == 0 {
+                        return;
+                    }
                     this.buttons &= !0x1;
                     this.forward_mouse(ev.position, MouseKind::LeftUp, window);
                 }),
@@ -638,6 +901,9 @@ impl Render for ViewerView {
             .on_mouse_up(
                 MouseButton::Right,
                 cx.listener(|this, ev: &gpui::MouseUpEvent, window, _cx| {
+                    if this.buttons & 0x2 == 0 {
+                        return;
+                    }
                     this.buttons &= !0x2;
                     this.forward_mouse(ev.position, MouseKind::RightUp, window);
                 }),
@@ -645,6 +911,9 @@ impl Render for ViewerView {
             .on_mouse_up(
                 MouseButton::Middle,
                 cx.listener(|this, ev: &gpui::MouseUpEvent, window, _cx| {
+                    if this.buttons & 0x4 == 0 {
+                        return;
+                    }
                     this.buttons &= !0x4;
                     this.forward_mouse(ev.position, MouseKind::MiddleUp, window);
                 }),
@@ -735,7 +1004,9 @@ impl Render for ViewerView {
                             .into_any_element(),
                     })
                     .when(toolbar_visible, |el| el.child(self.render_toolbar(cx)))
-                    .child(self.render_badge(cx))
+                    .when(self.info_visible && !self.ended, |el| {
+                        el.child(self.render_info(window, cx))
+                    })
                     .when(self.ended, |el| el.child(self.render_ended_overlay(cx))),
             )
     }
@@ -744,7 +1015,25 @@ impl Render for ViewerView {
 /// Reserve only explicit local shortcuts; bare Escape and Cmd-F belong to
 /// the remote application. Suppress both key-down and key-up forwarding.
 fn is_viewer_shortcut(key: &Keystroke) -> bool {
-    key.modifiers.control && key.modifiers.platform && matches!(key.key.as_str(), "escape" | "f")
+    key.modifiers.control
+        && key.modifiers.platform
+        && matches!(key.key.as_str(), "escape" | "f" | "i")
+}
+
+fn format_duration(duration: Duration) -> String {
+    let seconds = duration.as_secs();
+    format!(
+        "{:02}:{:02}:{:02}",
+        seconds / 3600,
+        seconds / 60 % 60,
+        seconds % 60
+    )
+}
+
+fn format_ms(duration: Option<Duration>) -> String {
+    duration
+        .map(|value| format!("{:.1} ms", value.as_secs_f64() * 1000.))
+        .unwrap_or_else(|| "—".into())
 }
 
 /// gpui modifiers → wire bitmask.
@@ -893,6 +1182,211 @@ pub fn open_viewer_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::{AnyView, Entity, KeyBinding, TestAppContext, VisualTestContext, point};
+    use removent_proto::ControlMsg;
+
+    struct Fixture {
+        viewer: Entity<ViewerView>,
+        commands: tokio::sync::mpsc::Receiver<ControlMsg>,
+        _frames: removent_core::latest::Sender<VideoFrame>,
+        _directory: tempfile::TempDir,
+    }
+
+    fn setup(cx: &mut TestAppContext) -> (Fixture, &mut VisualTestContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.bind_keys([KeyBinding::new(
+                "ctrl-cmd-i",
+                ViewerToggleInfo,
+                Some("Viewer"),
+            )]);
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let (commands, mut commands_rx) = tokio::sync::mpsc::channel(64);
+        let engine = Engine::for_viewer_test(
+            removent_core::DataPaths {
+                root: directory.path().into(),
+            },
+            commands,
+        );
+        let (frames, frames_rx) = removent_core::latest::channel();
+        let viewer_slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let slot = viewer_slot.clone();
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let viewer =
+                cx.new(|cx| ViewerView::new(engine, frames_rx, "Remote Mac".into(), window, cx));
+            viewer.update(cx, |view, _| {
+                view.handle_frame(
+                    VideoFrame {
+                        width: 640,
+                        height: 360,
+                        data: vec![0; 640 * 360 * 4],
+                        pts_us: 0,
+                    },
+                    window,
+                );
+            });
+            *slot.borrow_mut() = Some(viewer.clone());
+            gpui_component::Root::new(AnyView::from(viewer), window, cx)
+        });
+        let viewer = viewer_slot.borrow_mut().take().unwrap();
+        while commands_rx.try_recv().is_ok() {}
+        (
+            Fixture {
+                viewer,
+                commands: commands_rx,
+                _frames: frames,
+                _directory: directory,
+            },
+            cx,
+        )
+    }
+
+    #[gpui::test]
+    fn info_toggle_and_panel_clicks_stay_local(cx: &mut TestAppContext) {
+        let (mut fixture, cx) = setup(cx);
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("viewer-info").is_none());
+        cx.simulate_keystrokes("ctrl-cmd-i");
+        cx.run_until_parked();
+        let panel = cx.debug_bounds("viewer-info").unwrap();
+        assert_eq!(panel.left(), px(16.));
+        assert_eq!(panel.top(), TITLE_BAR_HEIGHT + px(16.));
+        for button in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
+            cx.simulate_mouse_down(panel.center(), button, Default::default());
+            cx.simulate_mouse_up(panel.center(), button, Default::default());
+        }
+        assert!(
+            fixture.commands.try_recv().is_err(),
+            "panel interactions must not move or click remotely"
+        );
+        let close = cx.debug_bounds("close-viewer-info").unwrap();
+        cx.simulate_mouse_move(close.center(), None, Default::default());
+        cx.simulate_click(close.center(), Default::default());
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            fixture.viewer.update(cx, |view, _| {
+                assert!(!view.info_visible);
+                view.forward_key(&Keystroke::parse("i").unwrap(), KeyKind::Up);
+            })
+        });
+        assert!(
+            fixture.commands.try_recv().is_err(),
+            "releasing a local shortcut must not send a stray key-up"
+        );
+        cx.update(|_, cx| {
+            fixture.viewer.update(cx, |view, _| {
+                view.forward_key(&Keystroke::parse("i").unwrap(), KeyKind::Down);
+                view.forward_key(&Keystroke::parse("ctrl-cmd-i").unwrap(), KeyKind::Up);
+            })
+        });
+        assert!(matches!(
+            fixture.commands.try_recv().unwrap(),
+            ControlMsg::KeyEvent {
+                kind: KeyKind::Down,
+                ..
+            }
+        ));
+        assert!(
+            matches!(
+                fixture.commands.try_recv().unwrap(),
+                ControlMsg::KeyEvent {
+                    kind: KeyKind::Up,
+                    ..
+                }
+            ),
+            "a remotely held key must release even if local shortcut modifiers were added"
+        );
+    }
+
+    #[gpui::test]
+    fn releasing_a_remote_drag_over_info_does_not_leave_a_held_button(cx: &mut TestAppContext) {
+        let (mut fixture, cx) = setup(cx);
+        cx.simulate_resize(size(px(1000.), px(700.)));
+        cx.simulate_keystrokes("ctrl-cmd-i");
+        cx.run_until_parked();
+        let panel = cx.debug_bounds("viewer-info").unwrap();
+        cx.simulate_mouse_down(
+            point(px(800.), px(350.)),
+            MouseButton::Left,
+            Default::default(),
+        );
+        cx.simulate_mouse_move(panel.center(), MouseButton::Left, Default::default());
+        cx.simulate_mouse_up(panel.center(), MouseButton::Left, Default::default());
+        let events: Vec<_> = std::iter::from_fn(|| fixture.commands.try_recv().ok()).collect();
+        assert!(matches!(
+            events.first(),
+            Some(ControlMsg::MouseEvent {
+                kind: MouseKind::LeftDown,
+                buttons: 1,
+                ..
+            })
+        ));
+        assert!(matches!(
+            events.last(),
+            Some(ControlMsg::MouseEvent {
+                kind: MouseKind::LeftUp,
+                buttons: 0,
+                ..
+            })
+        ));
+        cx.update(|_, cx| {
+            fixture
+                .viewer
+                .update(cx, |view, _| assert_eq!(view.buttons, 0))
+        });
+    }
+
+    #[gpui::test]
+    fn full_info_fits_minimum_window_and_idle_samples_reset_fps(cx: &mut TestAppContext) {
+        let (mut fixture, cx) = setup(cx);
+        cx.simulate_resize(size(px(480.), px(320.)));
+        cx.simulate_keystrokes("ctrl-cmd-i");
+        cx.update(|_, cx| {
+            fixture.viewer.update(cx, |view, cx| {
+                view.toolbar_until = Some(Instant::now() + TOOLBAR_HIDE_AFTER);
+                view.diagnostics.input = Some(Default::default());
+                view.diagnostics.vnc = Some(Default::default());
+                cx.notify();
+            })
+        });
+        cx.run_until_parked();
+        let panel = cx.debug_bounds("viewer-info").unwrap();
+        let close = cx.debug_bounds("close-viewer-info").unwrap();
+        assert!(panel.bottom() <= px(320. - 16.), "{panel:?}");
+        assert!(panel.right() <= px(480.));
+        assert!(close.bottom() < panel.bottom());
+        let toolbar = cx.debug_bounds("viewer-toolbar-chip").unwrap();
+        assert!(
+            toolbar.left() > panel.right(),
+            "{toolbar:?} overlaps {panel:?}"
+        );
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: panel.center(),
+            delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-100.))),
+            touch_phase: TouchPhase::Moved,
+            modifiers: Default::default(),
+        });
+        assert!(
+            fixture.commands.try_recv().is_err(),
+            "scrolling performance info must stay local"
+        );
+        cx.update(|_, cx| {
+            fixture.viewer.update(cx, |view, _| {
+                assert!(
+                    view.info_scroll.offset().y < px(0.),
+                    "all diagnostics must be reachable by scrolling"
+                );
+                view.fps_counter = 30;
+                view.last_fps_tick = Instant::now() - Duration::from_secs(2);
+                view.sample_diagnostics();
+                assert!((14.9..=15.1).contains(&view.fps_shown));
+                view.last_fps_tick = Instant::now() - Duration::from_secs(1);
+                view.sample_diagnostics();
+                assert_eq!(view.fps_shown, 0.);
+            })
+        });
+    }
 
     #[test]
     fn keystrokes_preserve_caps_lock_from_modifier_notifications() {
@@ -917,6 +1411,8 @@ mod tests {
             ("cmd-f", false),
             ("ctrl-cmd-escape", true),
             ("ctrl-cmd-f", true),
+            ("ctrl-cmd-i", true),
+            ("cmd-i", false),
         ] {
             assert_eq!(
                 is_viewer_shortcut(&Keystroke::parse(key).unwrap()),

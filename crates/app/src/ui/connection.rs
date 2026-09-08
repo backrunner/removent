@@ -5,23 +5,24 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme, Disableable, Sizable,
-    button::{Button, ButtonVariants},
     input::{InputEvent, InputState},
     spinner::Spinner,
     switch::Switch,
 };
 use removent_client::connection::{
-    AddressError, ConnectionAddress, ConnectionProtocol, ConnectionRequest,
+    AddressError, ConnectionAddress, ConnectionProtocol, ConnectionRequest, ConnectionStage,
 };
 use rust_i18n::t;
+use std::time::{Duration, Instant};
 
-use super::widgets::{form_input, icon_16};
+use super::widgets::{Button, form_input, icon_16, section_header};
 
 gpui::actions!(connection, [ConnectionTab, ConnectionTabPrev]);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConnectionDialogEvent {
     Submit,
+    Cancel,
     Close,
 }
 
@@ -41,6 +42,11 @@ pub struct ConnectionDialog {
     domain: Entity<InputState>,
     accept_invalid_certificate: bool,
     connecting: bool,
+    stage: ConnectionStage,
+    started: Option<Instant>,
+    elapsed_task: Option<gpui::Task<()>>,
+    retry: bool,
+    cancelled: bool,
     obscured: bool,
     restore_focus: Option<FocusHandle>,
     error: Option<String>,
@@ -91,6 +97,11 @@ impl ConnectionDialog {
             domain,
             accept_invalid_certificate: false,
             connecting: false,
+            stage: ConnectionStage::Resolving,
+            started: None,
+            elapsed_task: None,
+            retry: false,
+            cancelled: false,
             obscured: false,
             restore_focus: None,
             error: None,
@@ -110,6 +121,8 @@ impl ConnectionDialog {
         }
         self.step = Step::Details(protocol);
         self.error = None;
+        self.retry = false;
+        self.cancelled = false;
         self.accept_invalid_certificate = false;
         self.port.update(cx, |s, cx| {
             s.set_value(protocol.default_port().to_string(), window, cx)
@@ -126,7 +139,9 @@ impl ConnectionDialog {
         if self.obscured {
             return;
         }
-        if self.connecting || self.step == Step::Protocol {
+        if self.connecting {
+            cx.emit(ConnectionDialogEvent::Cancel);
+        } else if self.step == Step::Protocol {
             cx.emit(ConnectionDialogEvent::Close);
         } else {
             self.step = Step::Protocol;
@@ -144,9 +159,44 @@ impl ConnectionDialog {
         error: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        if connecting && !self.connecting {
+            self.stage = ConnectionStage::Resolving;
+            self.started = Some(Instant::now());
+            self.cancelled = false;
+            self.elapsed_task = Some(cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor().timer(Duration::from_secs(1)).await;
+                    if !this
+                        .update(cx, |this, cx| {
+                            cx.notify();
+                            this.connecting
+                        })
+                        .unwrap_or(false)
+                    {
+                        break;
+                    }
+                }
+            }));
+        } else if !connecting {
+            self.elapsed_task = None;
+            self.started = None;
+            self.retry = error.is_some();
+        }
         self.connecting = connecting;
         self.error = error;
         cx.notify();
+    }
+
+    pub fn set_stage(&mut self, stage: ConnectionStage, cx: &mut Context<Self>) {
+        if self.connecting {
+            self.stage = stage;
+            cx.notify();
+        }
+    }
+
+    pub fn cancel(&mut self, cx: &mut Context<Self>) {
+        self.set_connecting(false, None, cx);
+        self.cancelled = true;
     }
 
     /// A host-side PIN/admission dialog can temporarily cover this form. Remove
@@ -221,7 +271,11 @@ impl ConnectionDialog {
             return;
         }
         match self.request(cx) {
-            Ok(_) => cx.emit(ConnectionDialogEvent::Submit),
+            Ok(_) => {
+                // Lock immediately: repeated Enter/click events must not queue attempts.
+                self.set_connecting(true, None, cx);
+                cx.emit(ConnectionDialogEvent::Submit);
+            }
             Err(error) => {
                 self.error = Some(error);
                 cx.notify();
@@ -248,17 +302,50 @@ impl Render for ConnectionDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors;
         let busy = self.connecting;
-        let mut body = div().flex().flex_col().gap_4();
+        let mut body = div().flex().flex_col().gap_4().p_6();
         match self.step {
             Step::Protocol => {
+                body = body.child(
+                    div()
+                        .text_size(px(13.))
+                        .text_color(colors.muted_foreground)
+                        .child(t!("connection.subtitle").to_string()),
+                );
                 for (i, protocol) in ConnectionProtocol::ALL.into_iter().enumerate() {
+                    let (name, description) = match protocol {
+                        ConnectionProtocol::Removent => ("wifi", "connection.removent_hint"),
+                        ConnectionProtocol::Vnc => ("monitor", "connection.vnc_hint"),
+                        ConnectionProtocol::Rdp => ("copy", "connection.rdp_hint"),
+                    };
                     body = body.child(
                         Button::new(("connection-protocol", i))
                             .outline()
                             .w_full()
-                            .h(px(48.))
-                            .icon(icon_16("monitor"))
-                            .label(protocol.label())
+                            .h(px(84.))
+                            .rounded(px(14.))
+                            .surface()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .w(px(388.))
+                                    .max_w_full()
+                                    .px_2()
+                                    .child(
+                                        section_header(
+                                            name,
+                                            protocol.label().into(),
+                                            t!(description).to_string(),
+                                            cx,
+                                        )
+                                        .flex_1(),
+                                    )
+                                    .child(
+                                        icon_16("chevron-right")
+                                            .text_color(colors.muted_foreground),
+                                    ),
+                            )
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.choose(protocol, window, cx)
                             })),
@@ -336,45 +423,17 @@ impl Render for ConnectionDialog {
                                     ),
                             );
                 }
-                body = body
-                    .when_some(self.error.clone(), |el, error| {
-                        el.child(
-                            div()
-                                .text_size(px(12.))
-                                .text_color(colors.danger)
-                                .child(error),
-                        )
-                    })
-                    .child(
+                if protocol == ConnectionProtocol::Vnc {
+                    body = body.child(
                         div()
-                            .flex()
-                            .items_center()
-                            .justify_end()
-                            .gap_2()
-                            .when(busy, |el| {
-                                el.child(Spinner::new().small()).child(
-                                    div()
-                                        .flex_1()
-                                        .text_size(px(12.))
-                                        .child(t!("connection.connecting").to_string()),
-                                )
-                            })
-                            .child(
-                                Button::new("cancel-connection")
-                                    .ghost()
-                                    .label(t!("action.cancel").to_string())
-                                    .on_click(cx.listener(|_, _, _, cx| {
-                                        cx.emit(ConnectionDialogEvent::Close)
-                                    })),
-                            )
-                            .child(
-                                Button::new("submit-connection")
-                                    .primary()
-                                    .label(t!("action.connect").to_string())
-                                    .disabled(busy)
-                                    .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
-                            ),
+                            .p_3()
+                            .rounded(px(10.))
+                            .bg(colors.accent.opacity(0.08))
+                            .text_size(px(12.))
+                            .text_color(colors.muted_foreground)
+                            .child(t!("connection.credentials_hint").to_string()),
                     );
+                }
             }
         }
         div()
@@ -394,14 +453,17 @@ impl Render for ConnectionDialog {
                 this.cycle_focus(true, window, cx)
             }))
             .max_h((window.viewport_size().height - px(64.)).max(px(200.)))
-            .overflow_y_scroll()
-            .p_5()
+            .overflow_hidden()
             .flex()
             .flex_col()
-            .gap_5()
             .child(
                 div()
                     .flex()
+                    .flex_shrink_0()
+                    .p_6()
+                    .pb_4()
+                    .border_b_1()
+                    .border_color(colors.border)
                     .items_center()
                     .gap_2()
                     .when(matches!(self.step, Step::Details(_)), |el| {
@@ -419,7 +481,7 @@ impl Render for ConnectionDialog {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .text_size(px(15.))
+                            .text_size(px(20.))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .child(match self.step {
                                 Step::Protocol => t!("connection.add").to_string(),
@@ -431,14 +493,154 @@ impl Render for ConnectionDialog {
                             .ghost()
                             .small()
                             .icon(icon_16("x"))
-                            .tooltip(t!("action.close").to_string())
+                            .tooltip(
+                                t!(if busy {
+                                    "connection.cancel_and_close"
+                                } else {
+                                    "action.close"
+                                })
+                                .to_string(),
+                            )
                             .on_click(
                                 cx.listener(|_, _, _, cx| cx.emit(ConnectionDialogEvent::Close)),
                             ),
                     ),
             )
-            .child(body)
+            .child(
+                div()
+                    .id("connection-fields")
+                    .debug_selector(|| "connection-fields".into())
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(body),
+            )
+            .when(matches!(self.step, Step::Details(_)), |el| {
+                el.child(
+                    div()
+                        .debug_selector(|| "connection-footer".into())
+                        .flex()
+                        .flex_col()
+                        .gap_3()
+                        .flex_shrink_0()
+                        .px_6()
+                        .py_4()
+                        .border_t_1()
+                        .border_color(colors.border)
+                        .when_some(self.error.clone(), |el, error| {
+                            el.child(
+                                div()
+                                    .id("connection-error")
+                                    .max_h(px(110.))
+                                    .overflow_y_scroll()
+                                    .p_3()
+                                    .rounded(px(10.))
+                                    .bg(colors.danger.opacity(0.08))
+                                    .border_1()
+                                    .border_color(colors.danger.opacity(0.18))
+                                    .text_size(px(12.))
+                                    .text_color(colors.danger)
+                                    .child(error),
+                            )
+                        })
+                        .when(self.cancelled, |el| {
+                            el.child(
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(colors.muted_foreground)
+                                    .child(t!("connection.cancelled_hint").to_string()),
+                            )
+                        })
+                        .when(busy, |el| {
+                            let elapsed = self.started.map(|s| s.elapsed().as_secs()).unwrap_or(0);
+                            el.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .child(Spinner::new().icon(icon_16("loader-circle")).small())
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .text_size(px(12.))
+                                            .child(stage_label(self.stage)),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(12.))
+                                            .text_color(colors.muted_foreground)
+                                            .child(
+                                                t!("connection.elapsed", seconds = elapsed)
+                                                    .to_string(),
+                                            ),
+                                    ),
+                            )
+                            .when(elapsed >= 8, |el| {
+                                el.child(
+                                    div()
+                                        .text_size(px(12.))
+                                        .text_color(colors.muted_foreground)
+                                        .child(t!("connection.waiting_hint").to_string()),
+                                )
+                            })
+                        })
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_end()
+                                .gap_2()
+                                .child(
+                                    Button::new("cancel-connection")
+                                        .outline()
+                                        .label(
+                                            t!(if busy {
+                                                "connection.cancel_attempt"
+                                            } else {
+                                                "action.cancel"
+                                            })
+                                            .to_string(),
+                                        )
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            cx.emit(if this.connecting {
+                                                ConnectionDialogEvent::Cancel
+                                            } else {
+                                                ConnectionDialogEvent::Close
+                                            });
+                                        })),
+                                )
+                                .child(
+                                    Button::new("submit-connection")
+                                        .primary()
+                                        .label(
+                                            t!(if busy {
+                                                "connection.connecting"
+                                            } else if self.retry {
+                                                "connection.retry"
+                                            } else {
+                                                "action.connect"
+                                            })
+                                            .to_string(),
+                                        )
+                                        .disabled(busy)
+                                        .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
+                                ),
+                        ),
+                )
+            })
     }
+}
+
+pub fn stage_label(stage: ConnectionStage) -> String {
+    t!(match stage {
+        ConnectionStage::Resolving => "connection.stage_resolving",
+        ConnectionStage::Connecting => "connection.stage_connecting",
+        ConnectionStage::Negotiating => "connection.stage_negotiating",
+        ConnectionStage::Pairing => "connection.stage_pairing",
+        ConnectionStage::Authenticating => "connection.stage_authenticating",
+        ConnectionStage::PreparingDesktop => "connection.stage_desktop",
+    })
+    .to_string()
 }
 
 #[cfg(test)]
@@ -453,8 +655,17 @@ mod tests {
     impl Render for TestSurface {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             div()
+                .size_full()
                 .child(Button::new("background-control").label("Background"))
-                .child(self.0.clone())
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(div().w(px(480.)).child(self.0.clone())),
+                )
         }
     }
 
@@ -540,7 +751,7 @@ mod tests {
     #[gpui::test]
     fn keyboard_focus_stays_in_the_dialog_at_minimum_window_size(cx: &mut TestAppContext) {
         let (dialog, cx) = setup(cx);
-        cx.simulate_resize(gpui::size(px(720.), px(480.)));
+        cx.simulate_resize(gpui::size(px(860.), px(600.)));
         cx.update(|window, cx| {
             dialog.update(cx, |form, cx| {
                 form.choose(ConnectionProtocol::Rdp, window, cx)
@@ -554,6 +765,30 @@ mod tests {
             cx.simulate_keystrokes("shift-tab");
             cx.update(|window, cx| assert!(dialog.read(cx).focus.contains_focused(window, cx)));
         }
+    }
+
+    #[gpui::test]
+    fn connection_footer_stays_visible_at_minimum_size(cx: &mut TestAppContext) {
+        let (dialog, cx) = setup(cx);
+        cx.simulate_resize(gpui::size(px(860.), px(600.)));
+        cx.update(|window, cx| {
+            dialog.update(cx, |form, cx| {
+                form.choose(ConnectionProtocol::Rdp, window, cx);
+                form.set_connecting(true, None, cx);
+            })
+        });
+        cx.run_until_parked();
+        let fields = cx.debug_bounds("connection-fields").unwrap();
+        let footer = cx.debug_bounds("connection-footer").unwrap();
+        assert!(fields.size.height > px(100.));
+        assert!(footer.top() >= fields.bottom());
+        assert!(footer.bottom() <= px(600.));
+        cx.update(|_, cx| dialog.update(cx, |form, cx| {
+            form.set_connecting(false, Some("The remote device refused the connection. Check the address and try again.".into()), cx);
+        }));
+        cx.run_until_parked();
+        let footer = cx.debug_bounds("connection-footer").unwrap();
+        assert!(footer.bottom() <= px(600.));
     }
 
     #[gpui::test]
@@ -577,7 +812,47 @@ mod tests {
                 form.back(window, cx);
             })
         });
-        assert_eq!(events.try_recv().unwrap(), ConnectionDialogEvent::Close);
+        assert_eq!(events.try_recv().unwrap(), ConnectionDialogEvent::Cancel);
+    }
+
+    #[gpui::test]
+    fn submit_is_guarded_and_cancel_preserves_details_for_retry(cx: &mut TestAppContext) {
+        let (dialog, cx) = setup(cx);
+        let mut events = cx.events(&dialog);
+        cx.update(|window, cx| {
+            dialog.update(cx, |form, cx| {
+                form.choose(ConnectionProtocol::Vnc, window, cx);
+                form.host
+                    .update(cx, |s, cx| s.set_value("192.168.1.11", window, cx));
+                form.password
+                    .update(cx, |s, cx| s.set_value("secret", window, cx));
+                form.submit(cx);
+                form.submit(cx);
+                assert!(form.connecting);
+                assert!(form.elapsed_task.is_some());
+                form.set_stage(ConnectionStage::Negotiating, cx);
+                assert_eq!(form.stage, ConnectionStage::Negotiating);
+            })
+        });
+        assert_eq!(events.try_recv().unwrap(), ConnectionDialogEvent::Submit);
+        assert!(events.try_recv().is_err());
+        cx.update(|_, cx| {
+            dialog.update(cx, |form, cx| {
+                form.cancel(cx);
+                assert!(form.cancelled && !form.connecting);
+                assert!(form.elapsed_task.is_none());
+                assert_eq!(form.request(cx).unwrap().password, "secret");
+                form.set_stage(ConnectionStage::PreparingDesktop, cx);
+                assert_eq!(form.stage, ConnectionStage::Negotiating);
+                form.submit(cx);
+                assert!(form.connecting && !form.cancelled);
+                assert_eq!(form.stage, ConnectionStage::Resolving);
+                form.set_connecting(false, Some("Authentication failed".into()), cx);
+                assert!(form.retry);
+                assert!(form.elapsed_task.is_none());
+            })
+        });
+        assert_eq!(events.try_recv().unwrap(), ConnectionDialogEvent::Submit);
     }
 
     #[gpui::test]

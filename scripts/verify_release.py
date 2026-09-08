@@ -31,6 +31,7 @@ def verify_bundle(bundle):
     assert p['CFBundleIdentifier'] == 'io.removent.app'
     assert p['CFBundleIconFile'] == 'AppIcon'
     assert (bundle / 'Contents/Resources/AppIcon.icns').stat().st_size > 1000
+    assert (bundle / 'Contents/MacOS/removent-cli').is_file()
     # The CI shell protects its private-key files with umask 077; those modes
     # must not leak into the public app installed for multiple Mac accounts.
     for path in [bundle, *bundle.rglob('*')]:
@@ -70,6 +71,17 @@ def main():
         run('ditto', '-x', '-k', str(zip_path), td)
         verify_bundle(pathlib.Path(td) / 'Removent.app')
     run('hdiutil', 'verify', str(dmg))
+    # Check the actual compressed artifact, not just its source staging folder.
+    with tempfile.TemporaryDirectory() as td:
+        mount = pathlib.Path(td) / 'installer'
+        mount.mkdir()
+        run('hdiutil', 'attach', '-quiet', '-readonly', '-nobrowse', '-noautoopen',
+            '-mountpoint', str(mount), str(dmg))
+        try:
+            from verify_dmg_layout import verify
+            verify(mount)
+        finally:
+            run('hdiutil', 'detach', '-quiet', str(mount))
     run('codesign', '--verify', '--strict', str(dmg))
     run('xcrun', 'stapler', 'validate', str(dmg))
     run('spctl', '--assess', '--type', 'open', '--context', 'context:primary-signature', str(dmg))

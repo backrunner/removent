@@ -1,9 +1,12 @@
-use super::{FrameSignal, FrameSize, MAX_NAME, MAX_PIXELS, PixelFormat};
+use super::{FrameSignal, FrameSize, MAX_NAME, MAX_PIXELS, PixelFormat, VncStats};
 use crate::DecodedFrame;
 use std::io;
+use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Instant;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::sync::atomic::Ordering;
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader, ReadBuf};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::{RwLock, mpsc};
 
@@ -61,48 +64,90 @@ pub(super) async fn write_framebuffer_request(
 }
 
 pub(super) async fn read_frames(
-    mut stream: OwnedReadHalf,
+    stream: OwnedReadHalf,
     frame_tx: removent_core::latest::Sender<DecodedFrame>,
     signal_tx: mpsc::Sender<FrameSignal>,
     dimensions: Arc<RwLock<FrameSize>>,
     format: PixelFormat,
+    stats: Arc<VncStats>,
 ) {
+    let mut stream = BufReader::with_capacity(
+        256 * 1024,
+        CountingReader {
+            stream,
+            stats: stats.clone(),
+        },
+    );
     let initial = *dimensions.read().await;
     let mut framebuffer = vec![0u8; initial.width as usize * initial.height as usize * 4];
     let started = Instant::now();
     loop {
         let mut kind = [0u8; 1];
-        if stream.read_exact(&mut kind).await.is_err() {
+        if let Err(error) = stream.read_exact(&mut kind).await {
+            if error.kind() == io::ErrorKind::UnexpectedEof {
+                tracing::info!("VNC server closed the stream");
+            } else {
+                tracing::warn!(%error, "VNC stream read failed");
+            }
             break;
         }
+        let update_started = Instant::now();
+        let mut decode_time = Duration::ZERO;
         let result = match kind[0] {
-            0 => read_update(&mut stream, &mut framebuffer, &dimensions, format).await,
-            1 => read_color_map(&mut stream).await,
-            2 => Ok(()), // Bell
-            3 => read_cut_text(&mut stream).await,
-            150 => Ok(()), // EndOfContinuousUpdates pseudo-message
-            248 => read_fence(&mut stream).await,
-            250 => read_xvp(&mut stream).await,
+            0 => {
+                read_update(
+                    &mut stream,
+                    &mut framebuffer,
+                    &dimensions,
+                    format,
+                    &mut decode_time,
+                )
+                .await
+            }
+            1 => read_color_map(&mut stream).await.map(|_| false),
+            2 => Ok(false), // Bell
+            3 => read_cut_text(&mut stream).await.map(|_| false),
+            150 => Ok(false), // EndOfContinuousUpdates pseudo-message
+            248 => read_fence(&mut stream).await.map(|_| false),
+            250 => read_xvp(&mut stream).await.map(|_| false),
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "unsupported VNC server message",
             )),
         };
-        if result.is_err() {
-            break;
-        }
+        let changed = match result {
+            Ok(changed) => changed,
+            Err(error) => {
+                tracing::warn!(%error, message_type = kind[0], "VNC server message failed");
+                break;
+            }
+        };
         if kind[0] == 0 {
             let size = *dimensions.read().await;
             if size.width == 0 || size.height == 0 {
                 continue;
             }
-            let frame = DecodedFrame {
-                data: framebuffer.clone(),
-                width: size.width,
-                height: size.height,
-                pts_us: started.elapsed().as_micros() as i64,
-            };
-            let _ = frame_tx.send(frame);
+            if changed {
+                let copy_started = Instant::now();
+                let frame = DecodedFrame {
+                    data: framebuffer.clone(),
+                    width: size.width,
+                    height: size.height,
+                    pts_us: started.elapsed().as_micros() as i64,
+                };
+                decode_time += copy_started.elapsed();
+                stats
+                    .decode_us
+                    .store(decode_time.as_micros() as u64, Ordering::Relaxed);
+                stats.update_us.store(
+                    update_started.elapsed().as_micros() as u64,
+                    Ordering::Relaxed,
+                );
+                stats.received_frames.fetch_add(1, Ordering::Relaxed);
+                if frame_tx.send(frame).is_err() {
+                    break;
+                }
+            }
             if signal_tx.send(FrameSignal::Updated).await.is_err() {
                 break;
             }
@@ -111,7 +156,27 @@ pub(super) async fn read_frames(
     let _ = signal_tx.send(FrameSignal::Closed).await;
 }
 
-async fn read_color_map(stream: &mut OwnedReadHalf) -> io::Result<()> {
+struct CountingReader {
+    stream: OwnedReadHalf,
+    stats: Arc<VncStats>,
+}
+
+impl AsyncRead for CountingReader {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let before = buf.filled().len();
+        let result = Pin::new(&mut self.stream).poll_read(cx, buf);
+        self.stats
+            .received_bytes
+            .fetch_add((buf.filled().len() - before) as u64, Ordering::Relaxed);
+        result
+    }
+}
+
+async fn read_color_map(stream: &mut (impl AsyncRead + Unpin)) -> io::Result<()> {
     // padding(1), first colour(2), number of colours(2), then six bytes/RGB
     // entry. We request true-colour pixels, but consuming this message keeps
     // compatibility with servers that still send a colour map notification.
@@ -131,7 +196,7 @@ async fn read_color_map(stream: &mut OwnedReadHalf) -> io::Result<()> {
     stream.read_exact(&mut payload).await.map(|_| ())
 }
 
-async fn read_fence(stream: &mut OwnedReadHalf) -> io::Result<()> {
+async fn read_fence(stream: &mut (impl AsyncRead + Unpin)) -> io::Result<()> {
     // padding(3), flags(4), length(1), payload.
     let mut header = [0u8; 8];
     stream.read_exact(&mut header).await?;
@@ -146,22 +211,26 @@ async fn read_fence(stream: &mut OwnedReadHalf) -> io::Result<()> {
     stream.read_exact(&mut payload).await.map(|_| ())
 }
 
-async fn read_xvp(stream: &mut OwnedReadHalf) -> io::Result<()> {
+async fn read_xvp(stream: &mut (impl AsyncRead + Unpin)) -> io::Result<()> {
     // XVP version, message, and one byte of padding.
     let mut payload = [0u8; 3];
     stream.read_exact(&mut payload).await.map(|_| ())
 }
 
 async fn read_update(
-    stream: &mut OwnedReadHalf,
+    stream: &mut (impl AsyncRead + Unpin),
     framebuffer: &mut Vec<u8>,
     dimensions: &Arc<RwLock<FrameSize>>,
     format: PixelFormat,
-) -> io::Result<()> {
+    decode_time: &mut Duration,
+) -> io::Result<bool> {
     let mut head = [0u8; 3];
     stream.read_exact(&mut head).await?;
     let count = u16::from_be_bytes([head[1], head[2]]) as usize;
-    for _ in 0..count {
+    for rectangle in 0..count {
+        if rectangle % 32 == 31 {
+            tokio::task::yield_now().await;
+        }
         let mut rect = [0u8; 12];
         stream.read_exact(&mut rect).await?;
         let x = u16::from_be_bytes([rect[0], rect[1]]) as u32;
@@ -360,11 +429,39 @@ async fn read_update(
                 "unsupported VNC pixel format",
             ));
         }
-        let mut raw = vec![0u8; w as usize * h as usize * bytes_per_pixel];
-        stream.read_exact(&mut raw).await?;
+        // The requested wire format already matches BGRA apart from padding.
+        // Read directly into the framebuffer and only normalize alpha. This
+        // avoids a rectangle-sized allocation and three divisions per pixel.
+        let native_bgra = format.bits_per_pixel == 32
+            && !format.big_endian
+            && format.red_max == 255
+            && format.green_max == 255
+            && format.blue_max == 255
+            && format.red_shift == 16
+            && format.green_shift == 8
+            && format.blue_shift == 0;
+        if native_bgra {
+            for row in 0..h as usize {
+                let offset = ((y as usize + row) * width as usize + x as usize) * 4;
+                let dst = &mut framebuffer[offset..offset + w as usize * 4];
+                stream.read_exact(dst).await?;
+                let conversion = Instant::now();
+                for pixel in dst.as_chunks_mut::<4>().0 {
+                    pixel[3] = 255;
+                }
+                *decode_time += conversion.elapsed();
+                if row % 32 == 31 {
+                    tokio::task::yield_now().await;
+                }
+            }
+            continue;
+        }
+        let mut raw = vec![0u8; w as usize * bytes_per_pixel];
         for row in 0..h as usize {
+            stream.read_exact(&mut raw).await?;
+            let conversion = Instant::now();
             for col in 0..w as usize {
-                let src = (row * w as usize + col) * bytes_per_pixel;
+                let src = col * bytes_per_pixel;
                 let value = if format.big_endian {
                     if bytes_per_pixel == 4 {
                         u32::from_be_bytes(raw[src..src + 4].try_into().unwrap()) as u64
@@ -391,9 +488,13 @@ async fn read_update(
                 let dst = (((y as usize + row) * width as usize) + x as usize + col) * 4;
                 framebuffer[dst..dst + 4].copy_from_slice(&[blue, green, red, 255]);
             }
+            *decode_time += conversion.elapsed();
+            if row % 32 == 31 {
+                tokio::task::yield_now().await;
+            }
         }
     }
-    Ok(())
+    Ok(count > 0)
 }
 
 fn resize_framebuffer(framebuffer: &mut Vec<u8>, old: FrameSize, new: FrameSize) {
@@ -426,7 +527,7 @@ pub(super) fn scale_component(value: u32, max: u16) -> u8 {
     }
 }
 
-async fn read_cut_text(stream: &mut OwnedReadHalf) -> io::Result<()> {
+async fn read_cut_text(stream: &mut (impl AsyncRead + Unpin)) -> io::Result<()> {
     let mut head = [0u8; 7];
     stream.read_exact(&mut head).await?;
     let len = u32::from_be_bytes([head[3], head[4], head[5], head[6]]) as usize;
@@ -438,4 +539,105 @@ async fn read_cut_text(stream: &mut OwnedReadHalf) -> io::Result<()> {
     }
     let mut text = vec![0u8; len];
     stream.read_exact(&mut text).await.map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rectangle(x: u16, y: u16, width: u16, height: u16, pixels: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0, 0, 1];
+        for value in [x, y, width, height] {
+            bytes.extend_from_slice(&value.to_be_bytes());
+        }
+        bytes.extend_from_slice(&0i32.to_be_bytes());
+        bytes.extend_from_slice(pixels);
+        bytes
+    }
+
+    #[tokio::test]
+    async fn direct_bgra_reads_preserve_other_rows_and_normalize_padding() {
+        let dimensions = Arc::new(RwLock::new(FrameSize {
+            width: 4,
+            height: 3,
+            authoritative: true,
+        }));
+        let mut pixels = vec![42; 4 * 3 * 4];
+        let mut decode_time = Duration::ZERO;
+        let bytes = rectangle(
+            1,
+            1,
+            2,
+            2,
+            &[1, 2, 3, 0, 4, 5, 6, 12, 7, 8, 9, 0, 10, 11, 12, 0],
+        );
+        assert!(
+            read_update(
+                &mut bytes.as_slice(),
+                &mut pixels,
+                &dimensions,
+                requested_pixel_format(),
+                &mut decode_time
+            )
+            .await
+            .unwrap()
+        );
+        let mut expected = vec![42; 4 * 3 * 4];
+        expected[20..28].copy_from_slice(&[1, 2, 3, 255, 4, 5, 6, 255]);
+        expected[36..44].copy_from_slice(&[7, 8, 9, 255, 10, 11, 12, 255]);
+        assert_eq!(pixels, expected);
+        assert!(
+            !read_update(
+                &mut [0, 0, 0].as_slice(),
+                &mut pixels,
+                &dimensions,
+                requested_pixel_format(),
+                &mut decode_time
+            )
+            .await
+            .unwrap()
+        );
+        assert_eq!(
+            pixels, expected,
+            "an empty update must not change or republish the picture"
+        );
+    }
+
+    #[tokio::test]
+    async fn fully_buffered_large_update_yields_for_input() {
+        let dimensions = Arc::new(RwLock::new(FrameSize {
+            width: 3840,
+            height: 2160,
+            authoritative: true,
+        }));
+        let mut pixels = vec![0; 3840 * 2160 * 4];
+        let mut decode_time = Duration::ZERO;
+        let bytes = rectangle(0, 0, 3840, 2160, &pixels);
+        let input_ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let marker = input_ran.clone();
+        let input = tokio::spawn(async move {
+            marker.store(true, Ordering::Relaxed);
+        });
+        read_update(
+            &mut bytes.as_slice(),
+            &mut pixels,
+            &dimensions,
+            requested_pixel_format(),
+            &mut decode_time,
+        )
+        .await
+        .unwrap();
+        assert!(
+            input_ran.load(Ordering::Relaxed),
+            "pixel processing must yield even with all bytes already buffered"
+        );
+        input.await.unwrap();
+        assert!(
+            pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| *pixel == [0, 0, 0, 255])
+        );
+    }
 }

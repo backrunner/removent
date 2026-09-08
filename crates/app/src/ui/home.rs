@@ -3,8 +3,7 @@
 //!
 //! Interaction flow: browse/search → single-click to select and view details
 //! (double-click connects directly) → session window.
-//! Visual principles: no cards inside cards, hairline separators, monospace for all
-//! technical info, single entry point per control.
+//! Layered surfaces, section navigation, and consistent responsive form controls.
 
 use crate::engine::{Engine, UiEvent};
 use crate::permissions::PermissionKind;
@@ -20,12 +19,12 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme, Disableable, Sizable, TitleBar,
-    button::{Button, ButtonVariants},
     divider::Divider,
-    input::{Input, InputEvent, InputState},
+    input::{InputEvent, InputState},
     spinner::Spinner,
     switch::Switch,
 };
+use removent_client::connection::ConnectionStage;
 use removent_core::{AdmissionMode, Language, Theme as ThemePref};
 use rust_i18n::t;
 use std::collections::BTreeMap;
@@ -38,6 +37,9 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 
 gpui::actions!(home, [HomeEscape, HomeSettings, HomeConnect, HomeSearch]);
+
+// Search, list/empty state, section header, and local device share one gutter.
+const SIDEBAR_INSET: f32 = 16.;
 
 #[derive(Clone)]
 struct DeviceRow {
@@ -81,6 +83,8 @@ pub struct HomeView {
     local_perms: (bool, bool),
     /// Controlling in progress: waiting for SessionReady to open the viewer (stores the peer name).
     connecting: Option<String>,
+    connection_stage: ConnectionStage,
+    cancelled_generation: Option<usize>,
     /// Short-fingerprint cache of trusted devices: the render hot path must not hit disk;
     /// refreshed on pairing completion / settings save.
     trusted: HashSet<String>,
@@ -94,6 +98,7 @@ pub struct HomeView {
     connection_dialog: Option<Entity<ConnectionDialog>>,
     connection_subscription: Option<gpui::Subscription>,
     settings_open: bool,
+    settings_section: usize,
     device_name_input: Entity<InputState>,
     vnc_password_input: Entity<InputState>,
     /// Auto-update state machine snapshot (engine → UiEvent::UpdateStatus).
@@ -124,16 +129,18 @@ fn device_glyph(size: f32, colors: &gpui_component::ThemeColor) -> Div {
     div()
         .w(px(size))
         .h(px(size))
-        .rounded(px(6.))
+        .rounded(px(12.))
         .flex_shrink_0()
         .flex()
         .items_center()
         .justify_center()
-        .bg(colors.secondary)
+        .bg(colors.accent.opacity(0.12))
+        .border_1()
+        .border_color(colors.accent.opacity(0.18))
         .child(
             icon("monitor")
                 .size(px(size * 0.5))
-                .text_color(colors.muted_foreground),
+                .text_color(colors.accent),
         )
 }
 
@@ -290,6 +297,8 @@ impl HomeView {
                 PermissionKind::Accessibility.granted(),
             ),
             connecting: None,
+            connection_stage: ConnectionStage::Resolving,
+            cancelled_generation: None,
             admission: None,
             pin_dialog: None,
             pin_input,
@@ -297,6 +306,7 @@ impl HomeView {
             connection_dialog: None,
             connection_subscription: None,
             settings_open: false,
+            settings_section: 0,
             dialog_seq: 0,
             device_name_input,
             vnc_password_input,
@@ -356,6 +366,7 @@ impl HomeView {
         match self.engine.connect_to(addr) {
             Ok(()) => {
                 self.connecting = Some(name.clone());
+                self.connection_stage = ConnectionStage::Connecting;
                 self.set_status(t!("status.connecting", name = name), StatusTone::Info);
             }
             Err(e) => self.set_status(
@@ -364,6 +375,27 @@ impl HomeView {
             ),
         }
         cx.notify();
+    }
+
+    fn cancel_connection(&mut self, cx: &mut Context<Self>) {
+        if self.connecting.take().is_some() {
+            self.engine.disconnect_client();
+            self.cancelled_generation = Some(self.engine.client_generation());
+            if let Some(dialog) = &self.connection_dialog {
+                dialog.update(cx, |form, cx| form.cancel(cx));
+            }
+            self.set_status(t!("connection.cancelled").to_string(), StatusTone::Info);
+            cx.notify();
+        }
+    }
+
+    fn set_connection_stage(&mut self, stage: ConnectionStage, cx: &mut Context<Self>) {
+        if self.connecting.is_some() {
+            self.connection_stage = stage;
+            if let Some(dialog) = &self.connection_dialog {
+                dialog.update(cx, |form, cx| form.set_stage(stage, cx));
+            }
+        }
     }
 
     fn open_connection_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -384,12 +416,14 @@ impl HomeView {
                 }
                 match event {
                     ConnectionDialogEvent::Close => {
-                        if this.connecting.is_some() {
-                            this.engine.disconnect_client();
-                        }
+                        this.cancel_connection(cx);
                         this.connection_dialog = None;
                         this.connection_subscription = None;
                         window.focus(&this.focus);
+                    }
+                    ConnectionDialogEvent::Cancel => {
+                        this.cancel_connection(cx);
+                        window.focus(&dialog.focus_handle(cx));
                     }
                     ConnectionDialogEvent::Submit => {
                         if this.connecting.is_some() {
@@ -402,11 +436,13 @@ impl HomeView {
                         match this.engine.connect_request(request) {
                             Ok(()) => {
                                 this.connecting = Some(name.clone());
+                                this.connection_stage = ConnectionStage::Resolving;
                                 this.set_status(
                                     t!("status.connecting", name = name),
                                     StatusTone::Info,
                                 );
                                 dialog.update(cx, |form, cx| form.set_connecting(true, None, cx));
+                                window.focus(&dialog.focus_handle(cx));
                             }
                             Err(error) => dialog.update(cx, |form, cx| {
                                 form.set_connecting(
@@ -466,6 +502,7 @@ impl HomeView {
         }
         if let Some(PinDialog::Entry(tx)) = self.pin_dialog.take() {
             let _ = tx.send(pin);
+            self.set_connection_stage(ConnectionStage::Authenticating, cx);
             self.clear_pin_input(window, cx);
             self.set_status(t!("status.pin_submitted").to_string(), StatusTone::Info);
         }
@@ -474,9 +511,9 @@ impl HomeView {
 
     fn cancel_pin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(PinDialog::Entry(tx)) = self.pin_dialog.take() {
-            let _ = tx.send(String::new());
+            drop(tx);
             self.clear_pin_input(window, cx);
-            self.set_status(t!("status.pairing_cancelled").to_string(), StatusTone::Warn);
+            self.cancel_connection(cx);
         }
         cx.notify();
     }
@@ -640,9 +677,11 @@ impl HomeView {
                     .detach();
                 }
             }
+            UiEvent::ConnectionProgress { stage, .. } => {
+                self.set_connection_stage(stage, cx);
+            }
             UiEvent::ClientNeedsPin { tx, .. } => {
-                self.connection_dialog = None;
-                self.connection_subscription = None;
+                self.set_connection_stage(ConnectionStage::Pairing, cx);
                 self.dialog_seq += 1;
                 self.pin_dialog = Some(PinDialog::Entry(tx));
                 // Start from an empty field and hand it the keyboard focus.
@@ -708,7 +747,14 @@ impl HomeView {
                 }
                 self.set_status(t!("status.connect_failed", err = e), StatusTone::Err);
             }
-            UiEvent::SessionClosed { reason: r, .. } => {
+            UiEvent::SessionClosed {
+                generation,
+                reason: r,
+            } => {
+                if self.cancelled_generation == Some(generation) {
+                    self.cancelled_generation = None;
+                    return;
+                }
                 if let Some(dialog) = &self.connection_dialog {
                     dialog.update(cx, |form, cx| form.set_connecting(false, None, cx));
                 }
@@ -817,7 +863,8 @@ impl HomeView {
                     .child(
                         Button::new("add-connection")
                             .icon(icon_16("plus"))
-                            .ghost()
+                            .label(t!("connection.add").to_string())
+                            .primary()
                             .small()
                             .tooltip(t!("connection.add").to_string())
                             .disabled(self.connecting.is_some())
@@ -831,6 +878,7 @@ impl HomeView {
                             .ghost()
                             .small()
                             .tooltip(t!("settings.title").to_string())
+                            .tab(self.settings_open)
                             .on_click(cx.listener(|this, _, _w, cx| {
                                 this.settings_open = !this.settings_open;
                                 cx.notify();
@@ -861,7 +909,7 @@ impl HomeView {
             .gap_3()
             .px_3()
             .py_2()
-            .rounded(px(6.))
+            .rounded(px(12.))
             .cursor_default()
             // Single-click selects; double-click connects directly.
             .on_click(cx.listener(move |this, ev: &gpui::ClickEvent, _w, cx| {
@@ -896,9 +944,16 @@ impl HomeView {
                 el.child(icon_16("shield-check").text_color(colors.muted_foreground))
             });
         if selected {
-            el = el.bg(colors.list_active);
+            el = el
+                .bg(colors.accent.opacity(0.12))
+                .border_color(colors.accent.opacity(0.25))
+                .shadow_sm()
+                .hover(|s| s.bg(colors.accent.opacity(0.20)))
+                .active(|s| s.bg(colors.accent.opacity(0.28)));
         } else {
-            el = el.hover(|s| s.bg(colors.list_hover));
+            el = el
+                .hover(|s| s.bg(colors.list_hover))
+                .active(|s| s.bg(colors.list_active));
         }
         el
     }
@@ -922,16 +977,25 @@ impl HomeView {
             .flex_1()
             .min_h_0()
             .gap_1()
-            .px_2()
+            .px(px(SIDEBAR_INSET))
             .overflow_y_scroll();
         if rows.is_empty() {
             list = list.child(
                 div()
-                    .px_3()
-                    .py_5()
+                    .p_4()
+                    .mt_2()
+                    .rounded(px(14.))
+                    .border_1()
+                    .border_color(colors.border)
+                    .bg(colors.group_box)
                     .flex()
                     .flex_col()
-                    .gap_2()
+                    .gap_3()
+                    .child(
+                        div()
+                            .mb_1()
+                            .child(icon("wifi").size(px(24.)).text_color(colors.accent)),
+                    )
                     .child(
                         div()
                             .text_size(px(12.))
@@ -960,7 +1024,7 @@ impl HomeView {
                 list.child(self.render_device_row(fp, row, self.trusted.contains(fp.as_str()), cx));
         }
         div()
-            .w(px(if window.viewport_size().width < px(800.) {
+            .w(px(if window.viewport_size().width < px(1000.) {
                 228.
             } else {
                 256.
@@ -973,7 +1037,7 @@ impl HomeView {
             .bg(colors.sidebar)
             .child(
                 div()
-                    .px_4()
+                    .px(px(SIDEBAR_INSET))
                     .pt_5()
                     .pb_3()
                     .flex()
@@ -984,20 +1048,23 @@ impl HomeView {
                         div()
                             .text_size(px(11.))
                             .text_color(colors.muted_foreground)
+                            .px_2()
+                            .py_1()
+                            .rounded(px(6.))
+                            .bg(colors.secondary)
                             .child(self.devices.len().to_string()),
                     ),
             )
             .child(
-                div().px_3().pb_3().child(
-                    Input::new(&self.search_input)
-                        .h(px(30.))
+                div().px(px(SIDEBAR_INSET)).pb_3().child(
+                    form_input(&self.search_input)
                         .prefix(icon_16("search"))
                         .cleanable(true),
                 ),
             )
             .child(list)
             .child(
-                div().p_2().border_t_1().border_color(colors.border).child(
+                div().px(px(SIDEBAR_INSET)).py_3().child(
                     div()
                         .id("local-device")
                         .tab_index(0)
@@ -1008,9 +1075,10 @@ impl HomeView {
                         .items_center()
                         .gap_3()
                         .p_3()
-                        .rounded(px(6.))
+                        .rounded(px(12.))
                         .when(self.selected.is_none() && !self.settings_open, |el| {
-                            el.bg(colors.list_active)
+                            el.bg(colors.accent.opacity(0.12))
+                                .border_color(colors.accent.opacity(0.2))
                         })
                         .hover(|el| el.bg(colors.list_hover))
                         .cursor_pointer()
@@ -1019,7 +1087,7 @@ impl HomeView {
                             this.settings_open = false;
                             cx.notify();
                         }))
-                        .child(icon_16("monitor").text_color(colors.muted_foreground))
+                        .child(device_glyph(32., &colors))
                         .child(
                             div()
                                 .flex_1()
@@ -1098,29 +1166,50 @@ impl HomeView {
             .overflow_y_scroll()
             .child(
                 div()
-                    .max_w(px(584.))
+                    .max_w(px(760.))
                     .w_full()
                     .mx_auto()
                     .p_6()
                     .flex()
                     .flex_col()
-                    .gap_8()
+                    .gap_5()
                     .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_4()
+                        form_group(cx)
+                            .p_6()
+                            .bg(gpui::linear_gradient(
+                                135.,
+                                gpui::linear_color_stop(colors.secondary_active, 0.),
+                                gpui::linear_color_stop(colors.group_box, 1.),
+                            ))
+                            .gap_5()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .text_size(px(11.))
+                                    .text_color(colors.accent)
+                                    .child(icon_16("wifi"))
+                                    .child(t!("connection.lan_badge").to_string()),
+                            )
                             .child(
                                 div().flex().flex_col().gap_2().child(
                                     div()
-                                        .text_size(px(20.))
+                                        .text_size(px(28.))
                                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                                        .child(t!("connection.title").to_string()),
+                                        .child(t!("connection.welcome").to_string()),
                                 ),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(13.))
+                                    .text_color(colors.muted_foreground)
+                                    .child(t!("connection.welcome_hint").to_string()),
                             )
                             .child(
                                 div().flex().child(
                                     Button::new("open-connection-form")
+                                        .h(px(38.))
                                         .icon(icon_16(if connecting { "x" } else { "plus" }))
                                         .label(
                                             t!(if connecting {
@@ -1133,7 +1222,7 @@ impl HomeView {
                                         .primary()
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             if this.connecting.is_some() {
-                                                this.engine.disconnect_client();
+                                                this.cancel_connection(cx);
                                             } else {
                                                 this.open_connection_dialog(window, cx);
                                             }
@@ -1142,12 +1231,8 @@ impl HomeView {
                             ),
                     )
                     .child(
-                        div()
-                            .border_t_1()
-                            .border_color(colors.border)
-                            .pt_6()
-                            .flex()
-                            .flex_col()
+                        form_group(cx)
+                            .p_5()
                             .gap_4()
                             .child(
                                 div()
@@ -1281,7 +1366,7 @@ impl HomeView {
             .size_full()
             .overflow_y_scroll()
             .p_6()
-            .max_w(px(584.))
+            .max_w(px(760.))
             .mx_auto()
             .child(
                 // Device header
@@ -1321,8 +1406,7 @@ impl HomeView {
             )
             .child(
                 div().flex().gap_2().child(
-                    // While connecting this becomes "Cancel": after hanging up, the engine
-                    // sends SessionClosed to reset `connecting`.
+                    // Cancel immediately releases the form and invalidates queued events.
                     Button::new("connect-device")
                         .icon(icon_16(if connecting { "x" } else { "monitor" }))
                         .label(if connecting {
@@ -1334,7 +1418,7 @@ impl HomeView {
                         .when(connecting, |b| b.outline())
                         .on_click(cx.listener(move |this, _, _w, cx| {
                             if this.connecting.is_some() {
-                                this.engine.disconnect_client();
+                                this.cancel_connection(cx);
                             } else {
                                 this.connect_device(&fp_c, cx);
                             }
@@ -1342,7 +1426,7 @@ impl HomeView {
                 ),
             )
             .child(
-                // Device metadata uses the same plain form rows as settings.
+                // Device metadata shares the grouped surfaces used by settings.
                 div()
                     .flex()
                     .flex_col()
@@ -1395,210 +1479,248 @@ impl HomeView {
     fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors;
         let settings = self.engine.settings();
-        let vnc_enabled = settings.vnc_enabled;
-        let admission_idx = match settings.admission {
-            AdmissionMode::AlwaysAsk => 0,
-            AdmissionMode::TrustedAuto => 1,
-            AdmissionMode::DenyAll => 2,
-        };
-        let theme_idx = match settings.theme {
-            ThemePref::System => 0,
-            ThemePref::Dark => 1,
-            ThemePref::Light => 2,
-        };
-        let language_idx = match settings.language {
-            Language::System => 0,
-            Language::En => 1,
-            Language::ZhCn => 2,
-        };
-
-        div()
-            .id("settings")
+        let mut navigation = div()
             .flex()
-            .flex_col()
-            .gap_6()
-            .p_6()
-            .w_full()
-            .h_full()
-            // Small windows (e.g. 480 high) must still let the save button scroll into view.
-            .overflow_y_scroll()
-            .max_w(px(584.))
-            .mx_auto()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
+            .flex_wrap()
+            .gap(px(2.))
+            .p(px(3.))
+            .w_auto()
+            .max_w_full()
+            .rounded(px(10.))
+            .bg(colors.sidebar)
+            .border_1()
+            .border_color(colors.border);
+        navigation.style().align_self = Some(gpui::AlignSelf::FlexStart);
+        for (index, name, key) in [
+            (0, "settings", "settings.general"),
+            (1, "sun", "settings.appearance"),
+            (2, "shield-check", "settings.security"),
+            (3, "wifi", "settings.sharing"),
+            (4, "info", "settings.system"),
+        ] {
+            navigation = navigation.child(
+                Button::new(("settings-tab", index))
+                    .ghost()
+                    .icon(icon_16(name))
+                    .label(t!(key).to_string())
+                    .h(px(32.))
+                    .rounded(px(7.))
+                    .tab(self.settings_section == index)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings_section = index;
+                        cx.notify();
+                    })),
+            );
+        }
+        let row = || div().flex().flex_col().gap_3().p_5().w_full().min_w_0();
+        let header = |name, title, description| {
+            section_header(name, t!(title).to_string(), t!(description).to_string(), cx)
+        };
+        let mut content = div().flex().flex_col().gap_5().w_full().min_w_0();
+        match self.settings_section {
+            0 => {
+                content = content
+                    .child(header(
+                        "monitor",
+                        "settings.general",
+                        "settings.general_description",
+                    ))
                     .child(
-                        div()
-                            .text_size(px(20.))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child(t!("settings.title").to_string()),
-                    )
-                    .child(
-                        Button::new("close-settings")
-                            .icon(icon_16("x"))
-                            .ghost()
-                            .tooltip(t!("action.back").to_string())
-                            .on_click(cx.listener(|this, _, _w, cx| {
-                                this.settings_open = false;
-                                cx.notify();
-                            })),
-                    ),
-            )
-            .child(
-                // General: device name / appearance / language
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(group_title(t!("settings.general").to_string(), cx))
-                    .child(
-                        form_group(cx)
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_2()
-                                    .px_4()
-                                    .py_3()
-                                    .child(
-                                        div()
-                                            .text_size(px(13.))
-                                            .child(t!("settings.device_name").to_string()),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .child(form_input(&self.device_name_input)),
-                                            )
-                                            .child(
-                                                Button::new("save-device-name")
-                                                    .label(t!("action.save").to_string())
-                                                    .h(px(32.))
-                                                    .outline()
-                                                    .disabled(
-                                                        self.device_name_input
+                        form_group(cx).child(
+                            row()
+                                .child(setting_label(
+                                    t!("settings.device_name").to_string(),
+                                    t!("settings.device_name_hint").to_string(),
+                                    cx,
+                                ))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .w_full()
+                                        .items_center()
+                                        .gap_3()
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .child(form_input(&self.device_name_input)),
+                                        )
+                                        .child(
+                                            Button::new("save-device-name")
+                                                .label(t!("action.save").to_string())
+                                                .primary()
+                                                .h(px(36.))
+                                                .flex_shrink_0()
+                                                .disabled(
+                                                    self.device_name_input
+                                                        .read(cx)
+                                                        .value()
+                                                        .trim()
+                                                        .is_empty()
+                                                        || self
+                                                            .device_name_input
                                                             .read(cx)
                                                             .value()
                                                             .trim()
                                                             == settings.device_name,
-                                                    )
-                                                    .on_click(cx.listener(|this, _, _, cx| {
-                                                        this.save_device_name(cx)
-                                                    })),
-                                            ),
-                                    ),
-                            )
-                            .child(Divider::horizontal())
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .gap_3()
-                                    .px_4()
-                                    .py_3()
-                                    .child(
-                                        div()
-                                            .text_size(px(13.))
-                                            .child(t!("settings.appearance").to_string()),
-                                    )
-                                    .child({
-                                        let view = cx.entity().clone();
-                                        segmented(
-                                            "theme",
-                                            &[
-                                                t!("settings.theme.system").to_string(),
-                                                t!("settings.theme.dark").to_string(),
-                                                t!("settings.theme.light").to_string(),
-                                            ],
-                                            theme_idx,
-                                            Rc::new(move |i, _ev, window, app| {
-                                                let pref = match i {
-                                                    1 => ThemePref::Dark,
-                                                    2 => ThemePref::Light,
-                                                    _ => ThemePref::System,
-                                                };
-                                                view.update(app, |this, cx| {
-                                                    this.set_theme(pref, window, cx)
-                                                });
-                                            }),
-                                            cx,
-                                        )
-                                    }),
-                            )
-                            .child(Divider::horizontal())
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .gap_3()
-                                    .px_4()
-                                    .py_3()
-                                    .child(
-                                        div()
-                                            .text_size(px(13.))
-                                            .child(t!("settings.language").to_string()),
-                                    )
-                                    .child({
-                                        let view = cx.entity().clone();
-                                        segmented(
-                                            "language",
-                                            &[
-                                                t!("settings.language.system").to_string(),
-                                                "English".to_string(),
-                                                "中文".to_string(),
-                                            ],
-                                            language_idx,
-                                            Rc::new(move |i, _ev, _w, app| {
-                                                let lang = match i {
-                                                    1 => Language::En,
-                                                    2 => Language::ZhCn,
-                                                    _ => Language::System,
-                                                };
-                                                view.update(app, |this, cx| {
-                                                    this.set_language(lang, _w, cx)
-                                                });
-                                            }),
-                                            cx,
-                                        )
-                                    }),
-                            ),
-                    ),
-            )
-            .child(
-                // Security: admission control
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(group_title(t!("settings.security").to_string(), cx))
+                                                )
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.save_device_name(cx)
+                                                })),
+                                        ),
+                                ),
+                        ),
+                    )
                     .child(
                         form_group(cx).child(
-                            // Label above the selector: at the 720px minimum window width the
-                            // settings pane is only ~356px wide, and a side-by-side row would
-                            // clip the third segment (especially with the English labels).
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap_2()
-                                .px_4()
-                                .py_3()
+                            row()
+                                .child(setting_label(
+                                    t!("settings.language").to_string(),
+                                    t!("settings.language_hint").to_string(),
+                                    cx,
+                                ))
+                                .child({
+                                    let view = cx.entity();
+                                    segmented(
+                                        "language",
+                                        &[
+                                            t!("settings.language.system").to_string(),
+                                            "English".into(),
+                                            "中文".into(),
+                                        ],
+                                        match settings.language {
+                                            Language::System => 0,
+                                            Language::En => 1,
+                                            Language::ZhCn => 2,
+                                        },
+                                        Rc::new(move |i, _, window, app| {
+                                            view.update(app, |this, cx| {
+                                                this.set_language(
+                                                    match i {
+                                                        1 => Language::En,
+                                                        2 => Language::ZhCn,
+                                                        _ => Language::System,
+                                                    },
+                                                    window,
+                                                    cx,
+                                                )
+                                            });
+                                        }),
+                                        cx,
+                                    )
+                                }),
+                        ),
+                    );
+            }
+            1 => {
+                content = content
+                    .child(header(
+                        "sun",
+                        "settings.appearance",
+                        "settings.appearance_description",
+                    ))
+                    .child(
+                        form_group(cx).child(
+                            row()
+                                .child(setting_label(
+                                    t!("settings.color_mode").to_string(),
+                                    t!("settings.theme_hint").to_string(),
+                                    cx,
+                                ))
+                                .child({
+                                    let view = cx.entity();
+                                    segmented(
+                                        "theme",
+                                        &[
+                                            t!("settings.theme.system").to_string(),
+                                            t!("settings.theme.dark").to_string(),
+                                            t!("settings.theme.light").to_string(),
+                                        ],
+                                        match settings.theme {
+                                            ThemePref::System => 0,
+                                            ThemePref::Dark => 1,
+                                            ThemePref::Light => 2,
+                                        },
+                                        Rc::new(move |i, _, window, app| {
+                                            view.update(app, |this, cx| {
+                                                this.set_theme(
+                                                    match i {
+                                                        1 => ThemePref::Dark,
+                                                        2 => ThemePref::Light,
+                                                        _ => ThemePref::System,
+                                                    },
+                                                    window,
+                                                    cx,
+                                                )
+                                            });
+                                        }),
+                                        cx,
+                                    )
+                                })
                                 .child(
                                     div()
-                                        .text_size(px(13.))
-                                        .child(t!("settings.admission").to_string()),
-                                )
+                                        .mt_2()
+                                        .p_4()
+                                        .rounded(px(12.))
+                                        .bg(colors.background)
+                                        .border_1()
+                                        .border_color(colors.border)
+                                        .child(section_header(
+                                            "monitor",
+                                            "Removent".into(),
+                                            t!("settings.preview_hint").to_string(),
+                                            cx,
+                                        ))
+                                        .child(
+                                            div()
+                                                .mt_4()
+                                                .flex()
+                                                .gap_2()
+                                                .child(
+                                                    div()
+                                                        .w(px(72.))
+                                                        .h(px(54.))
+                                                        .rounded(px(8.))
+                                                        .bg(colors.sidebar),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .flex_1()
+                                                        .h(px(54.))
+                                                        .rounded(px(8.))
+                                                        .bg(colors.group_box)
+                                                        .shadow_sm()
+                                                        .child(
+                                                            div()
+                                                                .m_3()
+                                                                .w(px(48.))
+                                                                .h(px(6.))
+                                                                .rounded_full()
+                                                                .bg(colors.accent),
+                                                        ),
+                                                ),
+                                        ),
+                                ),
+                        ),
+                    );
+            }
+            2 => {
+                content = content
+                    .child(header(
+                        "shield-check",
+                        "settings.security",
+                        "settings.security_description",
+                    ))
+                    .child(
+                        form_group(cx).child(
+                            row()
+                                .child(setting_label(
+                                    t!("settings.admission").to_string(),
+                                    t!("settings.admission_hint").to_string(),
+                                    cx,
+                                ))
                                 .child({
-                                    let view = cx.entity().clone();
+                                    let view = cx.entity();
                                     segmented(
                                         "admission",
                                         &[
@@ -1606,14 +1728,18 @@ impl HomeView {
                                             t!("settings.admission.trusted").to_string(),
                                             t!("settings.admission.deny").to_string(),
                                         ],
-                                        admission_idx,
-                                        Rc::new(move |i, _ev, _w, app| {
-                                            let mode = match i {
-                                                0 => AdmissionMode::AlwaysAsk,
-                                                1 => AdmissionMode::TrustedAuto,
-                                                _ => AdmissionMode::DenyAll,
-                                            };
+                                        match settings.admission {
+                                            AdmissionMode::AlwaysAsk => 0,
+                                            AdmissionMode::TrustedAuto => 1,
+                                            AdmissionMode::DenyAll => 2,
+                                        },
+                                        Rc::new(move |i, _, _, app| {
                                             view.update(app, |this, cx| {
+                                                let mode = match i {
+                                                    1 => AdmissionMode::TrustedAuto,
+                                                    2 => AdmissionMode::DenyAll,
+                                                    _ => AdmissionMode::AlwaysAsk,
+                                                };
                                                 if this.persist_settings(|s| s.admission = mode) {
                                                     this.set_status(
                                                         t!("status.admission_mode_updated")
@@ -1626,82 +1752,59 @@ impl HomeView {
                                         }),
                                         cx,
                                     )
-                                }),
-                        ),
-                    ),
-            )
-            .child(
-                // Data: data directory
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(group_title(t!("settings.data").to_string(), cx))
-                    .child(
-                        form_group(cx).child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_3()
-                                .px_4()
-                                .py_3()
+                                })
                                 .child(
                                     div()
-                                        .w(px(100.))
-                                        .flex_shrink_0()
-                                        .text_size(px(13.))
-                                        .child(t!("settings.data_dir").to_string()),
-                                )
-                                .child(
-                                    div()
-                                        .flex_1()
+                                        .p_3()
+                                        .rounded(px(16.))
+                                        .bg(colors.accent.opacity(0.08))
                                         .text_size(px(12.))
-                                        .font_family(cx.theme().mono_font_family.clone())
                                         .text_color(colors.muted_foreground)
-                                        .truncate()
-                                        .child(self.engine.data_dir().display().to_string()),
-                                )
-                                .child(
-                                    Button::new("open-data-dir")
-                                        .label(t!("action.open").to_string())
-                                        .outline()
-                                        .compact()
-                                        .on_click(cx.listener(|this, _, _w, _cx| {
-                                            let _ = std::process::Command::new("open")
-                                                .arg(this.engine.data_dir())
-                                                .spawn();
-                                        })),
+                                        .child(
+                                            t!(match settings.admission {
+                                                AdmissionMode::AlwaysAsk =>
+                                                    "settings.admission.ask_hint",
+                                                AdmissionMode::TrustedAuto =>
+                                                    "settings.admission.trusted_hint",
+                                                AdmissionMode::DenyAll =>
+                                                    "settings.admission.deny_hint",
+                                            })
+                                            .to_string(),
+                                        ),
                                 ),
                         ),
-                    ),
-            )
-            .child(
-                // Compatibility: standard RFB/VNC for Apple Remote Desktop.
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(group_title(t!("settings.vnc").to_string(), cx))
+                    );
+            }
+            3 => {
+                content = content
+                    .child(header(
+                        "wifi",
+                        "settings.sharing",
+                        "settings.sharing_description",
+                    ))
                     .child(
                         form_group(cx)
                             .child(
                                 div()
                                     .flex()
                                     .items_center()
-                                    .justify_between()
-                                    .gap_3()
-                                    .px_4()
-                                    .py_3()
+                                    .gap_4()
+                                    .p_5()
                                     .child(
-                                        div()
-                                            .text_size(px(13.))
-                                            .child(t!("settings.vnc_enabled").to_string()),
+                                        setting_label(
+                                            t!("settings.vnc_enabled").to_string(),
+                                            format!(
+                                                "Apple Remote Desktop · VNC · TCP {}",
+                                                settings.vnc_port
+                                            ),
+                                            cx,
+                                        )
+                                        .flex_1(),
                                     )
                                     .child(
                                         Switch::new("vnc-enabled")
-                                            .small()
-                                            .checked(vnc_enabled)
-                                            .on_click(cx.listener(|this, _checked, _w, cx| {
+                                            .checked(settings.vnc_enabled)
+                                            .on_click(cx.listener(|this, _, _, cx| {
                                                 if this.persist_settings(|s| {
                                                     s.vnc_enabled = !s.vnc_enabled
                                                 }) {
@@ -1714,52 +1817,228 @@ impl HomeView {
                                             })),
                                     ),
                             )
-                            .child(Divider::horizontal())
+                            .when(settings.vnc_enabled, |el| {
+                                el.child(Divider::horizontal()).child(
+                                    row()
+                                        .child(setting_label(
+                                            t!("settings.vnc_password").to_string(),
+                                            t!("settings.vnc_hint").to_string(),
+                                            cx,
+                                        ))
+                                        .child(form_input(&self.vnc_password_input).mask_toggle())
+                                        .child(
+                                            div().flex().justify_end().child(
+                                                Button::new("save-vnc")
+                                                    .label(t!("action.save").to_string())
+                                                    .primary()
+                                                    .h(px(36.))
+                                                    .disabled(
+                                                        self.vnc_password_input
+                                                            .read(cx)
+                                                            .value()
+                                                            .as_str()
+                                                            == settings.vnc_password,
+                                                    )
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.save_vnc(cx)
+                                                    })),
+                                            ),
+                                        ),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .p_4()
+                            .rounded(px(12.))
+                            .bg(colors.accent.opacity(0.08))
+                            .text_size(px(12.))
+                            .text_color(colors.muted_foreground)
+                            .child(t!("settings.sharing_scope_hint").to_string()),
+                    );
+            }
+            _ => {
+                content = content
+                    .child(header(
+                        "info",
+                        "settings.system",
+                        "settings.system_description",
+                    ))
+                    .child(
+                        form_group(cx).child(
+                            row()
+                                .child(setting_label(
+                                    t!("settings.data_dir").to_string(),
+                                    t!("settings.data_hint").to_string(),
+                                    cx,
+                                ))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_3()
+                                        .w_full()
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .px_3()
+                                                .py_2()
+                                                .rounded(px(8.))
+                                                .bg(colors.background)
+                                                .text_size(px(11.))
+                                                .font_family(cx.theme().mono_font_family.clone())
+                                                .text_color(colors.muted_foreground)
+                                                .truncate()
+                                                .child(
+                                                    self.engine.data_dir().display().to_string(),
+                                                ),
+                                        )
+                                        .child(
+                                            Button::new("open-data-dir")
+                                                .icon(icon_16("folder"))
+                                                .label(t!("action.open").to_string())
+                                                .outline()
+                                                .h(px(36.))
+                                                .flex_shrink_0()
+                                                .on_click(cx.listener(|this, _, _, _| {
+                                                    let _ = std::process::Command::new("open")
+                                                        .arg(this.engine.data_dir())
+                                                        .spawn();
+                                                })),
+                                        ),
+                                ),
+                        ),
+                    )
+                    .child(
+                        form_group(cx).child(
+                            row()
+                                .child(setting_label(
+                                    t!("settings.logs").to_string(),
+                                    t!("settings.logs_hint").to_string(),
+                                    cx,
+                                ))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_3()
+                                        .w_full()
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .px_3()
+                                                .py_2()
+                                                .rounded(px(8.))
+                                                .bg(colors.background)
+                                                .text_size(px(11.))
+                                                .font_family(cx.theme().mono_font_family.clone())
+                                                .text_color(colors.muted_foreground)
+                                                .truncate()
+                                                .child(self.engine.data_dir().join("logs").display().to_string()),
+                                        )
+                                        .child(
+                                            Button::new("open-logs-dir")
+                                                .icon(icon_16("folder"))
+                                                .label(t!("settings.open_logs").to_string())
+                                                .outline()
+                                                .h(px(36.))
+                                                .flex_shrink_0()
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    let dir = this.engine.data_dir().join("logs");
+                                                    let result = std::fs::create_dir_all(&dir).and_then(|()| {
+                                                        std::process::Command::new("open").arg(&dir).spawn()
+                                                    });
+                                                    if let Err(error) = result {
+                                                        tracing::warn!(%error, "could not open logs folder");
+                                                        this.set_status(
+                                                            t!("settings.open_logs_failed", err = error.to_string()),
+                                                            StatusTone::Err,
+                                                        );
+                                                        cx.notify();
+                                                    }
+                                                })),
+                                        ),
+                                ),
+                        ),
+                    )
+                    .child(self.render_update_section(cx));
+            }
+        }
+        div()
+            .id("settings")
+            .size_full()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_6()
+                    .w_full()
+                    .max_w(px(760.))
+                    .mx_auto()
+                    .p_6()
+                    .child(
+                        div()
+                            .flex()
+                            .items_start()
+                            .justify_between()
+                            .gap_3()
                             .child(
                                 div()
                                     .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .px_4()
-                                    .py_3()
+                                    .flex_col()
+                                    .gap_2()
                                     .child(
                                         div()
-                                            .w(px(112.))
-                                            .flex_shrink_0()
-                                            .text_size(px(13.))
-                                            .child(t!("settings.vnc_password").to_string()),
+                                            .text_size(px(24.))
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .child(t!("settings.title").to_string()),
                                     )
                                     .child(
-                                        div().flex_1().child(
-                                            form_input(&self.vnc_password_input).mask_toggle(),
-                                        ),
+                                        div()
+                                            .text_size(px(12.))
+                                            .text_color(colors.muted_foreground)
+                                            .child(t!("settings.subtitle").to_string()),
                                     ),
                             )
-                            .child(Divider::horizontal())
                             .child(
-                                div()
-                                    .px_4()
-                                    .py_3()
-                                    .text_size(px(12.))
-                                    .text_color(colors.muted_foreground)
-                                    .child(t!("settings.vnc_hint").to_string()),
-                            )
-                            .child(
-                                div().px_4().pb_3().flex().justify_end().child(
-                                    Button::new("save-vnc")
-                                        .label(t!("action.save").to_string())
-                                        .h(px(32.))
-                                        .outline()
-                                        .disabled(
-                                            self.vnc_password_input.read(cx).value().as_str()
-                                                == settings.vnc_password,
-                                        )
-                                        .on_click(cx.listener(|this, _, _, cx| this.save_vnc(cx))),
-                                ),
+                                Button::new("close-settings")
+                                    .icon(icon_16("x"))
+                                    .outline()
+                                    .small()
+                                    .tooltip(t!("action.back").to_string())
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.settings_open = false;
+                                        cx.notify();
+                                    })),
                             ),
+                    )
+                    .child(navigation)
+                    .flex_shrink_0()
+                    .pb_4(),
+            )
+            .child(
+                div()
+                    .id(("settings-content", self.settings_section))
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(px(760.))
+                            .mx_auto()
+                            .px_6()
+                            .pb_6()
+                            .pt_2()
+                            .child(content),
                     ),
             )
-            .child(self.render_update_section(cx))
     }
 
     /// Software update (release.md §3): current version, check button, auto-check
@@ -1778,7 +2057,11 @@ impl HomeView {
                 .flex()
                 .items_center()
                 .gap_2()
-                .child(Spinner::new().color(colors.muted_foreground))
+                .child(
+                    Spinner::new()
+                        .icon(icon_16("loader-circle"))
+                        .color(colors.muted_foreground),
+                )
                 .child(
                     div()
                         .text_size(px(12.))
@@ -1944,21 +2227,27 @@ impl HomeView {
         let tone = match self.status_tone {
             StatusTone::Err => colors.danger,
             StatusTone::Warn => colors.warning,
-            _ => colors.muted_foreground,
+            StatusTone::Ok => colors.success,
+            StatusTone::Info => colors.muted_foreground,
         };
         div()
-            .h(px(28.))
+            .min_h(px(32.))
             .flex_shrink_0()
-            .px_3()
+            .px_4()
+            .py_2()
             .flex()
             .items_center()
+            .gap_2()
+            .bg(colors.sidebar)
             .border_t_1()
             .border_color(colors.border)
+            .child(dot(tone))
             .child(
                 div()
+                    .flex_1()
+                    .min_w_0()
                     .text_size(px(11.))
                     .text_color(tone)
-                    .truncate()
                     .child(self.status.clone()),
             )
     }
@@ -1969,11 +2258,11 @@ impl HomeView {
         let card = div()
             .w(px(360.))
             .p_6()
-            .rounded(px(10.))
+            .rounded(px(16.))
             .bg(colors.popover)
             .border_1()
             .border_color(colors.border)
-            .shadow_md()
+            .shadow(theme::popup_shadow(cx.theme().is_dark()))
             .flex()
             .flex_col()
             .gap_4();
@@ -2059,11 +2348,11 @@ impl HomeView {
         let card = div()
             .w(px(400.))
             .p_6()
-            .rounded(px(10.))
+            .rounded(px(16.))
             .bg(colors.popover)
             .border_1()
             .border_color(colors.border)
-            .shadow_md()
+            .shadow(theme::popup_shadow(cx.theme().is_dark()))
             .flex()
             .flex_col()
             .gap_4()
@@ -2272,16 +2561,67 @@ impl Render for HomeView {
             .flex()
             .flex_col()
             .size_full()
-            .bg(colors.background)
+            .bg(cx.theme().transparent)
             .text_color(colors.foreground)
             .child(self.render_title_bar(cx))
+            .when(
+                self.connecting.is_some() && self.connection_dialog.is_none(),
+                |el| {
+                    el.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .px_5()
+                            .py_3()
+                            .flex_shrink_0()
+                            .bg(colors.accent.opacity(0.08))
+                            .border_b_1()
+                            .border_color(colors.border)
+                            .child(Spinner::new().icon(icon_16("loader-circle")).small())
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .child(div().text_size(px(13.)).child(
+                                        super::connection::stage_label(self.connection_stage),
+                                    ))
+                                    .child(
+                                        div()
+                                            .text_size(px(12.))
+                                            .text_color(colors.muted_foreground)
+                                            .truncate()
+                                            .child(self.connecting.clone().unwrap_or_default()),
+                                    ),
+                            )
+                            .child(
+                                Button::new("cancel-pending-session")
+                                    .outline()
+                                    .label(t!("connection.cancel_attempt").to_string())
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.cancel_connection(cx)),
+                                    ),
+                            ),
+                    )
+                },
+            )
             .child(
                 div()
                     .flex()
                     .flex_1()
                     .overflow_hidden()
                     .child(self.render_sidebar(window, cx))
-                    .child(div().flex_1().overflow_hidden().child(detail)),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .bg(colors.background)
+                            .overflow_hidden()
+                            .child(detail),
+                    ),
             )
             .child(self.render_status_bar(cx))
             .children(
@@ -2293,13 +2633,13 @@ impl Render for HomeView {
                             "connection-overlay",
                             self.dialog_seq,
                             div()
-                                .w(px(440.))
+                                .w(px(480.))
                                 .max_w(window.viewport_size().width - px(48.))
-                                .rounded(px(8.))
+                                .rounded(px(20.))
                                 .bg(colors.popover)
                                 .border_1()
                                 .border_color(colors.border)
-                                .shadow_md()
+                                .shadow(theme::popup_shadow(cx.theme().is_dark()))
                                 .child(dialog.clone()),
                             cx,
                         )

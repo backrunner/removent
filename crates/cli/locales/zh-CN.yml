@@ -8,7 +8,7 @@ usage: |
 
   用法:
     removent-cli ping <addr|名称|短指纹> [选项]
-    removent-cli daemon <status|enable|disable>
+    removent-cli daemon <status|start|stop|restart|enable|disable|permissions|login-on|login-off|service-status>
 
   选项:
     --pin <码>       配对 PIN（缺省时在需要配对时从标准输入读取）
@@ -16,7 +16,7 @@ usage: |
     --timeout <秒>   mDNS 发现超时（默认 10）
     --name <设备名>  本端展示名（默认 RemoventCLI）
 
-daemon.unknown_action: "未知 daemon 操作: %{action}（支持 status|enable|disable）"
+daemon.unknown_action: "未知 daemon 操作: %{action}（支持 status|start|stop|restart|enable|disable|permissions|login-on|login-off|service-status）"
 daemon.connect_failed: "连接 daemon 失败（removentd 未运行？）"
 daemon.send_failed: "发送请求失败"
 daemon.wait_timeout: "等待 daemon 响应超时"

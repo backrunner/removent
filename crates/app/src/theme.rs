@@ -1,6 +1,6 @@
-//! Maps the "Quiet Control" design tokens (ui-design.md §2) onto the gpui-component Theme.
+//! Neutral macOS surfaces, restrained separators, and clear interaction states.
 
-use gpui::{App, Hsla, px, rgba};
+use gpui::{App, BoxShadow, Hsla, point, px, rgba};
 
 /// Opaque token.
 fn c(hex: u32) -> Hsla {
@@ -29,26 +29,26 @@ pub struct Palette {
 pub fn palette(dark: bool) -> Palette {
     if dark {
         Palette {
-            background: c(0x1C1D1F),
-            surface: c(0x26272A),
-            overlay: ca(0x2A2A2ECC),
-            border: ca(0xFFFFFF14),
+            background: c(0x1E2025),
+            surface: c(0x292C32),
+            overlay: ca(0x2D3037F5),
+            border: ca(0xFFFFFF16),
             text_primary: c(0xF5F5F7),
-            text_secondary: c(0xACACB5),
-            accent: c(0x528CF5),
+            text_secondary: c(0xA8ABB3),
+            accent: c(0x82B5FF),
             success: c(0x30D158),
             warning: c(0xFF9F0A),
             danger: c(0xFF453A),
         }
     } else {
         Palette {
-            background: c(0xFFFFFF),
+            background: c(0xF5F5F7),
             surface: c(0xF5F5F7),
             overlay: ca(0xFFFFFFF2),
-            border: ca(0x00000012),
-            text_primary: c(0x1D1D1F),
-            text_secondary: c(0x686870),
-            accent: c(0x2563D8),
+            border: ca(0x1C213014),
+            text_primary: c(0x202127),
+            text_secondary: c(0x686B74),
+            accent: c(0x0865DB),
             // In light mode status colors also serve as small text (status bar/tags); the stock
             // system colors lack contrast (2.2:1), so use darkened shades to reach ≥4.5:1 (WCAG AA).
             success: c(0x1F7A38),
@@ -64,28 +64,40 @@ pub fn scrim(dark: bool) -> Hsla {
     if dark { ca(0x00000099) } else { ca(0x00000040) }
 }
 
+/// Floating sheets need separation from content without a bright rim or glow.
+pub fn popup_shadow(dark: bool) -> Vec<BoxShadow> {
+    vec![BoxShadow {
+        color: if dark { ca(0x00000052) } else { ca(0x17203326) },
+        offset: point(px(0.), px(8.)),
+        blur_radius: px(24.),
+        spread_radius: px(-3.),
+    }]
+}
+
 /// Write the tokens into the gpui-component global Theme. Dark is the default (§1 principle 6).
 pub fn apply(dark: bool, cx: &mut App) {
     let p = palette(dark);
     let theme = gpui_component::theme::Theme::global_mut(cx);
     let t = &mut theme.colors;
 
+    // Keep the window backing opaque: GPUI's blurred mode on newer macOS
+    // can leave sharp background windows visible through controls.
     t.background = p.background;
     t.foreground = p.text_primary;
     t.border = p.border;
     t.muted = p.surface;
     t.muted_foreground = p.text_secondary;
     t.secondary = p.surface;
-    t.secondary_hover = if dark { c(0x323236) } else { c(0xEBEBEF) };
-    t.secondary_active = if dark { c(0x3A3A40) } else { c(0xE2E2E7) };
+    t.secondary_hover = if dark { c(0x41454E) } else { c(0xE8ECF2) };
+    t.secondary_active = if dark { c(0x4B505A) } else { c(0xDEE4EC) };
     t.secondary_foreground = p.text_primary;
     t.accent = p.accent;
     t.accent_foreground = c(0xFFFFFF);
     // Filled buttons need stronger contrast for their small white labels than
     // the accent used by focus rings and switches.
-    t.primary = if dark { c(0x3067C9) } else { p.accent };
-    t.primary_hover = if dark { c(0x3972D3) } else { c(0x2057C2) };
-    t.primary_active = if dark { c(0x285DB8) } else { c(0x1B4EAE) };
+    t.primary = if dark { c(0x306ACE) } else { p.accent };
+    t.primary_hover = if dark { c(0x3871D6) } else { c(0x2D6DE4) };
+    t.primary_active = if dark { c(0x2354A6) } else { c(0x194BA9) };
     t.primary_foreground = c(0xFFFFFF);
     t.danger = p.danger;
     t.danger_hover = p.danger;
@@ -104,26 +116,26 @@ pub fn apply(dark: bool, cx: &mut App) {
     t.info_hover = p.accent;
     t.info_active = p.accent;
     t.overlay = p.overlay;
-    t.popover = if dark { c(0x2A2A2E) } else { c(0xFFFFFF) };
+    t.popover = if dark { c(0x2B2E35) } else { c(0xFFFFFF) };
     t.popover_foreground = p.text_primary;
     t.input = p.border;
     t.caret = p.text_primary;
     t.ring = p.accent;
     t.selection = if dark { ca(0x0A84FF44) } else { ca(0x007AFF33) };
     t.list = p.background;
-    t.list_hover = if dark { c(0x2B2D31) } else { c(0xEAECEF) };
-    t.list_active = if dark { c(0x3A3A40) } else { c(0xE4E4E9) };
+    t.list_hover = if dark { c(0x3A3E47) } else { c(0xE8ECF2) };
+    t.list_active = if dark { c(0x4B505A) } else { c(0xDEE4EC) };
     t.list_active_border = p.border;
     t.list_even = p.background;
     t.list_head = p.surface;
-    t.sidebar = if dark { c(0x222326) } else { c(0xF3F3F5) };
+    t.sidebar = if dark { c(0x23262D) } else { c(0xECEEF1) };
     t.sidebar_foreground = p.text_primary;
     t.sidebar_border = p.border;
-    t.sidebar_accent = if dark { c(0x323236) } else { c(0xEBEBEF) };
+    t.sidebar_accent = if dark { c(0x41454E) } else { c(0xE8ECF2) };
     t.sidebar_accent_foreground = p.text_primary;
     t.sidebar_primary = p.accent;
     t.sidebar_primary_foreground = c(0xFFFFFF);
-    t.title_bar = p.background;
+    t.title_bar = t.sidebar;
     t.title_bar_border = p.border;
     t.tab = p.surface;
     t.tab_active = p.background;
@@ -131,12 +143,12 @@ pub fn apply(dark: bool, cx: &mut App) {
     t.tab_foreground = p.text_secondary;
     t.tab_bar = p.surface;
     t.tab_bar_segmented = p.surface;
-    t.group_box = p.surface;
+    t.group_box = if dark { c(0x2B2E35) } else { c(0xFFFFFF) };
     t.group_box_foreground = p.text_primary;
-    t.skeleton = if dark { c(0x3A3A40) } else { c(0xE4E4E9) };
-    t.switch = if dark { c(0x39393D) } else { c(0xD1D1D6) };
+    t.skeleton = if dark { c(0x4B505A) } else { c(0xDEE4EC) };
+    t.switch = if dark { c(0x4A4D55) } else { c(0xD1D1D6) };
     t.switch_thumb = c(0xFFFFFF);
-    t.slider_bar = if dark { c(0x39393D) } else { c(0xD1D1D6) };
+    t.slider_bar = if dark { c(0x4A4D55) } else { c(0xD1D1D6) };
     t.slider_thumb = p.accent;
     t.progress_bar = p.accent;
     t.scrollbar = p.background;
@@ -164,8 +176,8 @@ pub fn apply(dark: bool, cx: &mut App) {
     t.bullish = p.success;
     t.bearish = p.danger;
 
-    theme.shadow = false;
-    theme.radius = px(6.);
-    theme.radius_lg = px(10.);
+    theme.shadow = true;
+    theme.radius = px(9.);
+    theme.radius_lg = px(16.);
     theme.font_size = px(13.);
 }

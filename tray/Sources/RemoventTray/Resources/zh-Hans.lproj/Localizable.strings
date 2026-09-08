@@ -13,7 +13,7 @@
 "menu.pairing_pin" = "配对 PIN：%@";
 "menu.enable_service" = "启用服务";
 "menu.disable_service" = "停用服务";
-"menu.launch_at_login" = "开机自动启动";
+"menu.launch_at_login" = "登录时启动服务器";
 "menu.open_data_directory" = "打开数据目录";
 "menu.quit" = "退出菜单栏";
 
@@ -35,3 +35,10 @@
 "alert.open_main_app_failed" = "打开主应用失败：%@";
 "alert.daemon_not_found" = "找不到 removentd";
 "alert.daemon_not_found_detail" = "未找到 removentd 可执行文件，无法开启开机自动启动。请先安装 Removent daemon。";
+
+"menu.restart_service" = "重启后台服务";
+"menu.tray_at_login" = "登录时显示菜单栏图标";
+"menu.unattended_hint" = "无人值守需先完成配对与屏幕共享授权";
+"alert.service_failed" = "无法管理后台服务";
+
+"menu.setup_permissions" = "设置屏幕共享权限…";

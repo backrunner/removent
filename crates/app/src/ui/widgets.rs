@@ -1,11 +1,12 @@
 //! Shared UI primitives: icons, status indicators, form groups and selectors.
 
+pub use super::button::Button;
+
 use gpui::{
     App, ClickEvent, Div, ElementId, Entity, Hsla, SharedString, Window, div, prelude::*, px,
 };
 use gpui_component::{
     ActiveTheme, Icon, Sizable,
-    button::{Button, ButtonVariants},
     input::{Input, InputState},
 };
 use std::rc::Rc;
@@ -50,12 +51,8 @@ pub fn segmented(
     cx: &App,
 ) -> Div {
     let t = cx.theme();
-    // A subtle shared track keeps the options visually related on a plain form surface.
-    let (track, pill) = if t.is_dark() {
-        (t.secondary, t.secondary_active)
-    } else {
-        (t.list_active, t.popover)
-    };
+    // Inset track with a raised active segment; wraps at compact window sizes.
+    let track = t.background;
     let mut row = div()
         .flex()
         .w_auto()
@@ -65,8 +62,10 @@ pub fn segmented(
         .flex_wrap()
         .items_center()
         .gap(px(2.))
-        .p(px(2.))
-        .rounded(px(6.))
+        .p(px(4.))
+        .border_1()
+        .border_color(t.border)
+        .rounded(px(10.))
         .bg(track);
     row.style().align_self = Some(gpui::AlignSelf::FlexStart);
     for (i, label) in options.iter().enumerate() {
@@ -77,10 +76,9 @@ pub fn segmented(
             .label(label.clone())
             .ghost()
             .small()
-            .h(px(24.))
-            .rounded(px(4.))
-            .when(active, |el| el.bg(pill).text_color(t.foreground))
-            .when(!active, |el| el.text_color(t.muted_foreground))
+            .h(px(30.))
+            .rounded(px(7.))
+            .segment(active)
             .on_click(move |ev, window, app| cb(i, ev, window, app));
         row = row.child(item);
     }
@@ -88,29 +86,43 @@ pub fn segmented(
 }
 
 /// Single-line Input::h only affects multiline editors; use Styled::h to align
-/// actual input borders with the 32px form buttons.
+/// actual input borders with the 36px form buttons.
 pub fn form_input(state: &Entity<InputState>) -> Input {
-    Styled::h(Input::new(state), px(32.))
+    Styled::h(Input::new(state), px(36.))
+        .w_full()
+        .min_w_0()
+        .rounded(px(9.))
+        .shadow_none()
 }
 
-/// Floating frosted-glass toolbar container (viewer top bar / badge base), fully rounded pill.
-pub fn overlay_chip() -> Div {
+/// Compact floating toolbar shared by viewer controls and badges.
+pub fn overlay_chip(cx: &App) -> Div {
     div()
         .flex()
         .items_center()
         .gap_2()
         .px_3()
-        .h(px(28.))
-        .rounded(px(14.))
+        .h(px(40.))
+        .border_1()
+        .border_color(cx.theme().border)
+        .bg(cx.theme().popover)
+        .shadow(crate::theme::popup_shadow(cx.theme().is_dark()))
+        .rounded(px(20.))
 }
 
-/// Plain form group with a hairline separating the heading from its rows.
+/// Raised surface shared by settings, permissions and device metadata.
 pub fn form_group(cx: &App) -> Div {
     div()
         .flex()
         .flex_col()
-        .border_t_1()
+        .w_full()
+        .min_w_0()
+        .flex_shrink_0()
+        .rounded(px(14.))
+        .bg(cx.theme().group_box)
+        .border_1()
         .border_color(cx.theme().border)
+        .shadow_xs()
 }
 
 /// Form section heading, shared by device metadata and settings.
@@ -121,4 +133,69 @@ pub fn group_title(text: impl Into<SharedString>, cx: &App) -> Div {
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(cx.theme().foreground)
         .child(text.into())
+}
+
+/// Section identity: a tinted icon tile and a clear title/description hierarchy.
+pub fn section_header(name: &'static str, title: String, description: String, cx: &App) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .w_full()
+        .min_w_0()
+        .min_h(px(40.))
+        .flex_shrink_0()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .size(px(40.))
+                .flex_shrink_0()
+                .rounded(px(12.))
+                .bg(cx.theme().accent.opacity(0.12))
+                .border_1()
+                .border_color(cx.theme().accent.opacity(0.18))
+                .child(icon(name).size(px(20.)).text_color(cx.theme().accent)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .text_size(px(16.))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child(description),
+                ),
+        )
+}
+
+pub fn setting_label(title: String, description: String, cx: &App) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .min_w_0()
+        .child(
+            div()
+                .text_size(px(13.))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .child(title),
+        )
+        .child(
+            div()
+                .text_size(px(12.))
+                .text_color(cx.theme().muted_foreground)
+                .child(description),
+        )
 }

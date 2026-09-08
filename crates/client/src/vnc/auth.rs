@@ -5,6 +5,7 @@ use super::{
     ARD_SESSION_STATUS_PENDING_ALT, ARD_VERSION, MAX_NAME, MAX_PIXELS, PixelFormat, RFB_VERSION,
     SEC_ARD, SEC_ARD_MACOS, SEC_NONE, SEC_VNC_AUTH, VncError,
 };
+use crate::connection::{ConnectionProgress, ConnectionStage, report_progress};
 use aes::Aes128;
 use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
 use md5::{Digest, Md5};
@@ -17,9 +18,14 @@ pub(super) async fn handshake(
     stream: &mut TcpStream,
     username: &str,
     password: &[u8],
+    progress: Option<&ConnectionProgress>,
 ) -> Result<(u32, u32, PixelFormat, bool), VncError> {
+    report_progress(progress, ConnectionStage::Negotiating);
     let mut server_version = [0u8; 12];
-    stream.read_exact(&mut server_version).await?;
+    super::with_timeout("server greeting", 10, async {
+        Ok(stream.read_exact(&mut server_version).await?)
+    })
+    .await?;
     if !server_version.starts_with(b"RFB ") {
         return Err(VncError::Protocol("invalid server version".into()));
     }
@@ -32,41 +38,53 @@ pub(super) async fn handshake(
         .ok_or_else(|| VncError::Protocol("unsupported server version".into()))?;
     stream.write_all(client_version).await?;
     let legacy_33 = client_version.get(8..11) == Some(b"003");
-    let security = if legacy_33 {
-        let mut kind = [0u8; 4];
-        stream.read_exact(&mut kind).await?;
-        u32::from_be_bytes(kind) as u8
-    } else {
-        let mut count = [0u8; 1];
-        stream.read_exact(&mut count).await?;
-        if count[0] == 0 {
-            return Err(VncError::Protocol(
-                "server offered no security types".into(),
-            ));
-        }
-        let mut types = vec![0u8; count[0] as usize];
-        stream.read_exact(&mut types).await?;
-        choose_security_type(&types, username, password)?
-    };
+    let security = super::with_timeout("security negotiation", 10, async {
+        Ok(if legacy_33 {
+            let mut kind = [0u8; 4];
+            stream.read_exact(&mut kind).await?;
+            u32::from_be_bytes(kind) as u8
+        } else {
+            let mut count = [0u8; 1];
+            stream.read_exact(&mut count).await?;
+            if count[0] == 0 {
+                return Err(VncError::Protocol(
+                    "server offered no security types".into(),
+                ));
+            }
+            let mut types = vec![0u8; count[0] as usize];
+            stream.read_exact(&mut types).await?;
+            choose_security_type(&types, username, password)?
+        })
+    })
+    .await?;
     if !legacy_33 {
         stream.write_all(&[security]).await?;
     }
-    if matches!(security, SEC_ARD | SEC_ARD_MACOS) {
-        ard_auth(stream, username, password).await?;
-    } else if security == SEC_VNC_AUTH {
-        let mut challenge = [0u8; 16];
-        stream.read_exact(&mut challenge).await?;
-        stream
-            .write_all(&vnc_response(password, &challenge))
-            .await?;
-    } else if security != SEC_NONE {
-        return Err(VncError::Protocol("unsupported security type".into()));
-    }
+    tracing::info!(security, apple_ard, "VNC security method selected");
+    report_progress(progress, ConnectionStage::Authenticating);
+    super::with_timeout("authentication challenge", 30, async {
+        if matches!(security, SEC_ARD | SEC_ARD_MACOS) {
+            ard_auth(stream, username, password).await?;
+        } else if security == SEC_VNC_AUTH {
+            let mut challenge = [0u8; 16];
+            stream.read_exact(&mut challenge).await?;
+            stream
+                .write_all(&vnc_response(password, &challenge))
+                .await?;
+        } else if security != SEC_NONE {
+            return Err(VncError::Protocol("unsupported security type".into()));
+        }
+        Ok(())
+    })
+    .await?;
     // RFB 3.3 omits SecurityResult for the None type; newer versions send it
     // for every selected security method.
     if !legacy_33 || security != SEC_NONE {
         let mut result = [0u8; 4];
-        stream.read_exact(&mut result).await?;
+        super::with_timeout("authentication result", 30, async {
+            Ok(stream.read_exact(&mut result).await?)
+        })
+        .await?;
         if u32::from_be_bytes(result) != 0 {
             return Err(VncError::Authentication);
         }
@@ -77,48 +95,52 @@ pub(super) async fn handshake(
     let ard_session = apple_ard;
     stream.write_all(&[1]).await?;
 
-    let mut init = [0u8; 24];
-    stream.read_exact(&mut init).await?;
-    let width = u16::from_be_bytes([init[0], init[1]]) as u32;
-    let height = u16::from_be_bytes([init[2], init[3]]) as u32;
-    if (!apple_ard && (width == 0 || height == 0))
-        || (width != 0 && height != 0 && width as usize * height as usize > MAX_PIXELS)
-    {
-        return Err(VncError::Protocol("invalid framebuffer dimensions".into()));
-    }
-    let format = PixelFormat {
-        bits_per_pixel: init[4],
-        depth: init[5],
-        big_endian: init[6] != 0,
-        red_max: u16::from_be_bytes([init[8], init[9]]),
-        green_max: u16::from_be_bytes([init[10], init[11]]),
-        blue_max: u16::from_be_bytes([init[12], init[13]]),
-        red_shift: init[14],
-        green_shift: init[15],
-        blue_shift: init[16],
-    };
-    let name_len = u32::from_be_bytes([init[20], init[21], init[22], init[23]]) as usize;
-    if name_len > MAX_NAME {
-        return Err(VncError::Protocol("server name is too large".into()));
-    }
-    let mut name = vec![0u8; name_len];
-    stream.read_exact(&mut name).await?;
+    report_progress(progress, ConnectionStage::PreparingDesktop);
+    super::with_timeout("desktop initialization", 30, async {
+        let mut init = [0u8; 24];
+        stream.read_exact(&mut init).await?;
+        let width = u16::from_be_bytes([init[0], init[1]]) as u32;
+        let height = u16::from_be_bytes([init[2], init[3]]) as u32;
+        if (!apple_ard && (width == 0 || height == 0))
+            || (width != 0 && height != 0 && width as usize * height as usize > MAX_PIXELS)
+        {
+            return Err(VncError::Protocol("invalid framebuffer dimensions".into()));
+        }
+        let format = PixelFormat {
+            bits_per_pixel: init[4],
+            depth: init[5],
+            big_endian: init[6] != 0,
+            red_max: u16::from_be_bytes([init[8], init[9]]),
+            green_max: u16::from_be_bytes([init[10], init[11]]),
+            blue_max: u16::from_be_bytes([init[12], init[13]]),
+            red_shift: init[14],
+            green_shift: init[15],
+            blue_shift: init[16],
+        };
+        let name_len = u32::from_be_bytes([init[20], init[21], init[22], init[23]]) as usize;
+        if name_len > MAX_NAME {
+            return Err(VncError::Protocol("server name is too large".into()));
+        }
+        let mut name = vec![0u8; name_len];
+        stream.read_exact(&mut name).await?;
 
-    // Apple extends the ServerInit name field with a binary capability header
-    // when ClientInit includes the Select/Enhanced flags. The first byte is a
-    // NUL marker, followed by a reserved byte, flags, and a 16-byte bitmap;
-    // the human-readable server name follows the final NUL. Parse the flags
-    // here so sessions that initially report a 0x0 framebuffer can complete
-    // the required Session Select exchange before normal setup messages.
-    let server_flags = if ard_session && name.len() >= 22 && name[0] == 0 {
-        u32::from_be_bytes([name[2], name[3], name[4], name[5]])
-    } else {
-        0
-    };
-    if server_flags & ARD_SERVER_FLAG_SESSION_SELECT != 0 {
-        ard_session_select(stream).await?;
-    }
-    Ok((width, height, format, ard_session))
+        // Apple extends the ServerInit name field with a binary capability header
+        // when ClientInit includes the Select/Enhanced flags. The first byte is a
+        // NUL marker, followed by a reserved byte, flags, and a 16-byte bitmap;
+        // the human-readable server name follows the final NUL. Parse the flags
+        // here so sessions that initially report a 0x0 framebuffer can complete
+        // the required Session Select exchange before normal setup messages.
+        let server_flags = if ard_session && name.len() >= 22 && name[0] == 0 {
+            u32::from_be_bytes([name[2], name[3], name[4], name[5]])
+        } else {
+            0
+        };
+        if server_flags & ARD_SERVER_FLAG_SESSION_SELECT != 0 {
+            ard_session_select(stream).await?;
+        }
+        Ok((width, height, format, ard_session))
+    })
+    .await
 }
 
 pub(super) fn negotiated_version(server_version: &[u8; 12]) -> Option<&'static [u8]> {
@@ -222,14 +244,15 @@ pub(super) fn choose_security_type(
     username: &str,
     password: &[u8],
 ) -> Result<u8, VncError> {
-    // Apple servers commonly advertise both methods. Prefer the documented DH
-    // variants; they are interoperable with both old and current macOS servers.
+    // Current Screen Sharing servers advertise both 30 and 35. Type 30
+    // immediately supplies the standard ARD DH challenge; selecting 35 first
+    // can leave both peers waiting for data (observed on RFB 003.889).
     if !username.is_empty() {
-        if types.contains(&SEC_ARD_MACOS) {
-            return Ok(SEC_ARD_MACOS);
-        }
         if types.contains(&SEC_ARD) {
             return Ok(SEC_ARD);
+        }
+        if types.contains(&SEC_ARD_MACOS) {
+            return Ok(SEC_ARD_MACOS);
         }
     }
     // macOS can also expose the separate legacy "VNC viewers" password. This

@@ -478,6 +478,15 @@ pub fn run_install(
                     .and_then(|()| std::fs::rename(&backup, &bundle));
                 let reason = if restored.is_ok() {
                     let _ = std::fs::remove_dir_all(failed);
+                    // The replacement daemon may already have started. Put
+                    // the restored bundle's server back under the same job.
+                    #[cfg(target_os = "macos")]
+                    if let Ok(service) = removent_core::service::Service::new(
+                        removent_core::DataPaths::resolve(),
+                        bundle.join("Contents/MacOS/removentd"),
+                    ) {
+                        let _ = service.restart();
+                    }
                     t!("update.err.swap", err = error.to_string()).to_string()
                 } else {
                     t!(
@@ -562,12 +571,13 @@ fn move_into_place(staged: &Path, bundle: &Path) -> std::io::Result<()> {
 /// Restart the daemon (it ships inside the bundle; best-effort — it may not be
 /// loaded at all), open the new app and exit only if Launch Services accepts it.
 fn relaunch(bundle: &Path) -> std::io::Result<()> {
-    let uid = unsafe { libc::getuid() };
-    let _ = Command::new("launchctl")
-        .args(["kickstart", "-k", &format!("gui/{uid}/com.removent.daemon")])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+    #[cfg(target_os = "macos")]
+    removent_core::service::Service::new(
+        removent_core::DataPaths::resolve(),
+        bundle.join("Contents/MacOS/removentd"),
+    )
+    .and_then(|service| service.restart())
+    .map_err(std::io::Error::other)?;
     let opened = Command::new("/usr/bin/open")
         .arg("-n")
         .arg(bundle)

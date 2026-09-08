@@ -110,6 +110,15 @@ fn default_device_name() -> String {
 }
 
 impl Settings {
+    /// Read-modify-write transaction shared by the daemon and settings UI.
+    pub fn update(paths: &DataPaths, edit: impl FnOnce(&mut Self)) -> Result<Self> {
+        let _lock = crate::DataDirLock::acquire_blocking(&paths.root.join(".settings.lock"))?;
+        let mut next = Self::load(paths)?;
+        edit(&mut next);
+        next.save(paths)?;
+        Ok(next)
+    }
+
     pub fn load(paths: &DataPaths) -> Result<Self> {
         let file = paths.settings_file();
         let mut s: Settings = match std::fs::read_to_string(&file) {
@@ -123,7 +132,11 @@ impl Settings {
                     if let Err(re) = std::fs::rename(&file, &bak) {
                         return Err(re.into());
                     }
-                    tracing::warn!(error = %e, "settings.toml is corrupt; backed up to settings.toml.bak, using defaults");
+                    // TOML error Display includes source lines, potentially a VNC password.
+                    tracing::warn!(
+                        byte_offset = e.span().map(|span| span.start),
+                        "settings.toml is corrupt; backed up to settings.toml.bak, using defaults"
+                    );
                     Self::default()
                 }
             },
@@ -170,6 +183,30 @@ pub(crate) fn atomic_write(path: &PathBuf, bytes: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn concurrent_setting_edits_preserve_service_switch() {
+        let dir = tempdir().unwrap();
+        let paths = DataPaths {
+            root: dir.path().to_owned(),
+        };
+        Settings::default().save(&paths).unwrap();
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                barrier.wait();
+                Settings::update(&paths, |s| s.host_enabled = false).unwrap();
+            });
+            scope.spawn(|| {
+                barrier.wait();
+                Settings::update(&paths, |s| s.device_name = "Edited in main window".into())
+                    .unwrap();
+            });
+        });
+        let result = Settings::load(&paths).unwrap();
+        assert!(!result.host_enabled);
+        assert_eq!(result.device_name, "Edited in main window");
+    }
 
     #[test]
     fn concurrent_writers_publish_complete_private_files() {

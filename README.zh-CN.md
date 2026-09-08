@@ -24,7 +24,7 @@ Mac —— 无中转服务器、无账号，流量不出局域网。
 ### 方式一：下载 DMG
 
 从 [最新 release](https://github.com/backrunner/removent/releases) 下载
-`Removent-<版本>-macos-arm64.dmg`，打开后把 **Removent.app** 拖进「应用程序」。安装包
+`Removent-<版本>-macos-arm64.dmg`，打开后双击 **Removent.app**，选择「安装并打开」即可自动安装；也可拖进「应用程序」。安装包
 已经过 Developer ID 签名和 Apple 公证，打开时不会有 Gatekeeper 警告。
 
 ### 方式二：一行命令安装
@@ -43,6 +43,19 @@ macOS 会请求两项权限 —— 共享本机时都必需：
 在「系统设置 → 隐私与安全性」中授予后，从菜单栏托盘开启被控服务。在另一台 Mac 上从设备
 列表找到本机（或手动输入 IP），输入被控端显示的配对 PIN，即可连接。
 
+### 无人值守与登录自启
+
+server 由 macOS launchd 独立管理，退出主窗口或托盘后继续运行。在托盘选择「登录时启动服务器」
+即可设置当前用户登录后自动启动；「登录时显示菜单栏图标」是独立选项。托盘还可在 server 离线时
+启动它、设置屏幕共享权限，以及在授权后重启后台服务。关闭服务会保存，重启后不会自行开启。
+
+首次需为实际运行的 server 授予屏幕录制和辅助功能权限，并完成设备配对。之后受信任设备可在已授权
+范围内无人值守重连。支持已登录的图形会话；不支持 FileVault 开机解锁、首次登录界面或已注销的桌面。
+
+安装包自带 `Removent.app/Contents/MacOS/removent-cli`，可用 `daemon start`、`daemon login-on`、
+`daemon status` 独立管理 server。完整步骤、命令、系统限制和验证方法见
+[macOS 后台服务说明](docs/macos-background-service.md)。
+
 ### Apple Remote Desktop / VNC 兼容
 
 除自有的 RVP/QUIC 协议外，被控端可选开启标准 RFB/VNC 服务，供 VNC 客户端连接。该兼容
@@ -55,6 +68,11 @@ macOS 会请求两项权限 —— 共享本机时都必需：
 的凭据。标准 VNC 服务只需密码；Apple Remote Desktop / macOS「屏幕共享」使用 macOS 用户名
 和密码，并执行 Apple type-30/type-35 Diffie-Hellman/AES 认证。地址支持主机名、IPv4 和 IPv6，
 端口独立填写，协议不再由端口号推断。
+
+VNC 输入发送与画面处理独立运行，连续鼠标移动会合并为最新位置，按键、点击和滚动保持顺序，
+以减少高分辨率画面下的输入积压。查看窗口的性能信息默认隐藏；将鼠标移至窗口顶边，点击
+工具栏的仪表图标，或按 `Ctrl+Cmd+I`，可开关左上角半透明面板。面板显示分辨率、帧率、会话
+时长，以及 VNC 接收速率、像素处理耗时和输入排队情况；发送耗时为本地测量，不含远端响应。
 
 ### RDP 兼容连接
 

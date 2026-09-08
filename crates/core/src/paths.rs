@@ -84,12 +84,13 @@ impl DataPaths {
         ] {
             std::fs::create_dir_all(dir)?;
         }
-        // run/ holds the IPC socket; restrict it to this user.
+        // IPC sockets and diagnostic files belong only to this user.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ =
-                std::fs::set_permissions(self.run_dir(), std::fs::Permissions::from_mode(0o700));
+            for dir in [self.run_dir(), self.logs_dir(), self.panics_dir()] {
+                std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+            }
         }
         Ok(())
     }

@@ -9,32 +9,41 @@ use tokio::sync::{RwLock, mpsc};
 
 pub(super) async fn write_commands(
     mut stream: tokio::net::tcp::OwnedWriteHalf,
-    mut cmd_rx: mpsc::Receiver<ControlMsg>,
+    mut cmd_rx: super::queue::InputReceiver,
     mut signal_rx: mpsc::Receiver<FrameSignal>,
     dimensions: Arc<RwLock<FrameSize>>,
     apple_ard: bool,
 ) {
     let mut input = InputState::default();
+    let mut burst = 0;
     loop {
         tokio::select! {
+            biased;
+            cmd = cmd_rx.recv(), if burst < 32 => {
+                let Some(cmd) = cmd else { break };
+                let is_input = matches!(cmd.message, ControlMsg::MouseEvent { .. } | ControlMsg::KeyEvent { .. } | ControlMsg::ScrollEvent { .. });
+                if let Err(error) = write_command(&mut stream, cmd.message, &mut input, apple_ard).await {
+                    tracing::warn!(%error, "VNC stream write failed");
+                    break;
+                }
+                cmd_rx.record_sent(cmd.queued_at, is_input);
+                burst += 1;
+            }
             signal = signal_rx.recv() => match signal {
                 Some(FrameSignal::Updated) => {
+                    burst = 0;
                     let size = *dimensions.read().await;
-                    if size.width > 0
-                        && size.height > 0
-                        && write_framebuffer_request(&mut stream, true, size.width, size.height)
-                            .await
-                            .is_err()
-                    {
+                    if size.width > 0 && size.height > 0
+                        && let Err(error) = write_framebuffer_request(&mut stream, true, size.width, size.height).await {
+                        tracing::warn!(%error, "VNC framebuffer request failed");
                         break;
                     }
                 }
                 Some(FrameSignal::Closed) | None => break,
             },
-            cmd = cmd_rx.recv() => {
-                let Some(cmd) = cmd else { break };
-                if write_command(&mut stream, cmd, &mut input, apple_ard).await.is_err() { break; }
-            }
+            // Give frame requests and the runtime a turn during sustained input,
+            // without waiting for a frame to arrive before sending more keys.
+            _ = tokio::task::yield_now(), if burst >= 32 => { burst = 0; }
         }
     }
 }

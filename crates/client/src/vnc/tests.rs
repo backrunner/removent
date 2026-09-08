@@ -66,6 +66,16 @@ fn ard_credentials_reject_overlong_fields() {
 
 #[test]
 fn apple_security_prefers_dh_when_account_credentials_are_present() {
+    // Real macOS offer: selecting type 35 first stalls its handshake.
+    assert_eq!(
+        choose_security_type(&[30, 33, 36, 31, 32, 2, 35], "alice", b"pw").unwrap(),
+        SEC_ARD
+    );
+    assert_eq!(
+        choose_security_type(&[35, 2, 30], "alice", b"pw").unwrap(),
+        SEC_ARD
+    );
+
     assert_eq!(
         choose_security_type(&[SEC_NONE, SEC_ARD], "alice", b"pw").unwrap(),
         SEC_ARD
@@ -142,7 +152,24 @@ async fn client_handshake_and_raw_frame_roundtrip() {
         update.extend_from_slice(&[1, 2, 3, 255]);
         stream.write_all(&update).await.unwrap();
     });
-    let mut session = connect_vnc(addr, "").await.unwrap();
+    use crate::connection::{ConnectionProgress, ConnectionStage};
+    let stages = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let collected = stages.clone();
+    let progress: ConnectionProgress = std::sync::Arc::new(move |stage| {
+        collected.lock().unwrap().push(stage);
+    });
+    let mut session = connect_vnc_with_progress(addr, "", "", Some(&progress))
+        .await
+        .unwrap();
+    assert_eq!(
+        *stages.lock().unwrap(),
+        vec![
+            ConnectionStage::Connecting,
+            ConnectionStage::Negotiating,
+            ConnectionStage::Authenticating,
+            ConnectionStage::PreparingDesktop,
+        ]
+    );
     let frame = timeout(Duration::from_secs(1), session.decoded_bgra_rx.recv())
         .await
         .unwrap()
@@ -165,7 +192,10 @@ async fn apple_ard_type30_handshake_and_raw_frame_roundtrip() {
         let mut client_version = [0u8; 12];
         stream.read_exact(&mut client_version).await.unwrap();
         assert_eq!(&client_version, RFB_VERSION);
-        stream.write_all(&[1, SEC_ARD]).await.unwrap();
+        stream
+            .write_all(&[7, 30, 33, 36, 31, 32, 2, 35])
+            .await
+            .unwrap();
         let mut selected = [0u8; 1];
         stream.read_exact(&mut selected).await.unwrap();
         assert_eq!(selected[0], SEC_ARD);
@@ -363,7 +393,7 @@ async fn closing_command_channel_closes_frames_while_server_stays_open() {
     assert_eq!(frame.width, 1);
     assert_eq!(frame.height, 1);
     assert_eq!(frame.data, vec![1, 2, 3, 255]);
-    let (replacement, _unused) = mpsc::channel(1);
+    let (replacement, _unused) = queue::channel();
     drop(std::mem::replace(&mut session.cmd_tx, replacement));
     assert!(
         timeout(Duration::from_secs(1), session.decoded_bgra_rx.recv())
@@ -373,4 +403,106 @@ async fn closing_command_channel_closes_frames_while_server_stays_open() {
     );
     let _ = keep_open_tx.send(());
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn key_burst_reaches_server_before_a_stalled_4k_update_finishes() {
+    use removent_proto::{ControlMsg, KeyKind};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (partial_tx, partial_rx) = tokio::sync::oneshot::channel();
+    let (finish_tx, finish_rx) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        stream.write_all(RFB_VERSION).await.unwrap();
+        let mut version = [0; 12];
+        stream.read_exact(&mut version).await.unwrap();
+        stream.write_all(&[1, SEC_NONE]).await.unwrap();
+        assert_eq!(stream.read_u8().await.unwrap(), SEC_NONE);
+        stream.write_all(&0u32.to_be_bytes()).await.unwrap();
+        stream.read_u8().await.unwrap();
+        let mut init = [0; 24];
+        init[..2].copy_from_slice(&3840u16.to_be_bytes());
+        init[2..4].copy_from_slice(&2160u16.to_be_bytes());
+        init[4..20].copy_from_slice(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]);
+        stream.write_all(&init).await.unwrap();
+        let mut setup = [0; 38];
+        stream.read_exact(&mut setup).await.unwrap();
+        let mut update = vec![0, 0, 0, 1, 0, 0, 0, 0];
+        update.extend_from_slice(&3840u16.to_be_bytes());
+        update.extend_from_slice(&2160u16.to_be_bytes());
+        update.extend_from_slice(&0i32.to_be_bytes());
+        update.extend_from_slice(&[1, 2, 3, 0]);
+        stream.write_all(&update).await.unwrap();
+        partial_tx.send(()).unwrap();
+
+        // Withhold the remaining 33 MB until every down/up has arrived.
+        for _ in 0..500 {
+            for down in [1, 0] {
+                let mut event = [0; 8];
+                timeout(Duration::from_secs(2), stream.read_exact(&mut event))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(event, [4, down, 0, 0, 0, 0, 0, b'a']);
+            }
+        }
+        // Let the caller inspect counters before disconnecting.
+        let _ = finish_rx.await;
+    });
+    let session = connect_vnc(addr, "").await.unwrap();
+    partial_rx.await.unwrap();
+    for _ in 0..500 {
+        for kind in [KeyKind::Down, KeyKind::Up] {
+            session
+                .cmd_tx
+                .try_send(ControlMsg::KeyEvent {
+                    vk_code: 0,
+                    modifiers: KeyModifiers::empty(),
+                    kind,
+                    unicode: Some('a'),
+                })
+                .expect("a transient input burst must not drop a key or disconnect");
+        }
+    }
+    timeout(Duration::from_secs(2), async {
+        while session.cmd_tx.snapshot().sent < 1000 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(session.cmd_tx.snapshot().pending, 0);
+    assert_eq!(session.stats.snapshot().received_frames, 0);
+    assert!(session.stats.snapshot().received_bytes > 0);
+    finish_tx.send(()).unwrap();
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn stalled_server_greeting_reports_its_stage_and_closes_socket() {
+    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut byte = [0];
+        // No greeting: the client must time out and release this connection.
+        assert_eq!(stream.read(&mut byte).await.unwrap(), 0);
+    });
+    let result = timeout(Duration::from_secs(12), connect_vnc(addr, ""))
+        .await
+        .expect("a stalled greeting must have a bounded timeout");
+    assert!(matches!(
+        result,
+        Err(VncError::Timeout {
+            stage: "server greeting",
+            seconds: 10
+        })
+    ));
+    timeout(Duration::from_secs(1), server)
+        .await
+        .unwrap()
+        .unwrap();
 }

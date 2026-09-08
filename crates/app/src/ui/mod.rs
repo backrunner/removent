@@ -1,5 +1,6 @@
 //! UI modules: the Home main window, the Viewer session window, and shared widgets.
 
+pub mod button;
 pub mod connection;
 pub mod home;
 pub mod motion;

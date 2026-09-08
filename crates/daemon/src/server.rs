@@ -96,10 +96,25 @@ async fn handle_conn(state: Arc<DaemonState>, stream: UnixStream) {
 fn handle_request(state: &Arc<DaemonState>, req: IpcRequest) -> IpcResponse {
     match req {
         IpcRequest::Status => IpcResponse::Status(Box::new(state.snapshot())),
-        IpcRequest::SetEnabled { on } => {
-            state.set_enabled(on);
+        IpcRequest::RequestPermissions => {
+            // Login startup never prompts. An explicit setup action runs in
+            // the actual launchd process, keeping TCC attribution consistent.
+            tokio::task::spawn_blocking(|| {
+                if !crate::tcc::screen_recording_granted() {
+                    crate::tcc::request_screen_recording();
+                }
+                if !crate::tcc::accessibility_granted() {
+                    crate::tcc::request_accessibility();
+                }
+            });
             IpcResponse::Ok
         }
+        IpcRequest::SetEnabled { on } => match state.set_enabled(on) {
+            Ok(()) => IpcResponse::Ok,
+            Err(e) => IpcResponse::Error {
+                message: e.to_string(),
+            },
+        },
         IpcRequest::ReloadSettings => match Settings::load(&state.paths) {
             Ok(s) => {
                 *state.settings.lock().unwrap() = s;

@@ -223,3 +223,22 @@ mod tests {
         }
     }
 }
+
+/// Actual milestones emitted by the protocol implementation, never a timed estimate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionStage {
+    Resolving,
+    Connecting,
+    Negotiating,
+    Pairing,
+    Authenticating,
+    PreparingDesktop,
+}
+
+pub type ConnectionProgress = std::sync::Arc<dyn Fn(ConnectionStage) + Send + Sync>;
+
+pub(crate) fn report_progress(progress: Option<&ConnectionProgress>, stage: ConnectionStage) {
+    if let Some(progress) = progress {
+        progress(stage);
+    }
+}

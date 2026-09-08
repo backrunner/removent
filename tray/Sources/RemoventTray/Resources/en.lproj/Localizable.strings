@@ -13,7 +13,7 @@
 "menu.pairing_pin" = "Pairing PIN: %@";
 "menu.enable_service" = "Enable Service";
 "menu.disable_service" = "Disable Service";
-"menu.launch_at_login" = "Launch at Login";
+"menu.launch_at_login" = "Start Server at Login";
 "menu.open_data_directory" = "Open Data Directory";
 "menu.quit" = "Quit Menu Bar App";
 
@@ -35,3 +35,10 @@
 "alert.open_main_app_failed" = "Failed to open the main app: %@";
 "alert.daemon_not_found" = "removentd Not Found";
 "alert.daemon_not_found_detail" = "The removentd executable was not found, so Launch at Login cannot be enabled. Please install the Removent daemon first.";
+
+"menu.restart_service" = "Restart Background Service";
+"menu.tray_at_login" = "Show Menu Bar App at Login";
+"menu.unattended_hint" = "Unattended access requires pairing and screen sharing permissions";
+"alert.service_failed" = "Could Not Manage Background Service";
+
+"menu.setup_permissions" = "Set Up Screen Sharing Permissions…";

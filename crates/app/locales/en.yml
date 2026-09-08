@@ -116,6 +116,13 @@ update.install_now: Install and Relaunch
 update.session_active_hint: A session is in progress — end it before installing
 update.installing: Installing… the app will relaunch automatically
 update.err.fetch: "Failed to fetch update info (%{err})"
+update.err.http_forbidden: "GitHub or the update server denied access; GitHub's anonymous API limit may have been reached (HTTP 403). Try again later"
+update.err.http_not_found: "Update info was not found (HTTP 404). Check the update URL and release channel"
+update.err.http_rate_limit: "The update server is rate limiting requests (HTTP 429). Try again later"
+update.err.dns: "Cannot resolve the update server or proxy address. Check your network and DNS settings"
+update.err.connect: "Cannot connect to the update server. Check your network or proxy settings"
+update.err.timeout: "The update request timed out. Check your network or try again later"
+update.err.tls: "Cannot establish a secure connection to the update server. Check your system clock, certificates and proxy settings"
 update.err.bad_manifest: "Invalid update manifest (%{err})"
 update.err.signature: Update signature verification failed; the download was discarded
 update.err.proto_mismatch: This update requires a newer protocol — please upgrade both ends together

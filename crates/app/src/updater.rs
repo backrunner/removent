@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// Stable manifest URL (the `latest.json` asset of the newest GitHub Release).
 pub const DEFAULT_MANIFEST_URL: &str =
@@ -118,7 +119,7 @@ impl UpdateShared {
 }
 
 /// Manifest endpoint: the settings override wins (enterprise mirrors), otherwise
-/// the stable GitHub Releases URL.
+/// choose the GitHub channel from the compiled-in SemVer.
 pub fn manifest_endpoint(settings: &Settings) -> String {
     let custom = settings.update_endpoint.trim();
     if custom.is_empty() {
@@ -616,8 +617,91 @@ pub fn cleanup_stale_backup() {
 
 // ---- shell helpers ----
 
+#[derive(Debug)]
+struct FetchError {
+    exit_code: Option<i32>,
+    http_status: Option<u16>,
+    detail: String,
+}
+
+impl FetchError {
+    fn is_transient(&self) -> bool {
+        // Retry interrupted transfers as well as temporary server failures.
+        // A missing asset, denied request or invalid certificate needs a fix,
+        // not more requests (GitHub also reports API rate limits with 403).
+        matches!(
+            self.exit_code,
+            Some(5 | 6 | 7 | 18 | 28 | 52 | 55 | 56 | 92)
+        ) || (self.exit_code == Some(22)
+            && matches!(self.http_status, Some(408 | 429 | 500 | 502 | 503 | 504)))
+    }
+
+    fn user_message(&self) -> String {
+        let reason = match self.http_status {
+            Some(403) => t!("update.err.http_forbidden").to_string(),
+            Some(404) => t!("update.err.http_not_found").to_string(),
+            Some(429) => t!("update.err.http_rate_limit").to_string(),
+            Some(status) if status >= 400 => format!("HTTP {status}"),
+            _ => match self.exit_code {
+                Some(5 | 6) => t!("update.err.dns").to_string(),
+                Some(7) => t!("update.err.connect").to_string(),
+                Some(28) => t!("update.err.timeout").to_string(),
+                Some(35 | 60) => t!("update.err.tls").to_string(),
+                _ => self.detail.clone(),
+            },
+        };
+        t!("update.err.fetch", err = reason).to_string()
+    }
+}
+
 fn curl_get(url: &str) -> Result<String, String> {
-    let out = Command::new("curl")
+    fetch_with_retry(url, Duration::from_secs(30), curl_get_once)
+}
+
+fn fetch_with_retry(
+    url: &str,
+    timeout: Duration,
+    mut fetch: impl FnMut(&str, Duration) -> Result<Vec<u8>, FetchError>,
+) -> Result<String, String> {
+    let deadline = Instant::now() + timeout;
+    for attempt in 0..3 {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match fetch(url, remaining) {
+            Ok(body) => {
+                return String::from_utf8(body)
+                    .map_err(|e| t!("update.err.bad_manifest", err = e.to_string()).to_string());
+            }
+            Err(error) => {
+                let delay = Duration::from_secs(1 << attempt);
+                let retry = attempt < 2
+                    && error.is_transient()
+                    && deadline.saturating_duration_since(Instant::now()) > delay;
+                // Avoid recording mirror URLs or raw curl stderr: either can
+                // contain credentials. Keep enough context to diagnose failures.
+                tracing::warn!(
+                    source = if url == BETA_RELEASES_URL {
+                        "beta releases"
+                    } else {
+                        "manifest"
+                    },
+                    attempt = attempt + 1,
+                    exit_code = error.exit_code,
+                    http_status = error.http_status,
+                    retry,
+                    "update request failed"
+                );
+                if !retry {
+                    return Err(error.user_message());
+                }
+                std::thread::sleep(delay);
+            }
+        }
+    }
+    unreachable!("the final attempt always returns")
+}
+
+fn curl_get_once(url: &str, timeout: Duration) -> Result<Vec<u8>, FetchError> {
+    let out = Command::new("/usr/bin/curl")
         .args([
             "-fsSL",
             "--proto",
@@ -627,30 +711,48 @@ fn curl_get(url: &str) -> Result<String, String> {
             "--connect-timeout",
             "10",
             "--max-time",
-            "30",
+            &format!("{:.3}", timeout.as_secs_f64().max(0.001)),
             "--max-filesize",
             "2097152",
             "--user-agent",
             "Removent-Updater",
+            // Keep the status separate from the body, including for errors.
+            "--write-out",
+            "%{stderr}\n%{http_code}",
             "--url",
             url,
         ])
         .output()
-        .map_err(|e| t!("update.err.fetch", err = e.to_string()).to_string())?;
+        .map_err(|e| FetchError {
+            exit_code: None,
+            http_status: None,
+            detail: e.to_string(),
+        })?;
+    decode_fetch_output(out)
+}
+
+fn decode_fetch_output(out: std::process::Output) -> Result<Vec<u8>, FetchError> {
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let (detail, status) = stderr.rsplit_once('\n').unwrap_or((&stderr, ""));
+    let http_status = status.trim().parse::<u16>().ok().filter(|s| *s != 0);
     if !out.status.success() {
-        return Err(t!(
-            "update.err.fetch",
-            err = format!("curl exit {}", out.status)
-        )
-        .to_string());
+        let detail = detail.trim().chars().take(512).collect::<String>();
+        return Err(FetchError {
+            exit_code: out.status.code(),
+            http_status,
+            detail: if detail.is_empty() {
+                format!("curl {}", out.status)
+            } else {
+                detail
+            },
+        });
     }
-    String::from_utf8(out.stdout)
-        .map_err(|e| t!("update.err.bad_manifest", err = e.to_string()).to_string())
+    Ok(out.stdout)
 }
 
 /// Download to a `.part` file; `resume` continues a partial download (`-C -`).
 fn curl_download(url: &str, part: &Path, resume: bool) -> bool {
-    let mut cmd = Command::new("curl");
+    let mut cmd = Command::new("/usr/bin/curl");
     cmd.arg("-fSL")
         .args([
             "--proto",
@@ -725,6 +827,113 @@ fn codesign_verify(app: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
+    use std::os::unix::process::ExitStatusExt;
+
+    fn fetch_output(code: i32, body: &[u8], stderr: &str) -> std::process::Output {
+        std::process::Output {
+            status: std::process::ExitStatus::from_raw(code << 8),
+            stdout: body.to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    #[test]
+    fn fetch_preserves_manifest_body_without_status_metadata() {
+        let body = b"{\"version\":\"0.1.0-beta.4\"}\n";
+        assert_eq!(
+            decode_fetch_output(fetch_output(0, body, "\n200")).unwrap(),
+            body
+        );
+    }
+
+    #[test]
+    fn fetch_distinguishes_http_failures_with_the_same_curl_exit_code() {
+        for (status, retry) in [(403, false), (404, false), (429, true), (503, true)] {
+            let error = decode_fetch_output(fetch_output(
+                22,
+                b"",
+                &format!("curl: (22) The requested URL returned error: {status}\n\n{status}"),
+            ))
+            .unwrap_err();
+            assert_eq!(error.http_status, Some(status));
+            assert_eq!(error.is_transient(), retry);
+            assert!(error.user_message().contains(&format!("HTTP {status}")));
+        }
+    }
+
+    #[test]
+    fn fetch_retries_interrupted_transfers_but_rejects_certificate_failures() {
+        let interrupted = decode_fetch_output(fetch_output(
+            18,
+            b"{\"version\":",
+            "curl: (18) transfer closed with outstanding read data remaining\n\n200",
+        ))
+        .unwrap_err();
+        assert!(interrupted.is_transient());
+        assert_eq!(interrupted.http_status, Some(200));
+        let timeout =
+            decode_fetch_output(fetch_output(28, b"", "curl: (28) timeout\n\n000")).unwrap_err();
+        assert!(timeout.is_transient());
+        assert_eq!(timeout.http_status, None);
+        let certificate = decode_fetch_output(fetch_output(
+            60,
+            b"",
+            "curl: (60) SSL certificate problem\n\n000",
+        ))
+        .unwrap_err();
+        assert!(!certificate.is_transient());
+    }
+
+    #[test]
+    fn retry_discards_partial_body_and_uses_the_remaining_time_budget() {
+        let mut budgets = Vec::new();
+        let body = fetch_with_retry(
+            "https://example.com",
+            Duration::from_secs(30),
+            |_, budget| {
+                budgets.push(budget);
+                decode_fetch_output(if budgets.len() == 1 {
+                    fetch_output(18, b"{\"version\":", "curl: (18) interrupted\n\n200")
+                } else {
+                    fetch_output(0, b"{\"version\":\"0.1.0\"}", "\n200")
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(body, "{\"version\":\"0.1.0\"}");
+        assert_eq!(budgets.len(), 2);
+        assert!(budgets[1] < budgets[0]);
+        assert!(budgets[0] <= Duration::from_secs(30));
+    }
+
+    #[test]
+    fn retry_stops_on_permanent_failure_or_exhausted_budget() {
+        for (status, budget) in [
+            (404, Duration::from_secs(30)),
+            (503, Duration::from_millis(20)),
+        ] {
+            let mut attempts = 0;
+            let error = fetch_with_retry("https://example.com", budget, |_, _| {
+                attempts += 1;
+                decode_fetch_output(fetch_output(22, b"", &format!("\n{status}")))
+            })
+            .unwrap_err();
+            assert_eq!(attempts, 1);
+            assert!(error.contains(&format!("HTTP {status}")));
+        }
+    }
+
+    #[test]
+    #[ignore = "requires access to the public GitHub release feed"]
+    fn official_beta_feed_fetches_a_valid_signed_manifest() {
+        // Exercise the same discovery, HTTPS requests and signature validation
+        // as the app without downloading or installing an update.
+        let feed = curl_get(BETA_RELEASES_URL).unwrap();
+        let url = beta_manifest_url(&feed)
+            .unwrap()
+            .expect("the official feed must contain a release manifest");
+        fetch_and_validate(&url).unwrap();
+    }
 
     #[test]
     fn release_requirement_is_accepted_as_inline_source() {

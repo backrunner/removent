@@ -169,10 +169,12 @@ architecture, protocol — currently in Chinese).
 
 ## Updates
 
-Removent checks for updates 30 seconds after launch and then every 24 hours by fetching
-[`latest.json`](https://github.com/backrunner/removent/releases/latest/download/latest.json)
-from GitHub Releases. You can turn this off in the app's settings; the check never
-interferes with LAN-only operation.
+Removent checks for updates 30 seconds after launch and then every 24 hours.
+Beta builds use the GitHub Releases API to find the newest beta or stable release,
+then fetch that release's signed `latest.json`. Stable builds use GitHub's
+`releases/latest/download/latest.json` endpoint, which excludes prereleases and
+returns 404 until a stable release exists. You can turn checks off in the app's
+settings; they never interfere with LAN-only operation.
 
 Updates are **notify-only** — a badge appears in the settings page and the menu bar, and
 nothing is installed until you ask. When you do update, the download is verified against

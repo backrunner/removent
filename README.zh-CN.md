@@ -149,9 +149,10 @@ HEVC。目前使用 rav1e 软件编码和 rav1d 软件解码。Benchmark 同时�
 
 ## 自动更新
 
-Removent 在启动 30 秒后、之后每 24 小时从 GitHub Releases 拉取一次
-[`latest.json`](https://github.com/backrunner/removent/releases/latest/download/latest.json)
-检查新版本。可在应用设置中关闭；该检查不影响纯局域网使用。
+Removent 在启动 30 秒后、之后每 24 小时检查新版本。Beta 版本通过 GitHub Releases API
+选择最新的 beta 或正式版，再获取对应版本已签名的 `latest.json`。正式版使用 GitHub 的
+`releases/latest/download/latest.json` 地址；该地址不包含预发布版本，尚未发布正式版时会返回
+404。可在应用设置中关闭检查；该检查不影响纯局域网使用。
 
 更新**仅提示、不强制**——有新版时设置页与菜单栏出现角标，不确认不会安装任何内容。
 确认更新后，下载的包会先对照清单中的 SHA-256 与 Ed25519 签名（公钥已编译进应用）

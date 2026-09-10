@@ -157,7 +157,7 @@ impl Settings {
 }
 
 /// Atomic write via tmp + rename to avoid half-written files.
-pub(crate) fn atomic_write(path: &PathBuf, bytes: &[u8]) -> Result<()> {
+pub fn atomic_write(path: &PathBuf, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     // Each writer owns a separate sibling file. A shared .tmp can be renamed

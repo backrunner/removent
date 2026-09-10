@@ -1,8 +1,10 @@
 //! Explicit protocol selection and address validation shared with connection forms.
 
+use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ConnectionProtocol {
     Removent,
     Vnc,
@@ -16,6 +18,15 @@ impl ConnectionProtocol {
         match self {
             Self::Removent => "Removent",
             Self::Vnc => "VNC / Apple Remote Desktop",
+            Self::Rdp => "RDP",
+        }
+    }
+
+    /// Compact name for list rows and metadata.
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::Removent => "Removent",
+            Self::Vnc => "VNC",
             Self::Rdp => "RDP",
         }
     }

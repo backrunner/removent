@@ -19,6 +19,8 @@ aes = { workspace = true }
 md-5 = { workspace = true }
 num-bigint = { workspace = true }
 rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 anyhow = { workspace = true }
 ironrdp = { version = "0.17", features = ["connector", "session", "graphics", "input"] }
 ironrdp-tokio = { version = "0.10", features = ["reqwest-native-tls"] }

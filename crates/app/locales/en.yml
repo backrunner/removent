@@ -39,6 +39,8 @@ status.daemon_offline: "Screen sharing is unavailable"
 status.daemon_offline_short: Daemon not connected
 status.admission_mode_updated: Admission mode updated
 status.vnc_updated: VNC settings updated (restart the host service to apply)
+status.connection_save_failed: "Failed to save the connection: %{err}"
+status.connection_removed: Saved connection removed
 
 err.session_in_progress: A session is already in progress
 err.frame_channel_missing: Frame channel missing
@@ -144,6 +146,7 @@ action.allow: Allow
 action.deny: Deny
 action.open: Open
 action.save: Save
+action.edit: Edit
 action.back: Back
 
 pairing.request_title: Pairing Request
@@ -183,9 +186,17 @@ viewer.ended_desc: The peer closed the session, or the network connection was in
 viewer.close_window: Close Window
 
 device.section: "Devices"
+device.nearby: "Nearby"
 device.this_mac: "This Mac"
+saved.section: "Saved"
+saved.subtitle: "Saved connection"
+saved.protocol: "Protocol"
+saved.remove: "Remove saved connection"
+saved.credentials_hint: "Passwords are never saved. You'll be asked to enter it again when connecting."
 connection.title: "Remote connections"
 connection.add: "Add connection"
+connection.name: "Name (optional)"
+connection.name_placeholder: "e.g. Office Mac"
 connection.address: "Host"
 connection.host_placeholder: "IP address or hostname"
 connection.port: "Port"

@@ -33,6 +33,7 @@ static ICONS: &[(&str, &str)] = icons![
     "settings",
     "shield-check",
     "sun",
+    "trash-2",
     "volume-2",
     "volume-x",
     "wifi",

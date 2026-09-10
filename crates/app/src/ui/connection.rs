@@ -12,6 +12,7 @@ use gpui_component::{
 use removent_client::connection::{
     AddressError, ConnectionAddress, ConnectionProtocol, ConnectionRequest, ConnectionStage,
 };
+use removent_client::saved::SavedConnection;
 use rust_i18n::t;
 use std::time::{Duration, Instant};
 
@@ -35,6 +36,7 @@ enum Step {
 
 pub struct ConnectionDialog {
     step: Step,
+    name: Entity<InputState>,
     host: Entity<InputState>,
     port: Entity<InputState>,
     username: Entity<InputState>,
@@ -73,8 +75,11 @@ impl ConnectionDialog {
         let domain = cx.new(|cx| {
             InputState::new(window, cx).placeholder(t!("connection.optional").to_string())
         });
+        let name = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t!("connection.name_placeholder").to_string())
+        });
         let mut subscriptions = Vec::new();
-        for input in [&host, &port, &username, &password, &domain] {
+        for input in [&name, &host, &port, &username, &password, &domain] {
             subscriptions.push(
                 cx.subscribe(input, |this, _, ev: &InputEvent, cx| match ev {
                     InputEvent::PressEnter { .. } => this.submit(cx),
@@ -90,6 +95,7 @@ impl ConnectionDialog {
         window.focus(&focus);
         Self {
             step: Step::Protocol,
+            name,
             host,
             port,
             username,
@@ -216,6 +222,7 @@ impl ConnectionDialog {
             // A protocol selection may have focused a field before GPUI has
             // rendered it into the focus tree for the first time.
             let field_focused = [
+                &self.name,
                 &self.host,
                 &self.port,
                 &self.username,
@@ -264,6 +271,47 @@ impl ConnectionDialog {
             domain: self.domain.read(cx).value().trim().to_string(),
             accept_invalid_certificate: self.accept_invalid_certificate,
         })
+    }
+
+    /// The optional memo name saved alongside the request when it is submitted.
+    pub fn memo_name(&self, cx: &gpui::App) -> String {
+        self.name.read(cx).value().trim().to_string()
+    }
+
+    /// Reopen the Details step with a saved connection's fields. Passwords are
+    /// never persisted, so that field stays empty and takes the focus.
+    pub fn prefill(
+        &mut self,
+        saved: &SavedConnection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.obscured || self.connecting {
+            return;
+        }
+        self.step = Step::Details(saved.protocol);
+        self.error = None;
+        self.retry = false;
+        self.cancelled = false;
+        self.accept_invalid_certificate = saved.accept_invalid_certificate;
+        let port = saved.port.to_string();
+        let empty = String::new();
+        for (input, value) in [
+            (&self.name, &saved.name),
+            (&self.host, &saved.host),
+            (&self.port, &port),
+            (&self.username, &saved.username),
+            (&self.domain, &saved.domain),
+            (&self.password, &empty),
+        ] {
+            input.update(cx, |s, cx| s.set_value(value.clone(), window, cx));
+        }
+        if saved.protocol == ConnectionProtocol::Removent {
+            self.name.update(cx, |s, cx| s.focus(window, cx));
+        } else {
+            self.password.update(cx, |s, cx| s.focus(window, cx));
+        }
+        cx.notify();
     }
 
     fn submit(&mut self, cx: &mut Context<Self>) {
@@ -362,17 +410,19 @@ impl Render for ConnectionDialog {
                         .child(div().text_size(px(12.)).child(label))
                         .child(form_input(input).disabled(busy))
                 };
-                body = body.child(
-                    div()
-                        .flex()
-                        .gap_3()
-                        .child(field(t!("connection.address").to_string(), &self.host).flex_1())
-                        .child(
-                            field(t!("connection.port").to_string(), &self.port)
-                                .w(px(88.))
-                                .flex_shrink_0(),
-                        ),
-                );
+                body = body
+                    .child(field(t!("connection.name").to_string(), &self.name))
+                    .child(
+                        div()
+                            .flex()
+                            .gap_3()
+                            .child(field(t!("connection.address").to_string(), &self.host).flex_1())
+                            .child(
+                                field(t!("connection.port").to_string(), &self.port)
+                                    .w(px(88.))
+                                    .flex_shrink_0(),
+                            ),
+                    );
                 if protocol != ConnectionProtocol::Removent {
                     body = body
                         .child(field(

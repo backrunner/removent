@@ -38,6 +38,10 @@ impl DataPaths {
     pub fn peers_file(&self) -> PathBuf {
         self.root.join("peers.json")
     }
+    /// Saved connection bookmarks (client-side only; never holds credentials).
+    pub fn connections_file(&self) -> PathBuf {
+        self.root.join("connections.json")
+    }
     pub fn settings_file(&self) -> PathBuf {
         self.root.join("settings.toml")
     }

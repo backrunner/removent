@@ -24,7 +24,8 @@ use gpui_component::{
     spinner::Spinner,
     switch::Switch,
 };
-use removent_client::connection::ConnectionStage;
+use removent_client::connection::{ConnectionProtocol, ConnectionStage};
+use removent_client::saved::SavedConnection;
 use removent_core::{AdmissionMode, Language, Theme as ThemePref};
 use rust_i18n::t;
 use std::collections::BTreeMap;
@@ -45,6 +46,13 @@ const SIDEBAR_INSET: f32 = 16.;
 struct DeviceRow {
     name: String,
     addr: SocketAddr,
+}
+
+/// Sidebar selection: a discovered device, a saved bookmark, or None (this Mac).
+#[derive(Clone, PartialEq)]
+enum Selection {
+    Device(String),
+    Saved(String),
 }
 
 #[derive(Clone, Copy)]
@@ -72,7 +80,9 @@ pub struct HomeView {
     engine: Engine,
     _subscriptions: Vec<gpui::Subscription>,
     devices: BTreeMap<String, DeviceRow>,
-    selected: Option<String>,
+    /// Saved connection bookmarks (connections.json), refreshed on save/remove.
+    saved: Vec<SavedConnection>,
+    selected: Option<Selection>,
     status: String,
     status_tone: StatusTone,
     host_on: bool,
@@ -125,7 +135,7 @@ fn group_pin(pin: &str) -> String {
 }
 
 /// Consistent device glyph; names carry identity instead of decorative avatars.
-fn device_glyph(size: f32, colors: &gpui_component::ThemeColor) -> Div {
+fn icon_tile(name: &'static str, size: f32, colors: &gpui_component::ThemeColor) -> Div {
     div()
         .w(px(size))
         .h(px(size))
@@ -137,11 +147,37 @@ fn device_glyph(size: f32, colors: &gpui_component::ThemeColor) -> Div {
         .bg(colors.accent.opacity(0.12))
         .border_1()
         .border_color(colors.accent.opacity(0.18))
-        .child(
-            icon("monitor")
-                .size(px(size * 0.5))
-                .text_color(colors.accent),
-        )
+        .child(icon(name).size(px(size * 0.5)).text_color(colors.accent))
+}
+
+fn device_glyph(size: f32, colors: &gpui_component::ThemeColor) -> Div {
+    icon_tile("monitor", size, colors)
+}
+
+/// Small muted group heading inside the sidebar list (Saved / Nearby).
+fn list_group_label(text: String, cx: &App) -> Div {
+    div()
+        .px_3()
+        .pt_3()
+        .pb_1()
+        .text_size(px(11.))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(cx.theme().muted_foreground)
+        .child(text)
+}
+
+/// Bookmark glyph keyed by protocol, matching the connection dialog picker.
+fn saved_glyph(
+    protocol: ConnectionProtocol,
+    size: f32,
+    colors: &gpui_component::ThemeColor,
+) -> Div {
+    let name = match protocol {
+        ConnectionProtocol::Removent => "wifi",
+        ConnectionProtocol::Vnc => "monitor",
+        ConnectionProtocol::Rdp => "copy",
+    };
+    icon_tile(name, size, colors)
 }
 
 impl HomeView {
@@ -283,6 +319,7 @@ impl HomeView {
             my_fp_short: engine.fingerprint_short(),
             trusted: engine.trusted_short_fps(),
             update_status: engine.update_status(),
+            saved: engine.saved_connections(),
             engine,
             _subscriptions: subscriptions,
             devices: BTreeMap::new(),
@@ -377,6 +414,58 @@ impl HomeView {
         cx.notify();
     }
 
+    /// Reconnect from a bookmark. Entries that never needed a password go
+    /// straight out; the others reopen the form prefilled — the password is
+    /// never persisted, so it must be re-entered.
+    fn connect_saved(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.connecting.is_some() {
+            self.set_status(t!("status.connecting_other").to_string(), StatusTone::Warn);
+            cx.notify();
+            return;
+        }
+        let Some(entry) = self.saved.iter().find(|s| s.id == id).cloned() else {
+            return;
+        };
+        if entry.needs_credentials() {
+            self.open_connection_dialog(Some(&entry), window, cx);
+            return;
+        }
+        let name = entry.display_name();
+        self.engine.touch_saved_connection(&entry);
+        match self.engine.connect_request(entry.to_request()) {
+            Ok(()) => {
+                self.connecting = Some(name.clone());
+                self.connection_stage = ConnectionStage::Connecting;
+                self.set_status(t!("status.connecting", name = name), StatusTone::Info);
+            }
+            Err(e) => self.set_status(
+                t!("status.connect_failed", err = format!("{e:#}")),
+                StatusTone::Err,
+            ),
+        }
+        cx.notify();
+    }
+
+    fn remove_saved(&mut self, id: &str, cx: &mut Context<Self>) {
+        match self.engine.remove_saved_connection(id) {
+            Ok(()) => {
+                self.saved = self.engine.saved_connections();
+                if matches!(&self.selected, Some(Selection::Saved(s)) if s == id) {
+                    self.selected = None;
+                }
+                self.set_status(
+                    t!("status.connection_removed").to_string(),
+                    StatusTone::Info,
+                );
+            }
+            Err(e) => self.set_status(
+                t!("status.connection_save_failed", err = e.to_string()),
+                StatusTone::Err,
+            ),
+        }
+        cx.notify();
+    }
+
     fn cancel_connection(&mut self, cx: &mut Context<Self>) {
         if self.connecting.take().is_some() {
             self.engine.disconnect_client();
@@ -398,7 +487,12 @@ impl HomeView {
         }
     }
 
-    fn open_connection_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_connection_dialog(
+        &mut self,
+        prefill: Option<&SavedConnection>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.connection_dialog.is_some()
             || self.connecting.is_some()
             || self.pin_dialog.is_some()
@@ -407,6 +501,9 @@ impl HomeView {
             return;
         }
         let dialog = cx.new(|cx| ConnectionDialog::new(window, cx));
+        if let Some(saved) = prefill {
+            dialog.update(cx, |form, cx| form.prefill(saved, window, cx));
+        }
         self.connection_subscription = Some(cx.subscribe_in(
             &dialog,
             window,
@@ -432,7 +529,21 @@ impl HomeView {
                         let Ok(request) = dialog.read(cx).request(cx) else {
                             return;
                         };
-                        let name = format!("{} ({})", request.address, request.protocol.label());
+                        let memo = dialog.read(cx).memo_name(cx);
+                        // A submitted form is a saved bookmark (passwords are never
+                        // persisted); a failed save must not block connecting.
+                        match this.engine.save_connection(&request, memo.clone()) {
+                            Ok(()) => this.saved = this.engine.saved_connections(),
+                            Err(e) => this.set_status(
+                                t!("status.connection_save_failed", err = e.to_string()),
+                                StatusTone::Warn,
+                            ),
+                        }
+                        let name = if memo.is_empty() {
+                            format!("{} ({})", request.address, request.protocol.label())
+                        } else {
+                            memo
+                        };
                         match this.engine.connect_request(request) {
                             Ok(()) => {
                                 this.connecting = Some(name.clone());
@@ -594,7 +705,7 @@ impl HomeView {
             }
             UiEvent::DeviceLost(fp) => {
                 self.devices.remove(&fp);
-                if self.selected.as_deref() == Some(&fp) {
+                if matches!(&self.selected, Some(Selection::Device(s)) if s == &fp) {
                     self.selected = None;
                 }
             }
@@ -869,7 +980,7 @@ impl HomeView {
                             .tooltip(t!("connection.add").to_string())
                             .disabled(self.connecting.is_some())
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_connection_dialog(window, cx)
+                                this.open_connection_dialog(None, window, cx)
                             })),
                     )
                     .child(
@@ -895,7 +1006,8 @@ impl HomeView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = cx.theme().colors;
-        let selected = !self.settings_open && self.selected.as_deref() == Some(fp);
+        let selected =
+            !self.settings_open && matches!(&self.selected, Some(Selection::Device(s)) if s == fp);
         let fp_sel = fp.to_string();
         let fp_dbl = fp.to_string();
         let mut el = div()
@@ -916,7 +1028,7 @@ impl HomeView {
                 if ev.click_count() >= 2 {
                     this.connect_device(&fp_dbl, cx);
                 } else {
-                    this.selected = Some(fp_sel.clone());
+                    this.selected = Some(Selection::Device(fp_sel.clone()));
                     this.settings_open = false;
                     cx.notify();
                 }
@@ -958,6 +1070,78 @@ impl HomeView {
         el
     }
 
+    fn render_saved_row(
+        &self,
+        entry: &SavedConnection,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let colors = cx.theme().colors;
+        let selected = !self.settings_open
+            && matches!(&self.selected, Some(Selection::Saved(id)) if id == &entry.id);
+        let id_sel = entry.id.clone();
+        let id_dbl = entry.id.clone();
+        let mut el = div()
+            .id(gpui::ElementId::Name(format!("saved-{}", entry.id).into()))
+            .tab_index(0)
+            .border_1()
+            .border_color(colors.border.opacity(0.))
+            .focus(|style| style.border_color(colors.ring))
+            .flex()
+            .items_center()
+            .gap_3()
+            .px_3()
+            .py_2()
+            .rounded(px(12.))
+            .cursor_default()
+            // Same interaction as discovered devices: click selects, double-click connects.
+            .on_click(cx.listener(move |this, ev: &gpui::ClickEvent, window, cx| {
+                if ev.click_count() >= 2 {
+                    this.connect_saved(&id_dbl, window, cx);
+                } else {
+                    this.selected = Some(Selection::Saved(id_sel.clone()));
+                    this.settings_open = false;
+                    cx.notify();
+                }
+            }))
+            .child(saved_glyph(entry.protocol, 32., &colors))
+            .child(
+                div()
+                    .flex_1()
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .text_size(px(13.))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .truncate()
+                            .child(entry.display_name()),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(colors.muted_foreground)
+                            .truncate()
+                            .child(format!(
+                                "{} · {}",
+                                entry.protocol.short_label(),
+                                entry.address()
+                            )),
+                    ),
+            );
+        if selected {
+            el = el
+                .bg(colors.accent.opacity(0.12))
+                .border_color(colors.accent.opacity(0.25))
+                .shadow_sm()
+                .hover(|s| s.bg(colors.accent.opacity(0.20)))
+                .active(|s| s.bg(colors.accent.opacity(0.28)));
+        } else {
+            el = el
+                .hover(|s| s.bg(colors.list_hover))
+                .active(|s| s.bg(colors.list_active));
+        }
+        el
+    }
+
     fn render_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors;
         let query = self.search_input.read(cx).value().trim().to_lowercase();
@@ -970,6 +1154,16 @@ impl HomeView {
                     || row.addr.to_string().contains(&query)
             })
             .collect();
+        let saved_rows: Vec<_> = self
+            .saved
+            .iter()
+            .filter(|entry| {
+                query.is_empty()
+                    || entry.name.to_lowercase().contains(&query)
+                    || entry.host.to_lowercase().contains(&query)
+                    || entry.address().to_string().contains(&query)
+            })
+            .collect();
         let mut list = div()
             .id("device-list")
             .flex()
@@ -979,7 +1173,18 @@ impl HomeView {
             .gap_1()
             .px(px(SIDEBAR_INSET))
             .overflow_y_scroll();
-        if rows.is_empty() {
+        // Bookmarks come first: they are the user's own connect targets, while
+        // discovered devices below depend on LAN presence.
+        if !saved_rows.is_empty() {
+            list = list.child(list_group_label(t!("saved.section").to_string(), cx));
+            for entry in saved_rows.iter().copied() {
+                list = list.child(self.render_saved_row(entry, cx));
+            }
+            if !rows.is_empty() {
+                list = list.child(list_group_label(t!("device.nearby").to_string(), cx));
+            }
+        }
+        if rows.is_empty() && (saved_rows.is_empty() || query.is_empty()) {
             list = list.child(
                 div()
                     .p_4()
@@ -1163,12 +1368,18 @@ impl HomeView {
         div()
             .id("quick-start-scroll")
             .size_full()
+            .flex()
+            .flex_col()
             .overflow_y_scroll()
             .child(
+                // my_auto centers the guide vertically when it fits; the margins
+                // collapse to zero once content overflows, so scrolling still works.
                 div()
                     .max_w(px(760.))
                     .w_full()
                     .mx_auto()
+                    .my_auto()
+                    .flex_shrink_0()
                     .p_6()
                     .flex()
                     .flex_col()
@@ -1224,7 +1435,7 @@ impl HomeView {
                                             if this.connecting.is_some() {
                                                 this.cancel_connection(cx);
                                             } else {
-                                                this.open_connection_dialog(window, cx);
+                                                this.open_connection_dialog(None, window, cx);
                                             }
                                         })),
                                 ),
@@ -1474,6 +1685,164 @@ impl HomeView {
                             ),
                     ),
             )
+    }
+
+    fn render_saved_detail(
+        &self,
+        entry: &SavedConnection,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let colors = cx.theme().colors;
+        let connecting = self.connecting.is_some();
+        let id_connect = entry.id.clone();
+        let id_edit = entry.id.clone();
+        let id_remove = entry.id.clone();
+
+        let meta_row = |label: String, value: String| {
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_4()
+                .px_4()
+                .py(px(10.))
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .text_size(px(12.))
+                        .text_color(colors.muted_foreground)
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(px(12.))
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .child(value),
+                )
+        };
+
+        div()
+            .flex()
+            .flex_col()
+            .gap_6()
+            .id("saved-detail")
+            .size_full()
+            .overflow_y_scroll()
+            .p_6()
+            .max_w(px(760.))
+            .mx_auto()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_4()
+                    .child(saved_glyph(entry.protocol, 40., &colors))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_size(px(20.))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .truncate()
+                                    .child(entry.display_name()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(colors.muted_foreground)
+                                    .child(t!("saved.subtitle").to_string()),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("connect-saved")
+                            .icon(icon_16(if connecting { "x" } else { "monitor" }))
+                            .label(if connecting {
+                                t!("action.cancel").to_string()
+                            } else {
+                                t!("action.connect").to_string()
+                            })
+                            .when(!connecting, |b| b.primary())
+                            .when(connecting, |b| b.outline())
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                if this.connecting.is_some() {
+                                    this.cancel_connection(cx);
+                                } else {
+                                    this.connect_saved(&id_connect, window, cx);
+                                }
+                            })),
+                    )
+                    .when(!connecting, |el| {
+                        el.child(
+                            Button::new("edit-saved")
+                                .label(t!("action.edit").to_string())
+                                .outline()
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    if let Some(entry) =
+                                        this.saved.iter().find(|s| s.id == id_edit).cloned()
+                                    {
+                                        this.open_connection_dialog(Some(&entry), window, cx);
+                                    }
+                                })),
+                        )
+                        .child(
+                            Button::new("remove-saved")
+                                .icon(icon_16("trash-2"))
+                                .ghost()
+                                .tooltip(t!("saved.remove").to_string())
+                                .on_click(cx.listener(move |this, _, _w, cx| {
+                                    this.remove_saved(&id_remove, cx)
+                                })),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(group_title(t!("device.info").to_string(), cx))
+                    .child(
+                        form_group(cx)
+                            .child(meta_row(
+                                t!("saved.protocol").to_string(),
+                                entry.protocol.label().to_string(),
+                            ))
+                            .child(Divider::horizontal())
+                            .child(meta_row(
+                                t!("device.address").to_string(),
+                                entry.address().to_string(),
+                            ))
+                            .when(!entry.username.is_empty(), |el| {
+                                el.child(Divider::horizontal()).child(meta_row(
+                                    t!("connection.username").to_string(),
+                                    entry.username.clone(),
+                                ))
+                            }),
+                    ),
+            )
+            .when(entry.needs_credentials(), |el| {
+                el.child(
+                    div()
+                        .p_4()
+                        .rounded(px(12.))
+                        .bg(colors.accent.opacity(0.08))
+                        .text_size(px(12.))
+                        .text_color(colors.muted_foreground)
+                        .child(t!("saved.credentials_hint").to_string()),
+                )
+            })
     }
 
     fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2497,13 +2866,20 @@ impl Render for HomeView {
         let colors = cx.theme().colors;
         let detail = if self.settings_open {
             self.render_settings(cx).into_any_element()
-        } else if let Some(fp) = self.selected.clone() {
-            match self.devices.get(&fp).cloned() {
-                Some(row) => self.render_device_detail(&fp, &row, cx).into_any_element(),
+        } else {
+            match self.selected.clone() {
+                Some(Selection::Device(fp)) => match self.devices.get(&fp).cloned() {
+                    Some(row) => self.render_device_detail(&fp, &row, cx).into_any_element(),
+                    None => self.render_empty_detail(cx).into_any_element(),
+                },
+                Some(Selection::Saved(id)) => {
+                    match self.saved.iter().find(|s| s.id == id).cloned() {
+                        Some(entry) => self.render_saved_detail(&entry, cx).into_any_element(),
+                        None => self.render_empty_detail(cx).into_any_element(),
+                    }
+                }
                 None => self.render_empty_detail(cx).into_any_element(),
             }
-        } else {
-            self.render_empty_detail(cx).into_any_element()
         };
 
         div()
@@ -2524,7 +2900,7 @@ impl Render for HomeView {
                     && this.admission.is_none()
                     && this.connecting.is_none()
                 {
-                    this.open_connection_dialog(window, cx);
+                    this.open_connection_dialog(None, window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &HomeSearch, window, cx| {

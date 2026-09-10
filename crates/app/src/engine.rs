@@ -9,6 +9,7 @@ use futures::FutureExt;
 use removent_client::connect_session;
 use removent_client::connection::{ConnectionProgress, ConnectionStage};
 use removent_client::connection::{ConnectionProtocol, ConnectionRequest};
+use removent_client::saved::{SavedConnection, SavedConnections};
 use removent_core::ipc::{IpcEvent, IpcRequest, IpcResponse, StatusReport};
 use removent_core::{DataPaths, DeviceIdentity, PeersStore, Settings};
 use removent_input as rinput;
@@ -517,6 +518,37 @@ impl Engine {
         self.identity()
             .map(|id| id.short_fingerprint_hex())
             .unwrap_or_default()
+    }
+
+    // ---- saved connections (bookmarks; passwords are never persisted) ----
+
+    /// Snapshot of the saved-connection list, read fresh so edits by another
+    /// window or instance are picked up.
+    pub fn saved_connections(&self) -> Vec<SavedConnection> {
+        SavedConnections::load(&self.paths)
+            .map(|s| s.all().to_vec())
+            .unwrap_or_default()
+    }
+
+    /// Persist a submitted connection form as a reusable bookmark. Same-endpoint
+    /// submissions update the existing entry instead of duplicating it.
+    pub fn save_connection(&self, request: &ConnectionRequest, name: String) -> Result<()> {
+        let mut store = SavedConnections::load(&self.paths)?;
+        store.upsert(SavedConnection::from_request(request, name))?;
+        Ok(())
+    }
+
+    /// Refresh a bookmark's last-used timestamp (direct reconnects from the list).
+    pub fn touch_saved_connection(&self, entry: &SavedConnection) {
+        if let Ok(mut store) = SavedConnections::load(&self.paths) {
+            let _ = store.upsert(entry.clone());
+        }
+    }
+
+    pub fn remove_saved_connection(&self, id: &str) -> Result<()> {
+        let mut store = SavedConnections::load(&self.paths)?;
+        store.remove(id)?;
+        Ok(())
     }
 
     /// Short-fingerprint set of trusted devices (the "Paired" marker in the device list).

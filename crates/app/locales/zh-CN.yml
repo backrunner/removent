@@ -39,6 +39,8 @@ status.daemon_offline: "屏幕共享暂不可用"
 status.daemon_offline_short: 服务守护进程未连接
 status.admission_mode_updated: 准入模式已更新
 status.vnc_updated: VNC 设置已更新（重启被控服务后生效）
+status.connection_save_failed: "连接保存失败：%{err}"
+status.connection_removed: 已移除保存的连接
 
 err.session_in_progress: 已有进行中的会话
 err.frame_channel_missing: 帧通道缺失
@@ -144,6 +146,7 @@ action.allow: 允许
 action.deny: 拒绝
 action.open: 打开
 action.save: 保存
+action.edit: 编辑
 action.back: 返回
 
 pairing.request_title: 配对请求
@@ -183,9 +186,17 @@ viewer.ended_desc: 对端关闭了会话，或网络连接中断。
 viewer.close_window: 关闭窗口
 
 device.section: "设备"
+device.nearby: "附近设备"
 device.this_mac: "本机"
+saved.section: "已保存"
+saved.subtitle: "已保存的连接"
+saved.protocol: "协议"
+saved.remove: "移除已保存的连接"
+saved.credentials_hint: "密码不会被保存，连接时需要重新输入。"
 connection.title: "远程连接"
 connection.add: "添加连接"
+connection.name: "名称（可选）"
+connection.name_placeholder: "例如：办公室 Mac"
 connection.address: "主机地址"
 connection.host_placeholder: "IP 地址或主机名"
 connection.port: "端口"

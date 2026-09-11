@@ -2,6 +2,7 @@
 
 pub mod connection;
 pub mod jitter;
+pub mod keychain;
 pub mod rdp;
 pub mod saved;
 pub mod session;

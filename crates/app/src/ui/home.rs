@@ -414,9 +414,9 @@ impl HomeView {
         cx.notify();
     }
 
-    /// Reconnect from a bookmark. Entries that never needed a password go
-    /// straight out; the others reopen the form prefilled — the password is
-    /// never persisted, so it must be re-entered.
+    /// Reconnect from a bookmark. Passwords come back from the Keychain; when a
+    /// credentialed entry has no stored secret left, the prefilled form opens
+    /// instead so the user can re-enter it.
     fn connect_saved(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if self.connecting.is_some() {
             self.set_status(t!("status.connecting_other").to_string(), StatusTone::Warn);
@@ -426,13 +426,19 @@ impl HomeView {
         let Some(entry) = self.saved.iter().find(|s| s.id == id).cloned() else {
             return;
         };
+        let mut request = entry.to_request();
         if entry.needs_credentials() {
-            self.open_connection_dialog(Some(&entry), window, cx);
-            return;
+            match self.engine.saved_password(&entry.id) {
+                Some(password) => request.password = password,
+                None => {
+                    self.open_connection_dialog(Some(&entry), window, cx);
+                    return;
+                }
+            }
         }
         let name = entry.display_name();
         self.engine.touch_saved_connection(&entry);
-        match self.engine.connect_request(entry.to_request()) {
+        match self.engine.connect_request(request) {
             Ok(()) => {
                 self.connecting = Some(name.clone());
                 self.connection_stage = ConnectionStage::Connecting;
@@ -502,7 +508,8 @@ impl HomeView {
         }
         let dialog = cx.new(|cx| ConnectionDialog::new(window, cx));
         if let Some(saved) = prefill {
-            dialog.update(cx, |form, cx| form.prefill(saved, window, cx));
+            let password = self.engine.saved_password(&saved.id);
+            dialog.update(cx, |form, cx| form.prefill(saved, password, window, cx));
         }
         self.connection_subscription = Some(cx.subscribe_in(
             &dialog,
@@ -1832,7 +1839,7 @@ impl HomeView {
                             }),
                     ),
             )
-            .when(entry.needs_credentials(), |el| {
+            .when(entry.password_hint, |el| {
                 el.child(
                     div()
                         .p_4()

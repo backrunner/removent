@@ -1,8 +1,9 @@
 //! Saved connection bookmarks (connections.json).
 //!
 //! Everything needed to reconnect is persisted — address, protocol, and the
-//! non-secret fields — except the password, which stays per-connection and is
-//! never written to disk (mirrors the `ConnectionRequest` contract).
+//! non-secret fields — while `password_hint` records whether a secret exists.
+//! The password itself lives in the macOS Keychain under the bookmark id
+//! (see `keychain`); it never touches this file.
 
 use crate::connection::{ConnectionAddress, ConnectionProtocol, ConnectionRequest};
 use removent_core::{DataPaths, Result};
@@ -21,9 +22,9 @@ pub struct SavedConnection {
     pub username: String,
     pub domain: String,
     pub accept_invalid_certificate: bool,
-    /// Records only whether the request carried a password (never the password
-    /// itself): lets the UI reconnect directly to passwordless VNC/RDP servers
-    /// while still prompting for credentials where one was used.
+    /// Whether the request carried a password. The secret itself is in the
+    /// Keychain under `id`; this flag decides whether reconnecting needs a
+    /// keychain lookup (and a form fallback when the item is gone).
     pub password_hint: bool,
     pub added_at_unix: u64,
     pub last_used_unix: u64,
@@ -104,8 +105,8 @@ impl SavedConnection {
             && self.domain == other.domain
     }
 
-    /// Removent reconnects through trust/PIN; VNC/RDP need a re-opened form only
-    /// when the saved session originally used a password.
+    /// This entry expects a password: look it up in the Keychain first and fall
+    /// back to a prefilled form when the item is missing.
     pub fn needs_credentials(&self) -> bool {
         self.protocol != ConnectionProtocol::Removent && self.password_hint
     }
@@ -145,26 +146,31 @@ impl SavedConnections {
     }
 
     /// Insert a new bookmark, or refresh the memo name/timestamp of the matching
-    /// endpoint. The write is committed before the in-memory list changes, so a
-    /// failed save never mutates the store.
-    pub fn upsert(&mut self, mut entry: SavedConnection) -> Result<()> {
+    /// endpoint. Returns the stored entry — its stable `id` is the key under
+    /// which the password lives in the Keychain. The write is committed before
+    /// the in-memory list changes, so a failed save never mutates the store.
+    pub fn upsert(&mut self, mut entry: SavedConnection) -> Result<SavedConnection> {
         entry.name = entry.name.trim().to_string();
         entry.last_used_unix = now_unix();
         let mut next = self.clone();
-        if let Some(existing) = next.entries.iter_mut().find(|e| e.same_endpoint(&entry)) {
-            entry.id = existing.id.clone();
-            entry.added_at_unix = existing.added_at_unix;
-            *existing = entry;
-        } else {
-            if entry.id.is_empty() {
-                entry.id = format!("{:016x}", rand::random::<u64>());
-            }
-            entry.added_at_unix = entry.last_used_unix;
-            next.entries.push(entry);
-        }
+        let stored =
+            if let Some(existing) = next.entries.iter_mut().find(|e| e.same_endpoint(&entry)) {
+                entry.id = existing.id.clone();
+                entry.added_at_unix = existing.added_at_unix;
+                *existing = entry;
+                existing.clone()
+            } else {
+                if entry.id.is_empty() {
+                    entry.id = format!("{:016x}", rand::random::<u64>());
+                }
+                entry.added_at_unix = entry.last_used_unix;
+                let stored = entry.clone();
+                next.entries.push(entry);
+                stored
+            };
         next.flush()?;
         self.entries = next.entries;
-        Ok(())
+        Ok(stored)
     }
 
     pub fn remove(&mut self, id: &str) -> Result<bool> {

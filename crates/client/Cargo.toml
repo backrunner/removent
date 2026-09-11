@@ -39,3 +39,7 @@ hex = { workspace = true }
 removent-media-capture = { workspace = true }
 removent-host = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+security-framework-sys = "2"

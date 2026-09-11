@@ -278,11 +278,13 @@ impl ConnectionDialog {
         self.name.read(cx).value().trim().to_string()
     }
 
-    /// Reopen the Details step with a saved connection's fields. Passwords are
-    /// never persisted, so that field stays empty and takes the focus.
+    /// Reopen the Details step with a saved connection's fields. `password` is
+    /// whatever the Keychain still holds for the bookmark — `None` leaves the
+    /// field empty for the user to fill.
     pub fn prefill(
         &mut self,
         saved: &SavedConnection,
+        password: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -295,18 +297,19 @@ impl ConnectionDialog {
         self.cancelled = false;
         self.accept_invalid_certificate = saved.accept_invalid_certificate;
         let port = saved.port.to_string();
-        let empty = String::new();
+        let password = password.unwrap_or_default();
         for (input, value) in [
             (&self.name, &saved.name),
             (&self.host, &saved.host),
             (&self.port, &port),
             (&self.username, &saved.username),
             (&self.domain, &saved.domain),
-            (&self.password, &empty),
+            (&self.password, &password),
         ] {
             input.update(cx, |s, cx| s.set_value(value.clone(), window, cx));
         }
-        if saved.protocol == ConnectionProtocol::Removent {
+        // A missing stored password is the only field the user must supply.
+        if saved.protocol == ConnectionProtocol::Removent || !password.is_empty() {
             self.name.update(cx, |s, cx| s.focus(window, cx));
         } else {
             self.password.update(cx, |s, cx| s.focus(window, cx));

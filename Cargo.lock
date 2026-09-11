@@ -6809,6 +6809,8 @@ dependencies = [
  "removent-net",
  "removent-proto",
  "rustls",
+ "security-framework",
+ "security-framework-sys",
  "serde",
  "serde_json",
  "tempfile",

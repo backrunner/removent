@@ -9,6 +9,7 @@ use futures::FutureExt;
 use removent_client::connect_session;
 use removent_client::connection::{ConnectionProgress, ConnectionStage};
 use removent_client::connection::{ConnectionProtocol, ConnectionRequest};
+use removent_client::keychain;
 use removent_client::saved::{SavedConnection, SavedConnections};
 use removent_core::ipc::{IpcEvent, IpcRequest, IpcResponse, StatusReport};
 use removent_core::{DataPaths, DeviceIdentity, PeersStore, Settings};
@@ -531,11 +532,31 @@ impl Engine {
     }
 
     /// Persist a submitted connection form as a reusable bookmark. Same-endpoint
-    /// submissions update the existing entry instead of duplicating it.
+    /// submissions update the existing entry instead of duplicating it. The
+    /// password goes to the Keychain under the bookmark id — empty means the
+    /// user cleared it, so the stored secret is removed too.
     pub fn save_connection(&self, request: &ConnectionRequest, name: String) -> Result<()> {
         let mut store = SavedConnections::load(&self.paths)?;
-        store.upsert(SavedConnection::from_request(request, name))?;
+        let entry = store.upsert(SavedConnection::from_request(request, name))?;
+        if request.password.is_empty() {
+            let _ = keychain::delete(&entry.id);
+        } else if let Err(e) = keychain::store(&entry.id, &request.password) {
+            // The bookmark is saved; a keychain failure just means the next
+            // connect falls back to the prefilled form — keep it non-fatal.
+            tracing::warn!(err = %e, "failed to store connection password in keychain");
+        }
         Ok(())
+    }
+
+    /// Password for a saved connection, if one was stored in the Keychain.
+    pub fn saved_password(&self, id: &str) -> Option<String> {
+        match keychain::load(id) {
+            Ok(password) => password,
+            Err(e) => {
+                tracing::warn!(err = %e, "failed to read connection password from keychain");
+                None
+            }
+        }
     }
 
     /// Refresh a bookmark's last-used timestamp (direct reconnects from the list).
@@ -548,6 +569,7 @@ impl Engine {
     pub fn remove_saved_connection(&self, id: &str) -> Result<()> {
         let mut store = SavedConnections::load(&self.paths)?;
         store.remove(id)?;
+        let _ = keychain::delete(id);
         Ok(())
     }
 

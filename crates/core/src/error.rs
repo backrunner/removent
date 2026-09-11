@@ -16,6 +16,8 @@ pub enum CoreError {
     AlreadyRunning,
     #[error("crypto: {0}")]
     Crypto(String),
+    #[error("secure store: {0}")]
+    SecureStore(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

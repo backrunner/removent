@@ -31,7 +31,7 @@
 "alert.pairing_request" = "配对请求";
 "alert.pairing_pin_detail" = "PIN：%@，5 分钟内有效。";
 "alert.main_app_not_found" = "未找到 Removent 主应用";
-"alert.main_app_not_found_detail" = "未在系统中找到 Removent（bundle id io.removent.app），请先安装主应用。";
+"alert.main_app_not_found_detail" = "未在系统中找到 Removent（bundle id com.alkinum.removent），请先安装主应用。";
 "alert.open_main_app_failed" = "打开主应用失败：%@";
 "alert.daemon_not_found" = "找不到 removentd";
 "alert.daemon_not_found_detail" = "未找到 removentd 可执行文件，无法开启开机自动启动。请先安装 Removent daemon。";

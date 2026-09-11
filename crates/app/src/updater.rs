@@ -803,7 +803,7 @@ fn find_app_bundle(stage: &Path) -> Option<PathBuf> {
 fn release_codesign_requirement() -> String {
     // codesign treats -R as a filename unless the expression starts with '='.
     format!(
-        "=anchor apple generic and identifier \"io.removent.app\" and certificate leaf[subject.OU] = \"{EXPECTED_TEAM_ID}\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+        "=anchor apple generic and identifier \"com.alkinum.removent\" and certificate leaf[subject.OU] = \"{EXPECTED_TEAM_ID}\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
     )
 }
 

@@ -31,7 +31,7 @@
 "alert.pairing_request" = "Pairing Request";
 "alert.pairing_pin_detail" = "PIN: %@. Valid for 5 minutes.";
 "alert.main_app_not_found" = "Removent Main App Not Found";
-"alert.main_app_not_found_detail" = "Removent (bundle id io.removent.app) was not found on this system. Please install the main app first.";
+"alert.main_app_not_found_detail" = "Removent (bundle id com.alkinum.removent) was not found on this system. Please install the main app first.";
 "alert.open_main_app_failed" = "Failed to open the main app: %@";
 "alert.daemon_not_found" = "removentd Not Found";
 "alert.daemon_not_found_detail" = "The removentd executable was not found, so Launch at Login cannot be enabled. Please install the Removent daemon first.";

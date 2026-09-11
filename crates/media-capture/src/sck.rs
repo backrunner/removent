@@ -326,7 +326,7 @@ pub fn start_display_capture(
         .into_iter()
         .filter(|w| {
             let app = w.owning_application();
-            app.process_id() == own_pid || app.bundle_identifier() == "io.removent.app"
+            app.process_id() == own_pid || app.bundle_identifier() == "com.alkinum.removent"
         })
         .collect();
     let own_window_refs: Vec<&_> = own_windows.iter().collect();

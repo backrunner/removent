@@ -162,7 +162,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         if let path = ProcessInfo.processInfo.environment["REMOVENT_DEV_APP"] {
             return NSWorkspace.shared.runningApplications.contains { $0.executableURL?.path == path }
         }
-        return !NSRunningApplication.runningApplications(withBundleIdentifier: "io.removent.app").isEmpty
+        return !NSRunningApplication.runningApplications(withBundleIdentifier: "com.alkinum.removent").isEmpty
     }
 
     /// Queue admission requests that arrive while an alert is being shown
@@ -417,8 +417,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             app.activate(options: [.activateAllWindows])
             return
         }
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "io.removent.app") else {
-            trayLog("main app not installed (bundle id io.removent.app not found)")
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.alkinum.removent") else {
+            trayLog("main app not installed (bundle id com.alkinum.removent not found)")
             showErrorAlert(messageText: String(localized: "alert.main_app_not_found", bundle: .module, comment: "Error alert: main app not installed"),
                            informativeText: String(localized: "alert.main_app_not_found_detail", bundle: .module, comment: "Error alert body: main app not installed"))
             return

@@ -8,7 +8,8 @@
 use removent_core::{CoreError, Result};
 
 /// Generic-password service name; shows as the item name in Keychain Access.
-const SERVICE: &str = "io.removent.app";
+/// Matches the app bundle identifier.
+const SERVICE: &str = "com.alkinum.removent";
 
 fn err(e: impl std::fmt::Display) -> CoreError {
     CoreError::SecureStore(e.to_string())

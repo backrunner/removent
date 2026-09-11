@@ -14,7 +14,7 @@ from release_meta import VERSION, BASE
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DIST = ROOT / 'dist'
 TEAM = 'PB8H83VL3Z'
-REQUIREMENT = f'=anchor apple generic and identifier "io.removent.app" and certificate leaf[subject.OU] = "{TEAM}" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
+REQUIREMENT = f'=anchor apple generic and identifier "com.alkinum.removent" and certificate leaf[subject.OU] = "{TEAM}" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
 
 def run(*args):
     result = subprocess.run(args, capture_output=True)
@@ -28,7 +28,7 @@ def verify_bundle(bundle):
     p = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
     assert p['RemoventReleaseVersion'] == VERSION
     assert p['CFBundleShortVersionString'] == BASE
-    assert p['CFBundleIdentifier'] == 'io.removent.app'
+    assert p['CFBundleIdentifier'] == 'com.alkinum.removent'
     assert p['CFBundleIconFile'] == 'AppIcon'
     assert (bundle / 'Contents/Resources/AppIcon.icns').stat().st_size > 1000
     assert (bundle / 'Contents/MacOS/removent-cli').is_file()

@@ -39,7 +39,7 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
     <key>RemoventReleaseVersion</key><string>${VERSION}</string>
-    <key>CFBundleIdentifier</key><string>io.removent.app</string>
+    <key>CFBundleIdentifier</key><string>com.alkinum.removent</string>
     <key>CFBundleLocalizations</key>
     <array>
         <string>en</string>

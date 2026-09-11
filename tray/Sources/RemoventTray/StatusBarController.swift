@@ -60,6 +60,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             if changed { self.rebuildMenu() }
             self.updateIcon()
         }
+        retireLegacyTrayLoginItem()
         client.start()
         refreshServiceStatus()
 
@@ -526,7 +527,21 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     // quitting it never causes a respawn and never stops the server.
     private var trayLoginURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/com.alkinum.removent.tray.plist")
+    }
+
+    /// Machines that ran a pre-rename beta may still carry the old launch item;
+    /// drop the stale plist and unload its job so it cannot open a removed app.
+    private func retireLegacyTrayLoginItem() {
+        let legacy = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents/com.removent.tray.plist")
+        try? FileManager.default.removeItem(at: legacy)
+        let bootout = Process()
+        bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        bootout.arguments = ["bootout", "gui/\(getuid())/com.removent.tray"]
+        bootout.standardOutput = FileHandle.nullDevice
+        bootout.standardError = FileHandle.nullDevice
+        try? bootout.run()
     }
 
     @objc private func toggleTrayAtLogin() {
@@ -535,7 +550,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 try FileManager.default.removeItem(at: trayLoginURL)
             } else {
                 let plist: [String: Any] = [
-                    "Label": "com.removent.tray",
+                    "Label": "com.alkinum.removent.tray",
                     "ProgramArguments": ["/usr/bin/open", "-g", Bundle.main.bundleURL.path],
                     "RunAtLoad": true,
                     "LimitLoadToSessionType": "Aqua"

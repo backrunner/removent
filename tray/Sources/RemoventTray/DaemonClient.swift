@@ -66,10 +66,10 @@ final class DaemonClient {
 
     private var fd: Int32 = -1
     private let writeLock = NSLock()
-    private let queue = DispatchQueue(label: "com.removent.tray.daemon-client")
+    private let queue = DispatchQueue(label: "com.alkinum.removent.tray.daemon-client")
     /// Serial write queue: preserves write order and keeps the write loop from
     /// blocking the caller (usually the main thread).
-    private let writeQueue = DispatchQueue(label: "com.removent.tray.daemon-client.write")
+    private let writeQueue = DispatchQueue(label: "com.alkinum.removent.tray.daemon-client.write")
     private var running = false
 
     func start() {

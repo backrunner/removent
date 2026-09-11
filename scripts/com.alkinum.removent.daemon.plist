@@ -4,7 +4,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.removent.daemon</string>
+    <string>com.alkinum.removent.daemon</string>
     <key>ProgramArguments</key>
     <array>
         <string>@EXE@</string>

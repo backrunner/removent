@@ -40,7 +40,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key>
     <string>RemoventTray</string>
     <key>CFBundleIdentifier</key>
-    <string>com.removent.tray</string>
+    <string>com.alkinum.removent.tray</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleLocalizations</key>

@@ -8,7 +8,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
-pub const LABEL: &str = "com.removent.daemon";
+pub const LABEL: &str = "com.alkinum.removent.daemon";
+
+/// The pre-rename launchd label. Machines that ran an older beta may still
+/// have the job loaded or a login plist registered under it — `KeepAlive`
+/// would respawn the daemon until the job is booted out.
+const LEGACY_LABEL: &str = "com.removent.daemon";
 
 pub struct Service {
     pub paths: DataPaths,
@@ -111,7 +116,23 @@ impl Service {
         self.start_locked()
     }
 
+    /// Drop the pre-rename job and its login registration so management moves
+    /// to the new label. Only applies to the default data directory: custom
+    /// dev roots never owned the system label.
+    fn retire_legacy_label(&self) {
+        if self.label != LABEL {
+            return;
+        }
+        let _ = self.launchctl(&["bootout", &self.domain(), LEGACY_LABEL]);
+        let _ = std::fs::remove_file(
+            self.login_file
+                .with_file_name(format!("{LEGACY_LABEL}.plist")),
+        );
+        let _ = std::fs::remove_file(self.paths.run_dir().join(format!("{LEGACY_LABEL}.plist")));
+    }
+
     fn start_locked(&self) -> Result<()> {
+        self.retire_legacy_label();
         let status = self.status()?;
         if status.reachable {
             return Ok(());
@@ -146,6 +167,7 @@ impl Service {
     /// unmanaged instances are adopted on the next login or explicit restart.
     pub fn set_launch_at_login(&self, on: bool) -> Result<()> {
         let _lock = self.lock()?;
+        self.retire_legacy_label();
         if on {
             let plist = self.plist()?;
             std::fs::create_dir_all(self.login_file.parent().unwrap())?;
@@ -183,6 +205,7 @@ impl Service {
     }
 
     fn stop_locked(&self) -> Result<()> {
+        self.retire_legacy_label();
         let status = self.status()?;
         if status.managed {
             self.checked(&["bootout", &self.target()])?;
@@ -219,8 +242,8 @@ fn render_plist(label: &str, executable: &Path, data: &Path) -> String {
             .replace('<', "&lt;")
             .replace('>', "&gt;")
     }
-    include_str!("../../../scripts/com.removent.daemon.plist")
-        .replace("com.removent.daemon", &xml(label))
+    include_str!("../../../scripts/com.alkinum.removent.daemon.plist")
+        .replace("com.alkinum.removent.daemon", &xml(label))
         .replace("@EXE@", &xml(&executable.to_string_lossy()))
         .replace("@DATA@", &xml(&data.to_string_lossy()))
 }

@@ -30,7 +30,7 @@ Packaged launches use a per-user **LaunchAgent** in the graphical `gui/<uid>`
 session, with `KeepAlive`, a 10-second restart throttle and graceful SIGTERM
 handling. Normal starts bootstrap a transient job from the data directory.
 **Start Server at Login** persists the same job in
-`~/Library/LaunchAgents/com.removent.daemon.plist`. Turning that option off removes
+`~/Library/LaunchAgents/com.alkinum.removent.daemon.plist`. Turning that option off removes
 future login registration without terminating the current service or session.
 **Show Menu Bar App at Login** is a separate, optional launch-once job; quitting
 the tray does not respawn it or stop the server.

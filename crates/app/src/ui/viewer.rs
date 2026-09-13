@@ -1306,35 +1306,40 @@ mod tests {
         cx.simulate_keystrokes("ctrl-cmd-i");
         cx.run_until_parked();
         let panel = cx.debug_bounds("viewer-info").unwrap();
-        cx.simulate_mouse_down(
-            point(px(800.), px(350.)),
-            MouseButton::Left,
-            Default::default(),
-        );
-        cx.simulate_mouse_move(panel.center(), MouseButton::Left, Default::default());
-        cx.simulate_mouse_up(panel.center(), MouseButton::Left, Default::default());
-        let events: Vec<_> = std::iter::from_fn(|| fixture.commands.try_recv().ok()).collect();
-        assert!(matches!(
-            events.first(),
-            Some(ControlMsg::MouseEvent {
-                kind: MouseKind::LeftDown,
-                buttons: 1,
-                ..
-            })
-        ));
-        assert!(matches!(
-            events.last(),
-            Some(ControlMsg::MouseEvent {
-                kind: MouseKind::LeftUp,
-                buttons: 0,
-                ..
-            })
-        ));
-        cx.update(|_, cx| {
-            fixture
-                .viewer
-                .update(cx, |view, _| assert_eq!(view.buttons, 0))
-        });
+        for (button, mask, down, up) in [
+            (MouseButton::Left, 1, MouseKind::LeftDown, MouseKind::LeftUp),
+            (
+                MouseButton::Right,
+                2,
+                MouseKind::RightDown,
+                MouseKind::RightUp,
+            ),
+            (
+                MouseButton::Middle,
+                4,
+                MouseKind::MiddleDown,
+                MouseKind::MiddleUp,
+            ),
+        ] {
+            cx.simulate_mouse_down(point(px(800.), px(350.)), button, Default::default());
+            cx.simulate_mouse_move(panel.center(), button, Default::default());
+            cx.simulate_mouse_up(panel.center(), button, Default::default());
+            let events: Vec<_> = std::iter::from_fn(|| fixture.commands.try_recv().ok()).collect();
+            assert!(matches!(
+                events.first(),
+                Some(ControlMsg::MouseEvent { kind, buttons, .. })
+                    if *kind == down && *buttons == mask
+            ));
+            assert!(matches!(
+                events.last(),
+                Some(ControlMsg::MouseEvent { kind, buttons: 0, .. }) if *kind == up
+            ));
+            cx.update(|_, cx| {
+                fixture
+                    .viewer
+                    .update(cx, |view, _| assert_eq!(view.buttons, 0))
+            });
+        }
     }
 
     #[gpui::test]

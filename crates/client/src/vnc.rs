@@ -204,8 +204,7 @@ pub async fn connect_vnc_with_progress(
                 .in_current_span(),
             );
             tasks.spawn(
-                input::write_commands(write_half, cmd_rx, signal_rx, dimensions, apple_ard)
-                    .in_current_span(),
+                input::write_commands(write_half, cmd_rx, signal_rx, dimensions).in_current_span(),
             );
             tasks.join_next().await;
             tasks.abort_all();

@@ -4,7 +4,7 @@ use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockDecrypt, KeyInit};
 use md5::{Digest, Md5};
 use num_bigint::BigUint;
-use removent_proto::KeyModifiers;
+use removent_proto::{ControlMsg, KeyModifiers, MouseKind, ScrollPhase};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::time::{Duration, timeout};
@@ -30,13 +30,110 @@ fn mac_virtual_keys_map_to_x11_keysyms() {
 }
 
 #[test]
-fn mouse_button_order_matches_rfb_and_ard() {
-    // Internal order is left/right/middle. RFB swaps the latter two;
-    // ARD keeps Apple's native order.
-    assert_eq!(rfb_button_mask(0b001, false), 0b001);
-    assert_eq!(rfb_button_mask(0b010, false), 0b100);
-    assert_eq!(rfb_button_mask(0b100, false), 0b010);
-    assert_eq!(rfb_button_mask(0b111, true), 0b111);
+fn mouse_button_order_matches_rfb() {
+    // Internal order is left/right/middle; RFB always swaps the latter two.
+    assert_eq!(rfb_button_mask(0b001), 0b001);
+    assert_eq!(rfb_button_mask(0b010), 0b100);
+    assert_eq!(rfb_button_mask(0b100), 0b010);
+    assert_eq!(rfb_button_mask(0b111), 0b111);
+}
+
+#[tokio::test]
+async fn pointer_packets_keep_rfb_button_order_with_standard_and_apple_banners() {
+    // RFC 6143 section 7.5.5: PointerEvent always uses left/middle/right
+    // bits. Apple's greeting must not switch these ordinary type-5 packets
+    // to the macOS event API's left/right/middle order.
+    for banner in [RFB_VERSION, ARD_VERSION] {
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            stream.write_all(banner).await.unwrap();
+            let mut version = [0; 12];
+            stream.read_exact(&mut version).await.unwrap();
+            assert_eq!(&version, RFB_VERSION);
+            stream.write_all(&[1, SEC_NONE]).await.unwrap();
+            assert_eq!(stream.read_u8().await.unwrap(), SEC_NONE);
+            stream.write_all(&0u32.to_be_bytes()).await.unwrap();
+            assert_eq!(stream.read_u8().await.unwrap(), 1);
+            let mut init = [0; 24];
+            init[..2].copy_from_slice(&320u16.to_be_bytes());
+            init[2..4].copy_from_slice(&200u16.to_be_bytes());
+            init[4..20].copy_from_slice(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]);
+            stream.write_all(&init).await.unwrap();
+            let mut setup = [0; 38];
+            stream.read_exact(&mut setup).await.unwrap();
+
+            // Keep the framebuffer stalled while observing the actual input
+            // socket: right-down/drag, scroll with right held, right-up,
+            // middle-click, then a left/right chord with separate releases.
+            for (mask, x, y) in [
+                (4, 10, 20),
+                (4, 11, 21),
+                (12, 11, 21),
+                (4, 11, 21),
+                (68, 11, 21),
+                (4, 11, 21),
+                (0, 11, 21),
+                (2, 11, 21),
+                (0, 11, 21),
+                (1, 11, 21),
+                (5, 11, 21),
+                (4, 11, 21),
+                (0, 11, 21),
+            ] {
+                let mut packet = [0; 6];
+                timeout(Duration::from_secs(2), stream.read_exact(&mut packet))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(packet, [5, mask, 0, x, 0, y], "banner: {banner:?}");
+            }
+        });
+        let session = connect_vnc(addr, "").await.unwrap();
+        for (index, (buttons, kind, x, y)) in [
+            (2, MouseKind::RightDown, 10., 20.),
+            (2, MouseKind::Moved, 11., 21.),
+            (0, MouseKind::RightUp, 11., 21.),
+            (4, MouseKind::MiddleDown, 11., 21.),
+            (0, MouseKind::MiddleUp, 11., 21.),
+            (1, MouseKind::LeftDown, 11., 21.),
+            (3, MouseKind::RightDown, 11., 21.),
+            (2, MouseKind::LeftUp, 11., 21.),
+            (0, MouseKind::RightUp, 11., 21.),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            session
+                .cmd_tx
+                .try_send(ControlMsg::MouseEvent {
+                    display_id: 0,
+                    x_px: x,
+                    y_px: y,
+                    buttons,
+                    kind,
+                })
+                .unwrap();
+            if index == 1 {
+                session
+                    .cmd_tx
+                    .try_send(ControlMsg::ScrollEvent {
+                        display_id: 0,
+                        dx_mm: 3.,
+                        dy_mm: -3.,
+                        phase: ScrollPhase::Changed,
+                    })
+                    .unwrap();
+            }
+        }
+        timeout(Duration::from_secs(3), server)
+            .await
+            .unwrap()
+            .unwrap();
+    }
 }
 
 #[test]
@@ -181,7 +278,7 @@ async fn client_handshake_and_raw_frame_roundtrip() {
 }
 
 #[tokio::test]
-async fn apple_ard_type30_handshake_and_raw_frame_roundtrip() {
+async fn apple_ard_type30_handshake_pointer_and_raw_frame_roundtrip() {
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
         .await
         .unwrap();
@@ -250,6 +347,13 @@ async fn apple_ard_type30_handshake_and_raw_frame_roundtrip() {
         assert_eq!(&setup[24..28], &0i32.to_be_bytes());
         assert_eq!(setup[28], 3); // FramebufferUpdateRequest
 
+        let mut click = [0; 12];
+        timeout(Duration::from_secs(2), stream.read_exact(&mut click))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(click, [5, 4, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0]);
+
         let mut update = vec![0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0];
         update.extend_from_slice(&[1, 2, 3, 255]);
         stream.write_all(&update).await.unwrap();
@@ -257,6 +361,18 @@ async fn apple_ard_type30_handshake_and_raw_frame_roundtrip() {
     let mut session = connect_vnc_with_credentials(addr, "alice", "secret")
         .await
         .unwrap();
+    for (buttons, kind) in [(2, MouseKind::RightDown), (0, MouseKind::RightUp)] {
+        session
+            .cmd_tx
+            .try_send(ControlMsg::MouseEvent {
+                display_id: 0,
+                x_px: 0.,
+                y_px: 0.,
+                buttons,
+                kind,
+            })
+            .unwrap();
+    }
     let frame = timeout(Duration::from_secs(1), session.decoded_bgra_rx.recv())
         .await
         .unwrap()

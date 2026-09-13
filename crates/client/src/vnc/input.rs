@@ -12,7 +12,6 @@ pub(super) async fn write_commands(
     mut cmd_rx: super::queue::InputReceiver,
     mut signal_rx: mpsc::Receiver<FrameSignal>,
     dimensions: Arc<RwLock<FrameSize>>,
-    apple_ard: bool,
 ) {
     let mut input = InputState::default();
     let mut burst = 0;
@@ -22,7 +21,7 @@ pub(super) async fn write_commands(
             cmd = cmd_rx.recv(), if burst < 32 => {
                 let Some(cmd) = cmd else { break };
                 let is_input = matches!(cmd.message, ControlMsg::MouseEvent { .. } | ControlMsg::KeyEvent { .. } | ControlMsg::ScrollEvent { .. });
-                if let Err(error) = write_command(&mut stream, cmd.message, &mut input, apple_ard).await {
+                if let Err(error) = write_command(&mut stream, cmd.message, &mut input).await {
                     tracing::warn!(%error, "VNC stream write failed");
                     break;
                 }
@@ -60,7 +59,6 @@ async fn write_command(
     stream: &mut (impl tokio::io::AsyncWrite + Unpin),
     cmd: ControlMsg,
     input: &mut InputState,
-    apple_ard: bool,
 ) -> io::Result<()> {
     match cmd {
         ControlMsg::MouseEvent {
@@ -69,11 +67,9 @@ async fn write_command(
             buttons,
             ..
         } => {
-            // ControlMsg uses Removent's left/right/middle bit order
-            // (1/2/4). Standard RFB uses left/middle/right (1/2/4), while
-            // Apple's ARD messages use the Removent/macOS order. Keep the
-            // native order for ARD and swap the latter two bits for RFB.
-            let mask = rfb_button_mask(buttons, apple_ard);
+            // This is an ordinary RFB PointerEvent, including after Apple
+            // authentication. Convert the internal order on every connection.
+            let mask = rfb_button_mask(buttons);
             input.buttons = mask;
             input.last_x = x_px.clamp(0.0, u16::MAX as f32) as u16;
             input.last_y = y_px.clamp(0.0, u16::MAX as f32) as u16;
@@ -152,14 +148,11 @@ async fn write_command(
     }
 }
 
-pub(super) fn rfb_button_mask(buttons: u8, apple_ard: bool) -> u8 {
-    if apple_ard {
-        // ARD uses left/right/middle (1/2/4), matching ControlMsg.
-        buttons & 0x07
-    } else {
-        // Standard RFB uses left/middle/right (1/2/4).
-        (buttons & 1) | ((buttons & 2) << 1) | ((buttons & 4) >> 1)
-    }
+pub(super) fn rfb_button_mask(buttons: u8) -> u8 {
+    // RFC 6143 section 7.5.5 uses left/middle/right (1/2/4), whereas
+    // ControlMsg uses left/right/middle (1/2/4). The Apple server banner and
+    // authentication method do not change the ordinary type-5 packet format.
+    (buttons & 1) | ((buttons & 2) << 1) | ((buttons & 4) >> 1)
 }
 
 pub(super) fn keysym_for_key(vk: u16, modifiers: KeyModifiers, unicode: Option<char>) -> u32 {
@@ -316,7 +309,6 @@ mod tests {
                         unicode,
                     },
                     &mut input,
-                    false,
                 )
                 .await
                 .unwrap();
@@ -344,7 +336,6 @@ mod tests {
                     unicode: Some(character),
                 },
                 &mut input,
-                false,
             )
             .await
             .unwrap();
@@ -366,7 +357,12 @@ mod tests {
 
     #[tokio::test]
     async fn scrolling_preserves_held_buttons_on_both_axes() {
-        for apple_ard in [false, true] {
+        for (buttons, held, kind) in [
+            (1, 1, removent_proto::MouseKind::LeftDown),
+            (2, 4, removent_proto::MouseKind::RightDown),
+            (4, 2, removent_proto::MouseKind::MiddleDown),
+            (3, 5, removent_proto::MouseKind::RightDown),
+        ] {
             let mut input = InputState::default();
             let mut bytes = Vec::new();
             write_command(
@@ -375,11 +371,10 @@ mod tests {
                     display_id: 0,
                     x_px: 10.,
                     y_px: 20.,
-                    buttons: 3,
-                    kind: removent_proto::MouseKind::RightDown,
+                    buttons,
+                    kind,
                 },
                 &mut input,
-                apple_ard,
             )
             .await
             .unwrap();
@@ -393,11 +388,9 @@ mod tests {
                     phase: removent_proto::ScrollPhase::Changed,
                 },
                 &mut input,
-                apple_ard,
             )
             .await
             .unwrap();
-            let held = if apple_ard { 3 } else { 5 };
             assert_eq!(bytes.len(), 24);
             for (packet, mask) in
                 bytes
@@ -434,7 +427,6 @@ mod tests {
                     phase: removent_proto::ScrollPhase::Changed,
                 },
                 &mut input,
-                false,
             )
             .await
             .unwrap();

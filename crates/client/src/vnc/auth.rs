@@ -90,7 +90,7 @@ pub(super) async fn handshake(
         }
     }
     // Apple Screen Sharing interoperates with the ordinary RFB ClientInit
-    // byte. The vendor banner is used only to select Apple auth/input quirks;
+    // byte. The vendor banner identifies Apple desktop initialization quirks;
     // sending private flag bits here makes strict servers reject the session.
     let ard_session = apple_ard;
     stream.write_all(&[1]).await?;

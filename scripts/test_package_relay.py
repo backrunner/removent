@@ -3,14 +3,26 @@ import hashlib
 import io
 import pathlib
 import struct
+import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
 
-from package_relay import PLATFORMS, asset_name, verify, verify_universal
+from package_relay import PLATFORMS, SIGNING_REQUIREMENT, asset_name, verify, verify_universal
 
 
 class ReleaseAssetTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "darwin", "Requires Apple's signing tools")
+    def test_signing_requirement_is_inline_and_rejects_another_signer(self):
+        with tempfile.TemporaryDirectory() as temp:
+            subprocess.run(["/usr/bin/csreq", "-r", SIGNING_REQUIREMENT, "-b",
+                            str(pathlib.Path(temp) / "requirement")], check=True, capture_output=True)
+        result = subprocess.run(["/usr/bin/codesign", "--verify", "--all-architectures", "--strict",
+                                 "-R", SIGNING_REQUIREMENT, "/usr/bin/true"], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("code failed to satisfy specified code requirement", result.stderr)
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)

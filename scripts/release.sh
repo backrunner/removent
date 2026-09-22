@@ -44,6 +44,6 @@ codesign --force --timestamp --options runtime --sign "$APPLE_SIGNING_IDENTITY" 
 python3 scripts/test_relay_launchd.py --live --binary "$RELAY_NOTARY_DIR/removent-relay"
 ditto -c -k --keepParent "$RELAY_NOTARY_DIR/removent-relay" "$RELAY_NOTARY_DIR/removent-relay.zip"
 scripts/notarize.sh "$RELAY_NOTARY_DIR/removent-relay.zip"
-codesign --verify --strict -R 'anchor apple generic and certificate leaf[subject.OU] = "PB8H83VL3Z"' "$RELAY_NOTARY_DIR/removent-relay"
+# The packager checks both architectures against the Developer ID requirement.
 python3 scripts/package_relay.py --version "v${VERSION}" --platform macos-universal --binary "$RELAY_NOTARY_DIR/removent-relay"
 echo "Release v${VERSION} verified and ready to publish."

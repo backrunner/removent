@@ -12,6 +12,13 @@ import tarfile
 import tempfile
 
 PLATFORMS = ("linux-x86_64", "linux-aarch64", "macos-universal")
+SIGNING_REQUIREMENT = ('=anchor apple generic and certificate leaf[subject.OU] = "PB8H83VL3Z" '
+                       'and certificate leaf[field.1.2.840.113635.100.6.1.13] exists')
+
+
+def verify_signature(binary):
+    subprocess.run(["codesign", "--verify", "--all-architectures", "--strict", "-R",
+                    SIGNING_REQUIREMENT, str(binary)], check=True)
 
 
 def verify_universal(binary):
@@ -84,14 +91,15 @@ def main():
                 with tarfile.open(args.directory / asset_name(args.version, "macos-universal"), "r:gz") as archive:
                     binary.write_bytes(archive.extractfile("removent-relay").read())
                 binary.chmod(0o755)
-                subprocess.run(["codesign", "--verify", "--strict", "-R",
-                                'anchor apple generic and certificate leaf[subject.OU] = "PB8H83VL3Z"', str(binary)], check=True)
+                verify_signature(binary)
         return
     if not args.platform or not args.binary:
         parser.error("Packaging requires --platform and --binary")
     output = subprocess.check_output([str(args.binary.resolve()), "--version"], text=True).strip()
     if output != f"removent-relay {args.version.removeprefix('v')}":
         raise ValueError("Binary version does not match the release tag")
+    if args.platform == "macos-universal":
+        verify_signature(args.binary)
     args.directory.mkdir(parents=True, exist_ok=True)
     name = asset_name(args.version, args.platform)
     artifact = args.directory / name

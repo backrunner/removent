@@ -2,7 +2,7 @@
 
 Relay 使用预编译 Rust 二进制，支持 Linux x86_64 / ARM64，以及 macOS 13+ 的 Apple Silicon / Intel。Linux 后台服务使用 systemd 247+（例如 Ubuntu 22.04+、Debian 12+），macOS 使用当前用户的 launchd LaunchAgent。目标机器不需要 Rust、Docker、Node 或 Python。
 
-> 安装器使用从 v0.1.1 开始的正式 GitHub Release 资产。指定版本若没有对应资产，安装会明确失败，保留已有安装。
+> 安装器使用从 v0.1.2 开始的正式 GitHub Release 资产。指定版本若没有对应资产，安装会明确失败，保留已有安装。
 
 ## Linux 安装
 
@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/in
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install_relay.sh -o install_relay.sh
-sh install_relay.sh --version v0.1.1 --no-setup
+sh install_relay.sh --version v0.1.2 --no-setup
 sudo removent-relay setup --address removent://relay.example.com:48700 --room office
 ```
 

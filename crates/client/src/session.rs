@@ -1352,7 +1352,7 @@ mod lifecycle_tests {
             tokio::sync::watch::channel(controller.lock().unwrap().state());
         let input = Arc::new(removent_host::RecorderInputSink::default());
         let (_commands, commands_rx) = mpsc::channel(4);
-        let (_keyframes, keyframes_rx) = mpsc::channel(4);
+        let (keyframes, keyframes_rx) = mpsc::channel(4);
         let deps = removent_host::ControlPumpDeps {
             conn: peer.conn.clone(),
             kf_tx: None,
@@ -1395,6 +1395,15 @@ mod lifecycle_tests {
         let degraded = controller.lock().unwrap().state();
         assert!(degraded.bitrate_kbps < 3000 && degraded.fps < 30);
         assert_eq!(degraded.scale, 1.);
+        // Cold encoders on virtualized Macs can leave the partial frame pending
+        // through another downgrade. Exercise that case before starting video.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while controller.lock().unwrap().state().bitrate_kbps >= degraded.bitrate_kbps {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("a sustained receiver stall must continue lowering the bitrate");
         for kind in [KeyKind::Down, KeyKind::Up] {
             session
                 .send(ControlMsg::KeyEvent {
@@ -1461,24 +1470,24 @@ mod lifecycle_tests {
             None,
             None,
         ));
-        let _producer = AbortOnDrop(tokio::spawn(async move {
-            let start = Instant::now();
-            let mut n = 0u8;
+        // Decode real cached-screen refreshes. Wall-clock capture/arrival jitter
+        // on a shared CI runner is not a deterministic healthy-network fixture.
+        // Keyframe requests keep receiver evidence fresh without inventing stats.
+        frames.send((raw, 1)).unwrap();
+        let _refreshes = AbortOnDrop(tokio::spawn(async move {
+            let _keep_capture_open = frames;
             loop {
-                n = n.wrapping_add(1);
-                if frames
-                    .send((
-                        [n, 80, 160, 255].repeat(320 * 240),
-                        start.elapsed().as_micros() as i64 + 1,
-                    ))
-                    .is_err()
-                {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                if keyframes.send(()).await.is_err() {
                     break;
                 }
-                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }));
-        tokio::time::timeout(Duration::from_secs(12), async {
+        // Recovery is an increase from the actual floor, not necessarily above
+        // the first downgrade: startup may have caused several more reductions,
+        // and each healthy upgrade deliberately takes five seconds.
+        let mut lowest_bitrate = controller.lock().unwrap().state().bitrate_kbps;
+        let recovery = tokio::time::timeout(Duration::from_secs(12), async {
             loop {
                 let frame = session
                     .decoded_bgra_rx
@@ -1486,13 +1495,20 @@ mod lifecycle_tests {
                     .await
                     .expect("video remains live");
                 assert_eq!((frame.width, frame.height), (320, 240));
-                if controller.lock().unwrap().state().bitrate_kbps > degraded.bitrate_kbps {
+                let bitrate = controller.lock().unwrap().state().bitrate_kbps;
+                lowest_bitrate = lowest_bitrate.min(bitrate);
+                if bitrate > lowest_bitrate {
                     break;
                 }
             }
         })
-        .await
-        .expect("healthy decoded traffic must permit recovery");
+        .await;
+        assert!(
+            recovery.is_ok(),
+            "healthy decoded traffic must permit recovery: first={degraded:?}, \
+             lowest_bitrate={lowest_bitrate}, current={:?}",
+            controller.lock().unwrap().state()
+        );
         cancel.cancel();
     }
 

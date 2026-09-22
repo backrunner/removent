@@ -22,7 +22,7 @@ To review the script or install a specific version first:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install_relay.sh -o install_relay.sh
-sh install_relay.sh --version v0.1.1 --no-setup
+sh install_relay.sh --version v0.1.2 --no-setup
 sudo removent-relay setup --address removent://relay.example.com:48700
 ```
 

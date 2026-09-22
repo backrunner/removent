@@ -235,7 +235,7 @@ are in English.
 
 ## Releasing (maintainers)
 
-Tag a version matching `Cargo.toml` (`v0.1.1`) and push — `.github/workflows/release.yml`
+Tag a version matching `Cargo.toml` (`v0.1.2`) and push — `.github/workflows/release.yml`
 builds, Developer-ID signs, notarizes, and attaches the DMG/zip/`latest.json` to a GitHub
 release. Required secrets are documented at the top of that workflow file. To cut a release
 locally, set `APPLE_SIGNING_IDENTITY` plus notarization credentials

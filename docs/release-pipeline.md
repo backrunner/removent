@@ -1,6 +1,6 @@
 # Removent 发布指南
 
-首发版本：`0.1.1`，协议 v1，桌面 App 支持 Apple Silicon、macOS 13+；独立 relay 同时支持 Linux x86_64 / ARM64 和 macOS Universal。分发采用 Developer ID 签名、公证的 GitHub Releases；这不是 Mac App Store 提交流程。商店提交还需要独立评估沙盒、权限及审核要求，并使用商店更新渠道。
+首发版本：`0.1.2`，协议 v1，桌面 App 支持 Apple Silicon、macOS 13+；独立 relay 同时支持 Linux x86_64 / ARM64 和 macOS Universal。分发采用 Developer ID 签名、公证的 GitHub Releases；这不是 Mac App Store 提交流程。商店提交还需要独立评估沙盒、权限及审核要求，并使用商店更新渠道。
 
 ```mermaid
 flowchart LR
@@ -37,7 +37,7 @@ bash scripts/release.sh
 
 不要把私钥、p12、专用密码或 API key 提交到 Git。可通过 `xcrun notarytool store-credentials` 交互式建立 Keychain profile。也支持 `APPLE_API_KEY_PATH / APPLE_API_KEY_ID / APPLE_API_ISSUER` 或 `APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID`。
 
-`RELEASE_BUILD_NUMBER` 是 Apple 的正整数构建号，应随发布递增；营销版本是 `0.1.1`，完整 SemVer 保存在 `RemoventReleaseVersion` 并用于更新验证。CI 使用 workflow run number。
+`RELEASE_BUILD_NUMBER` 是 Apple 的正整数构建号，应随发布递增；营销版本是 `0.1.2`，完整 SemVer 保存在 `RemoventReleaseVersion` 并用于更新验证。CI 使用 workflow run number。
 
 发布前提交源码并创建相同版本 tag。`scripts/publish_release.sh` 要求工作区干净、本地 tag / 远端 tag / HEAD 一致，并重新验证所有产物。CI 在 push `v*` tag 后自动发布；推送 tag 前应先配置并验证所有签名和公证凭据。不要同时运行本地发布与 CI 发布。
 
@@ -51,7 +51,7 @@ bash scripts/publish_release.sh
 
 同一个稳定 tag 还必须包含 `removent-relay-vX.Y.Z-{linux-x86_64,linux-aarch64,macos-universal}.tar.gz`，每个包有独立的 `.sha256` 文件。Linux 使用原生 x86_64 / ARM64 runner 构建静态 musl 二进制，检查不依赖动态 ELF 解释器，运行 relay 测试与真实 systemd 生命周期验收。macOS relay 编译 ARM64 与 x86_64 两个 target，合并 Universal 二进制，再由 `scripts/release.sh` 完成 Developer ID 签名、真实 launchd 验收和公证后打包。构建机器需通过 rustup 安装 `aarch64-apple-darwin` 与 `x86_64-apple-darwin` 标准库；本机发布仍在 Apple Silicon 上运行。
 
-`scripts/package_relay.py` 校验版本、文件内容、架构与校验和。发布工作流收齐全部平台资产至 `dist/relay` 后，`scripts/publish_release.sh` 才会将它们与 App 一起发布；缺失资产会失败。本机发布时必须先取回相同 tag 的两个 Linux 包及校验文件并放入 `dist/relay`，不能用 macOS 产物替代。可执行 `python3 scripts/package_relay.py --version v0.1.1 --verify` 预先检查。
+`scripts/package_relay.py` 校验版本、文件内容、架构与校验和。发布工作流收齐全部平台资产至 `dist/relay` 后，`scripts/publish_release.sh` 才会将它们与 App 一起发布；缺失资产会失败。本机发布时必须先取回相同 tag 的两个 Linux 包及校验文件并放入 `dist/relay`，不能用 macOS 产物替代。可执行 `python3 scripts/package_relay.py --version v0.1.2 --verify` 预先检查。
 
 用户通过 `scripts/install_relay.sh` 下载已发布二进制，服务器不编译源码。安装器只负责校验和安装；配置与启停由 `removent-relay` 原生 CLI 完成。安装与更新保留身份及凭据，更新后由用户显式 restart。
 

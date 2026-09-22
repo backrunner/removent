@@ -192,7 +192,7 @@ Removent 在启动 30 秒后、之后每 24 小时检查新版本，使用 GitHu
 
 ## 发布（维护者）
 
-推送与 `Cargo.toml` 版本一致的 tag（如 `v0.1.1`）即可触发
+推送与 `Cargo.toml` 版本一致的 tag（如 `v0.1.2`）即可触发
 `.github/workflows/release.yml`：构建、Developer ID 签名、公证，并把 DMG/zip/
 `latest.json` 附加到 GitHub release。所需 secrets 见该 workflow 文件顶部注释。本地发布：
 设置 `APPLE_SIGNING_IDENTITY` 和公证凭证（见 `scripts/notarize.sh`）后运行

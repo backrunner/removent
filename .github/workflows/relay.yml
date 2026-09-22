@@ -46,6 +46,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: relay-${{ matrix.target }}
+          cache-on-failure: true
       - run: sudo apt-get update && sudo apt-get install -y musl-tools cmake
       - run: cargo test --locked -p removent-relay
       - run: cargo clippy --locked -p removent-relay --all-targets -- -D warnings
@@ -54,7 +55,6 @@ jobs:
         env:
           RELAY_TARGET: ${{ matrix.target }}
           CC: musl-gcc
-          RUSTFLAGS: -C linker=musl-gcc
         run: |
           cargo test --locked --release -p removent-relay --target "$RELAY_TARGET"
           cargo build --locked --release -p removent-relay --target "$RELAY_TARGET"

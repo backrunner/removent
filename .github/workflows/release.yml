@@ -64,7 +64,6 @@ jobs:
         env:
           RELAY_TARGET: ${{ matrix.target }}
           CC: musl-gcc
-          RUSTFLAGS: -C linker=musl-gcc
         run: |
           cargo test --locked --release -p removent-relay --target "$RELAY_TARGET"
           cargo build --locked --release -p removent-relay --target "$RELAY_TARGET"

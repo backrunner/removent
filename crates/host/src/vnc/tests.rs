@@ -68,3 +68,81 @@ fn raw_frame_honours_client_16_bit_big_endian_format() {
     send_frame_message(&mut packet, &frame, 0, 0, 1, 1, format);
     assert_eq!(&packet[16..], &[0xf8, 0x1f]);
 }
+
+#[test]
+fn raw_frame_supports_eight_bit_true_colour() {
+    let format = PixelFormat {
+        bits_per_pixel: 8,
+        depth: 8,
+        red_max: 7,
+        green_max: 7,
+        blue_max: 3,
+        red_shift: 0,
+        green_shift: 3,
+        blue_shift: 6,
+        ..default_pixel_format()
+    };
+    assert!(format.supported());
+    let frame = Frame {
+        data: vec![255, 0, 255, 255],
+        width: 1,
+        height: 1,
+    };
+    let mut packet = Vec::new();
+    send_frame_message(&mut packet, &frame, 0, 0, 1, 1, format);
+    assert_eq!(&packet[16..], &[0xc7]);
+}
+
+#[tokio::test]
+async fn server_handshake_supports_all_standard_versions() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    for version in [b"RFB 003.003\n", b"RFB 003.007\n", b"RFB 003.008\n"] {
+        for password in ["", "password"] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                protocol::perform_handshake(&mut stream, password.as_bytes())
+                    .await
+                    .unwrap();
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                let mut stream = TcpStream::connect(addr).await.unwrap();
+                let mut greeting = [0; 12];
+                stream.read_exact(&mut greeting).await.unwrap();
+                stream.write_all(version).await.unwrap();
+                let security = if password.is_empty() { 1 } else { 2 };
+                if version == b"RFB 003.003\n" {
+                    assert_eq!(stream.read_u32().await.unwrap(), security as u32);
+                } else {
+                    assert_eq!(stream.read_u8().await.unwrap(), 1);
+                    assert_eq!(stream.read_u8().await.unwrap(), security);
+                    stream.write_u8(security).await.unwrap();
+                }
+                if security == 2 {
+                    let mut challenge = [0; 16];
+                    stream.read_exact(&mut challenge).await.unwrap();
+                    stream
+                        .write_all(&vnc_response(password.as_bytes(), &challenge))
+                        .await
+                        .unwrap();
+                }
+                if version == RFB_VERSION || security == 2 {
+                    assert_eq!(stream.read_u32().await.unwrap(), 0);
+                }
+                stream.write_u8(1).await.unwrap();
+                let mut init = [0; 24];
+                stream.read_exact(&mut init).await.unwrap();
+                assert!(u16::from_be_bytes([init[0], init[1]]) > 0);
+                assert_eq!(init[4], 32);
+                let mut name =
+                    vec![0; u32::from_be_bytes(init[20..24].try_into().unwrap()) as usize];
+                stream.read_exact(&mut name).await.unwrap();
+                assert_eq!(name, b"Removent VNC");
+            })
+            .await
+            .unwrap();
+            server.await.unwrap();
+        }
+    }
+}

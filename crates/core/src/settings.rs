@@ -16,6 +16,11 @@ pub struct Settings {
     /// Service master switch (toggleable from the menu bar).
     pub host_enabled: bool,
     pub host_port: u16,
+    /// Opt-in legacy WindowServer capture for lock/login-window compatibility.
+    /// Video/input only; requires signed-app validation on the target macOS.
+    pub window_server_capture: bool,
+    /// Refuse unknown/untrusted device certificates before RVP negotiation.
+    pub paired_only: bool,
     /// Optional legacy RFB/VNC listener for Apple Remote Desktop and other
     /// standard VNC clients. Disabled by default because RFB is LAN-only and
     /// its password authentication is intentionally legacy-compatible.
@@ -78,6 +83,8 @@ impl Default for Settings {
             admission: AdmissionMode::AlwaysAsk,
             host_enabled: true,
             host_port: removent_proto::DEFAULT_PORT,
+            window_server_capture: false,
+            paired_only: false,
             vnc_enabled: false,
             vnc_port: 5900,
             vnc_username: String::new(),

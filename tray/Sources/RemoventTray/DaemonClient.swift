@@ -17,6 +17,10 @@ struct Session: Codable, Equatable {
 
 struct StatusResponse: Codable, Equatable {
     let running: Bool
+    let host_ready: Bool?
+    let host_error: String?
+    let relay_connected: Bool?
+    let relay_error: String?
     let port: Int
     let device_name: String
     let fp_short: String

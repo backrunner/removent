@@ -102,6 +102,7 @@ async fn cmd_daemon(action: &str) -> anyhow::Result<()> {
 
 struct PingArgs {
     target: String,
+    relay_profile: Option<std::path::PathBuf>,
     pin: Option<String>,
     count: u32,
     timeout: Duration,
@@ -110,6 +111,7 @@ struct PingArgs {
 
 fn parse_args(raw: &[String]) -> anyhow::Result<PingArgs> {
     let mut target = None;
+    let mut relay_profile = None;
     let mut pin = None;
     let mut count = 4u32;
     let mut timeout = 10u64;
@@ -123,7 +125,11 @@ fn parse_args(raw: &[String]) -> anyhow::Result<PingArgs> {
                 .context(t!("args.missing_value", arg = arg))
                 .map(String::as_str)
         };
-        if let Some(v) = inline("--pin=") {
+        if let Some(v) = inline("--relay-profile=") {
+            relay_profile = Some(std::path::PathBuf::from(v));
+        } else if arg == "--relay-profile" {
+            relay_profile = Some(std::path::PathBuf::from(next_val()?));
+        } else if let Some(v) = inline("--pin=") {
             pin = Some(v.to_string());
         } else if arg == "--pin" {
             pin = Some(next_val()?.to_string());
@@ -145,8 +151,19 @@ fn parse_args(raw: &[String]) -> anyhow::Result<PingArgs> {
             bail!(t!("args.unrecognized", arg = arg));
         }
     }
+    anyhow::ensure!(
+        target.is_some() != relay_profile.is_some(),
+        "Provide a target or --relay-profile FILE"
+    );
+    if target
+        .as_ref()
+        .is_some_and(|t| t.contains("://") && !t.starts_with("removent://"))
+    {
+        bail!("Use removent://host:port");
+    }
     Ok(PingArgs {
-        target: target.context(t!("args.missing_target"))?,
+        target: target.unwrap_or_default(),
+        relay_profile,
         pin,
         count: count.max(1),
         timeout: Duration::from_secs(timeout.max(1)),
@@ -158,6 +175,17 @@ fn parse_args(raw: &[String]) -> anyhow::Result<PingArgs> {
 /// name/short-fingerprint/instance-name. Multiple simultaneous matches are an
 /// ambiguity error instead of silently picking the first one.
 async fn resolve_target(target: &str, timeout: Duration) -> anyhow::Result<SocketAddr> {
+    if target.starts_with("removent://") {
+        let endpoint = removent_core::removent_uri::RemoventEndpoint::parse(target)
+            .map_err(anyhow::Error::msg)?;
+        return tokio::time::timeout(
+            timeout,
+            tokio::net::lookup_host((endpoint.host.as_str(), endpoint.port)),
+        )
+        .await??
+        .next()
+        .context("No addresses found for Removent host");
+    }
     if let Ok(addr) = target.parse::<SocketAddr>() {
         return Ok(addr);
     }
@@ -380,12 +408,34 @@ async fn cmd_ping(args: PingArgs) -> anyhow::Result<()> {
     let paths = DataPaths::resolve();
     let id = identity::load_or_create(&paths, &args.name).context(t!("error.load_identity"))?;
 
-    let addr = resolve_target(&args.target, args.timeout).await?;
+    let mut expected_host = None;
+    let relay = if let Some(profile) = &args.relay_profile {
+        let config = removent_relay::config::TunnelConfig::load(profile)?;
+        expected_host = Some(
+            removent_relay::config::decode_secret(&config.host_fingerprint)
+                .context("Relay profile requires host_fingerprint")?,
+        );
+        Some(removent_relay::client::ClientBridge::start(&config, &id).await?)
+    } else {
+        None
+    };
+    let addr = if let Some(relay) = &relay {
+        relay.address
+    } else {
+        resolve_target(&args.target, args.timeout).await?
+    };
 
     let (ep, _pin_state) = make_client_endpoint(
-        SocketAddr::from(([0, 0, 0, 0], 0)),
+        if addr.is_ipv6() {
+            SocketAddr::from(([0u16; 8], 0))
+        } else {
+            SocketAddr::from(([0, 0, 0, 0], 0))
+        },
         &id,
-        PinState::new([], true),
+        match expected_host {
+            Some(pin) => PinState::new([pin], false),
+            None => PinState::new([], true),
+        },
     )
     .map_err(|e| anyhow::anyhow!(t!("error.create_endpoint", err = e.to_string())))?;
 
@@ -539,6 +589,17 @@ async fn main() -> anyhow::Result<()> {
 
     let raw: Vec<String> = std::env::args().skip(1).collect();
     match raw.first().map(String::as_str) {
+        Some("identity") => {
+            let identity = identity::load_or_create(&paths, &settings.device_name)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "certificate_fingerprint": identity.fingerprint_hex(),
+                    "public_key": hex::encode(identity.verifying_key().as_bytes()),
+                }))?
+            );
+            Ok(())
+        }
         Some("ping") => cmd_ping(parse_args(&raw[1..])?).await,
         Some("daemon") => {
             let action = raw.get(1).map(String::as_str).unwrap_or("status");
@@ -552,6 +613,45 @@ async fn main() -> anyhow::Result<()> {
             eprintln!("{}\n", t!("error.unknown_subcommand", cmd = other));
             print!("{}", t!("usage"));
             std::process::exit(2);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_profile_and_native_address_are_exclusive() {
+        let parse =
+            |values: &[&str]| parse_args(&values.iter().map(|v| v.to_string()).collect::<Vec<_>>());
+        let args = parse(&["--relay-profile", "/private/office.toml", "--count", "20"]).unwrap();
+        assert_eq!(
+            args.relay_profile.unwrap(),
+            std::path::PathBuf::from("/private/office.toml")
+        );
+        assert_eq!(args.count, 20);
+        assert!(parse(&["removent://localhost:48688"]).is_ok());
+        for bad in [
+            vec![],
+            vec!["relay://office"],
+            vec!["quic://localhost:48688"],
+            vec!["wss://localhost:443"],
+            vec!["--relay-profile"],
+            vec!["localhost", "--relay-profile", "office.toml"],
+        ] {
+            assert!(parse(&bad).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn native_uri_resolves_loopback_without_discovery() {
+        for target in ["removent://127.0.0.1:48688", "removent://[::1]:48688"] {
+            let address = resolve_target(target, Duration::from_secs(1))
+                .await
+                .unwrap();
+            assert!(address.ip().is_loopback());
+            assert_eq!(address.port(), 48688);
         }
     }
 }

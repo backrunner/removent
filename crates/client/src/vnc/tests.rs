@@ -63,8 +63,7 @@ async fn pointer_packets_keep_rfb_button_order_with_standard_and_apple_banners()
             init[2..4].copy_from_slice(&200u16.to_be_bytes());
             init[4..20].copy_from_slice(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]);
             stream.write_all(&init).await.unwrap();
-            let mut setup = [0; 38];
-            stream.read_exact(&mut setup).await.unwrap();
+            let _ = read_client_setup(&mut stream).await;
 
             // Keep the framebuffer stalled while observing the actual input
             // socket: right-down/drag, scroll with right held, right-up,
@@ -177,9 +176,12 @@ fn apple_security_prefers_dh_when_account_credentials_are_present() {
         choose_security_type(&[SEC_NONE, SEC_ARD], "alice", b"pw").unwrap(),
         SEC_ARD
     );
+    // Type 35 is not the type-30 DH protocol. Never select an unimplemented
+    // method and then stall waiting for a challenge that will not arrive.
+    assert!(choose_security_type(&[SEC_ARD_MACOS], "alice", b"pw").is_err());
     assert_eq!(
-        choose_security_type(&[SEC_NONE, SEC_ARD_MACOS], "alice", b"pw").unwrap(),
-        SEC_ARD_MACOS
+        choose_security_type(&[SEC_ARD_MACOS, SEC_VNC_AUTH], "alice", b"pw").unwrap(),
+        SEC_VNC_AUTH
     );
     assert_eq!(
         choose_security_type(&[SEC_VNC_AUTH, SEC_ARD], "", b"pw").unwrap(),
@@ -211,6 +213,75 @@ fn rfb_version_negotiation_falls_back_to_supported_wire_versions() {
         Some(RFB_VERSION.as_slice())
     );
     assert!(negotiated_version(b"not a vnc!!!").is_none());
+    assert!(negotiated_version(b"RFB 003x008\n").is_none());
+    assert!(negotiated_version(b"RFB 003.008x").is_none());
+}
+
+#[tokio::test]
+async fn standard_versions_and_security_methods_interoperate() {
+    for version in [b"RFB 003.003\n", b"RFB 003.007\n", b"RFB 003.008\n"] {
+        for security in [SEC_NONE, SEC_VNC_AUTH] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                stream.write_all(version).await.unwrap();
+                let mut reply = [0; 12];
+                stream.read_exact(&mut reply).await.unwrap();
+                assert_eq!(&reply, version);
+                if version == b"RFB 003.003\n" {
+                    stream.write_u32(u32::from(security)).await.unwrap();
+                } else {
+                    stream.write_all(&[1, security]).await.unwrap();
+                    assert_eq!(stream.read_u8().await.unwrap(), security);
+                }
+                if security == SEC_VNC_AUTH {
+                    let challenge = *b"0123456789abcdef";
+                    stream.write_all(&challenge).await.unwrap();
+                    let mut response = [0; 16];
+                    stream.read_exact(&mut response).await.unwrap();
+                    assert_eq!(response, vnc_response(b"password", &challenge));
+                }
+                if security != SEC_NONE || version == RFB_VERSION {
+                    stream.write_u32(0).await.unwrap();
+                }
+                assert_eq!(stream.read_u8().await.unwrap(), 1);
+                let mut init = [0; 24];
+                init[1] = 1;
+                init[3] = 1;
+                stream.write_all(&init).await.unwrap();
+                read_client_setup(&mut stream).await;
+            });
+            let session = timeout(Duration::from_secs(2), connect_vnc(addr, "password")).await;
+            assert!(
+                matches!(session, Ok(Ok(_))),
+                "{version:?}, security {security}"
+            );
+            server.await.unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn legacy_security_type_cannot_truncate_to_none() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        stream.write_all(b"RFB 003.003\n").await.unwrap();
+        let mut reply = [0; 12];
+        stream.read_exact(&mut reply).await.unwrap();
+        stream.write_u32(257).await.unwrap();
+        // Unknown u32 type 257 must not become None (1) and emit ClientInit.
+        assert_eq!(stream.read(&mut [0]).await.unwrap(), 0);
+    });
+    assert!(matches!(
+        timeout(Duration::from_secs(2), connect_vnc(addr, ""))
+            .await
+            .unwrap(),
+        Err(VncError::Protocol(_))
+    ));
+    server.await.unwrap();
 }
 
 #[test]
@@ -243,8 +314,7 @@ async fn client_handshake_and_raw_frame_roundtrip() {
         init[3] = 1;
         init[4..20].copy_from_slice(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]);
         stream.write_all(&init).await.unwrap();
-        let mut setup = [0u8; 38];
-        stream.read_exact(&mut setup).await.unwrap();
+        let _ = read_client_setup(&mut stream).await;
         let mut update = vec![0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0];
         update.extend_from_slice(&[1, 2, 3, 255]);
         stream.write_all(&update).await.unwrap();
@@ -340,12 +410,8 @@ async fn apple_ard_type30_handshake_pointer_and_raw_frame_roundtrip() {
         stream.write_all(&init).await.unwrap();
         stream.write_all(b"ARD").await.unwrap();
 
-        let mut setup = vec![0u8; 38];
-        stream.read_exact(&mut setup).await.unwrap();
-        assert_eq!(setup[0], 0); // SetPixelFormat
-        assert_eq!(setup[20], 2); // SetEncodings
-        assert_eq!(&setup[24..28], &0i32.to_be_bytes());
-        assert_eq!(setup[28], 3); // FramebufferUpdateRequest
+        let request = read_client_setup(&mut stream).await;
+        assert_eq!(request[0], 3); // FramebufferUpdateRequest
 
         let mut click = [0; 12];
         timeout(Duration::from_secs(2), stream.read_exact(&mut click))
@@ -440,14 +506,10 @@ async fn apple_ard_session_select_and_zero_size_frame_roundtrip() {
             .unwrap();
 
         // Standard SetPixelFormat, SetEncodings, then the safe max-size
-        // probe request (38 bytes total).
-        let mut setup = vec![0u8; 38];
-        stream.read_exact(&mut setup).await.unwrap();
-        assert_eq!(setup[0], 0);
-        assert_eq!(setup[20], 2);
-        assert_eq!(setup[28], 3);
-        assert_eq!(&setup[34..36], &u16::MAX.to_be_bytes());
-        assert_eq!(&setup[36..38], &u16::MAX.to_be_bytes());
+        // probe request.
+        let request = read_client_setup(&mut stream).await;
+        assert_eq!(&request[6..8], &u16::MAX.to_be_bytes());
+        assert_eq!(&request[8..10], &u16::MAX.to_be_bytes());
 
         let mut update = vec![
             0, 0, 0, 1, // FramebufferUpdate + one rectangle
@@ -493,8 +555,7 @@ async fn closing_command_channel_closes_frames_while_server_stays_open() {
         init[3] = 1;
         init[4..20].copy_from_slice(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]);
         stream.write_all(&init).await.unwrap();
-        let mut setup = [0u8; 38];
-        stream.read_exact(&mut setup).await.unwrap();
+        let _ = read_client_setup(&mut stream).await;
         let mut update = vec![0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0];
         update.extend_from_slice(&[1, 2, 3, 255]);
         stream.write_all(&update).await.unwrap();
@@ -542,8 +603,7 @@ async fn key_burst_reaches_server_before_a_stalled_4k_update_finishes() {
         init[2..4].copy_from_slice(&2160u16.to_be_bytes());
         init[4..20].copy_from_slice(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]);
         stream.write_all(&init).await.unwrap();
-        let mut setup = [0; 38];
-        stream.read_exact(&mut setup).await.unwrap();
+        let _ = read_client_setup(&mut stream).await;
         let mut update = vec![0, 0, 0, 1, 0, 0, 0, 0];
         update.extend_from_slice(&3840u16.to_be_bytes());
         update.extend_from_slice(&2160u16.to_be_bytes());
@@ -582,7 +642,10 @@ async fn key_burst_reaches_server_before_a_stalled_4k_update_finishes() {
         }
     }
     timeout(Duration::from_secs(2), async {
-        while session.cmd_tx.snapshot().sent < 1000 {
+        // Reader and writer are independent tasks. Draining the input writer
+        // does not imply the reader has been scheduled for its first bytes.
+        while session.cmd_tx.snapshot().sent < 1000 || session.stats.snapshot().received_bytes == 0
+        {
             tokio::task::yield_now().await;
         }
     })
@@ -621,4 +684,209 @@ async fn stalled_server_greeting_reports_its_stage_and_closes_socket() {
         .await
         .unwrap()
         .unwrap();
+}
+
+async fn read_client_setup(stream: &mut TcpStream) -> [u8; 10] {
+    let mut format = [0; 20];
+    stream.read_exact(&mut format).await.unwrap();
+    assert_eq!(format[0], 0);
+    assert_eq!(&format[4..8], &[32, 24, 0, 1]);
+    assert_eq!(stream.read_u8().await.unwrap(), 2);
+    stream.read_u8().await.unwrap();
+    let count = stream.read_u16().await.unwrap();
+    let mut encodings = Vec::new();
+    for _ in 0..count {
+        encodings.push(stream.read_i32().await.unwrap());
+    }
+    for supported in [0, 1, 5, -223, -308, -224] {
+        assert!(encodings.contains(&supported));
+    }
+    let mut request = [0; 10];
+    stream.read_exact(&mut request).await.unwrap();
+    assert_eq!(&request[..2], &[3, 0]);
+    request
+}
+
+async fn serve_none(stream: &mut TcpStream, banner: &[u8; 12], width: u16, height: u16) {
+    stream.write_all(banner).await.unwrap();
+    let mut reply = [0; 12];
+    stream.read_exact(&mut reply).await.unwrap();
+    stream.write_all(&[1, 1]).await.unwrap();
+    assert_eq!(stream.read_u8().await.unwrap(), 1);
+    stream.write_u32(0).await.unwrap();
+    assert_eq!(stream.read_u8().await.unwrap(), 1);
+    let mut init = [0; 24];
+    init[..2].copy_from_slice(&width.to_be_bytes());
+    init[2..4].copy_from_slice(&height.to_be_bytes());
+    stream.write_all(&init).await.unwrap();
+    read_client_setup(stream).await;
+}
+
+fn update_rect(width: u16, height: u16, encoding: i32, payload: &[u8]) -> Vec<u8> {
+    let mut update = vec![0, 0, 0, 1, 0, 0, 0, 0];
+    update.extend_from_slice(&width.to_be_bytes());
+    update.extend_from_slice(&height.to_be_bytes());
+    update.extend_from_slice(&encoding.to_be_bytes());
+    update.extend_from_slice(payload);
+    update
+}
+
+#[tokio::test]
+async fn apple_empty_updates_and_resize_continue_requesting_pixels() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        serve_none(&mut stream, ARD_VERSION, 0, 0).await;
+        stream.write_all(&[0, 0, 0, 0]).await.unwrap();
+        let mut request = [0; 10];
+        timeout(Duration::from_secs(2), stream.read_exact(&mut request))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(request, [3, 0, 0, 0, 0, 0, 255, 255, 255, 255]);
+        // Hextile can also supply the first inferred Apple framebuffer.
+        stream
+            .write_all(&update_rect(2, 1, 5, &[2, 1, 2, 3, 0]))
+            .await
+            .unwrap();
+        stream.read_exact(&mut request).await.unwrap();
+        assert_eq!(request, [3, 0, 0, 0, 0, 0, 0, 2, 0, 1]);
+        stream
+            .write_all(&update_rect(3, 2, -223, &[]))
+            .await
+            .unwrap();
+        stream.read_exact(&mut request).await.unwrap();
+        assert_eq!(request, [3, 0, 0, 0, 0, 0, 0, 3, 0, 2]);
+        stream
+            .write_all(&update_rect(3, 2, 5, &[2, 7, 8, 9, 0]))
+            .await
+            .unwrap();
+        stream.read_exact(&mut request).await.unwrap();
+        assert_eq!(request, [3, 1, 0, 0, 0, 0, 0, 3, 0, 2]);
+    });
+    let mut session = connect_vnc(addr, "").await.unwrap();
+    let final_frame = timeout(Duration::from_secs(3), async {
+        loop {
+            let frame = session.decoded_bgra_rx.recv().await.unwrap();
+            if frame.width == 3 && frame.data == [7, 8, 9, 255].repeat(6) {
+                break frame;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(final_frame.height, 2);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn malformed_frame_surfaces_error_and_closes_both_socket_halves() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        serve_none(&mut stream, RFB_VERSION, 1, 1).await;
+        stream.write_all(&update_rect(2, 1, 0, &[])).await.unwrap();
+        assert_eq!(
+            timeout(Duration::from_secs(2), stream.read(&mut [0]))
+                .await
+                .unwrap()
+                .unwrap(),
+            0
+        );
+    });
+    let mut session = connect_vnc(addr, "").await.unwrap();
+    assert!(
+        timeout(Duration::from_secs(2), session.decoded_bgra_rx.recv())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let error = (&mut session.completion).await.unwrap().unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires REMOVENT_LIBVNCSERVER_FIXTURE built from tests/fixtures/libvncserver.c"]
+async fn independent_libvncserver_interoperability() {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let fixture = std::env::var("REMOVENT_LIBVNCSERVER_FIXTURE").expect("fixture executable path");
+    for version in [3, 7, 8] {
+        for auth in [false, true] {
+            timeout(Duration::from_secs(10), async {
+                let reserve = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let addr = reserve.local_addr().unwrap();
+                drop(reserve);
+                let mut child = tokio::process::Command::new(&fixture)
+                    .args([
+                        addr.port().to_string(),
+                        version.to_string(),
+                        u8::from(auth).to_string(),
+                    ])
+                    .kill_on_drop(true)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .unwrap();
+                let mut output = BufReader::new(child.stdout.take().unwrap()).lines();
+                assert_eq!(output.next_line().await.unwrap().as_deref(), Some("READY"));
+                let mut session = connect_vnc(addr, if auth { "interop-password" } else { "" })
+                    .await
+                    .unwrap();
+                let frame = session.decoded_bgra_rx.recv().await.unwrap();
+                assert_eq!((frame.width, frame.height), (64, 48));
+                let at = (40 * 64 + 40) * 4;
+                assert_eq!(&frame.data[at..at + 4], &[40, 40, 123, 255]);
+                session
+                    .cmd_tx
+                    .send(ControlMsg::MouseEvent {
+                        display_id: 0,
+                        x_px: 12.,
+                        y_px: 24.,
+                        buttons: 2,
+                        kind: MouseKind::RightDown,
+                    })
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    output.next_line().await.unwrap().as_deref(),
+                    Some("POINTER 4 12 24 ENCODING 5")
+                );
+                let key = |character| ControlMsg::KeyEvent {
+                    vk_code: u16::MAX,
+                    modifiers: KeyModifiers::empty(),
+                    kind: removent_proto::KeyKind::Down,
+                    unicode: Some(character),
+                };
+                session.cmd_tx.send(key('c')).await.unwrap();
+                loop {
+                    let frame = session.decoded_bgra_rx.recv().await.unwrap();
+                    let at = (16 * 64 + 16) * 4;
+                    if frame.data[at..at + 4] == [0, 0, 123, 255] {
+                        break;
+                    }
+                }
+                session.cmd_tx.send(key('r')).await.unwrap();
+                loop {
+                    let frame = session.decoded_bgra_rx.recv().await.unwrap();
+                    if (frame.width, frame.height) == (80, 60) {
+                        let at = (40 * 80 + 40) * 4;
+                        if frame.data[at..at + 4] == [40, 40, 123, 255] {
+                            break;
+                        }
+                    }
+                }
+                drop(session);
+                child.kill().await.unwrap();
+                child.wait().await.unwrap();
+            })
+            .await
+            .unwrap_or_else(|_| panic!("LibVNCServer RFB 3.{version}, auth={auth} timed out"));
+            eprintln!(
+                "LibVNCServer RFB 3.{version}, auth={auth}: Hextile, CopyRect, resize, right-click passed"
+            );
+        }
+    }
 }

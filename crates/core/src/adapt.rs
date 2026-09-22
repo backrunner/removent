@@ -1,10 +1,7 @@
-//! Adaptive quality controller (protocol.md §6.4).
-//!
-//! Input: StatsReport sample windows. Output: bitrate/fps/scale decisions.
-//! Downgrade: loss>2% or jitter>20ms → bitrate×0.7 (floor 1000kbps);
-//! on continued degradation, lower fps next, then scale. Upgrade ×1.25 after
-//! 5s of sustained health. Hysteresis: minimum 2s between changes; non-Auto
-//! manual presets act as an upper-bound clamp.
+//! Readability-first adaptive quality. Preserve negotiated spatial detail, spend
+//! fewer frames on a constrained link, and only recover after sustained evidence.
+//! The per-frame budget is a conservative rate-control floor, not a proof that
+//! arbitrary content/font sizes remain legible (see the codec quantizer ceiling).
 
 use crate::QualityPreset;
 
@@ -21,25 +18,37 @@ pub struct Sample {
     pub loss_pct: f32,
     pub recv_kbps: u32,
     pub jitter_ms: f32,
+    /// Submission to decoded-output latency, including decoder queueing.
+    pub decode_ms: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Health {
-    Degrading,
-    Healthy,
+impl Sample {
+    pub fn is_valid(&self) -> bool {
+        [self.rtt_ms, self.loss_pct, self.jitter_ms, self.decode_ms]
+            .iter()
+            .all(|v| v.is_finite() && *v >= 0.)
+            && self.loss_pct <= 100.
+    }
 }
 
 const MIN_CHANGE_INTERVAL_MS: u64 = 2000;
 const HEALTHY_UPGRADE_MS: u64 = 5000;
-pub const BITRATE_FLOOR_KBPS: u32 = 1000;
+pub const MIN_REFRESH_FPS: u8 = 2;
+
+/// 0.08 bits/pixel/frame, rounded up. An engineering guardrail for screen
+/// content, complemented by a codec quantizer ceiling where supported.
+pub fn readable_frame_bits(width: u32, height: u32) -> u64 {
+    (u64::from(width.max(1)) * u64::from(height.max(1))).div_ceil(100) * 8
+}
 
 pub struct AdaptationController {
     state: QualityState,
     max_bitrate_kbps: u32,
+    negotiated_fps: u8,
     base_fps: u8,
-    scale_enabled: bool,
-    health: Health,
-    degraded_windows: u32,
+    min_fps: u8,
+    frame_bits: u64,
+    preferred_frame_bits: u64,
     healthy_since_ms: Option<u64>,
     last_change_ms: u64,
     now_ms: u64,
@@ -47,119 +56,153 @@ pub struct AdaptationController {
 
 impl AdaptationController {
     pub fn new(bitrate_kbps: u32, fps: u8, preset: QualityPreset) -> Self {
-        let mut c = Self {
+        Self::with_dimensions(bitrate_kbps, fps, preset, 1920, 1080)
+    }
+
+    pub fn with_dimensions(
+        bitrate_kbps: u32,
+        fps: u8,
+        preset: QualityPreset,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        let cap = match preset {
+            QualityPreset::Smooth => 4_000,
+            QualityPreset::Balanced => 12_000,
+            QualityPreset::HighQuality => 24_000,
+            QualityPreset::Extreme => 48_000,
+            QualityPreset::Auto => u32::MAX,
+        };
+        let max_bitrate_kbps = bitrate_kbps.clamp(1, cap);
+        let frame_bits = readable_frame_bits(width, height);
+        // A low manual bitrate may not afford the requested frame rate even
+        // before congestion. Never start below the per-frame budget if avoidable.
+        let base_fps = fps
+            .max(1)
+            .min((u64::from(max_bitrate_kbps) * 1000 / frame_bits).clamp(1, 255) as u8);
+        Self {
             state: QualityState {
-                bitrate_kbps,
-                fps,
+                bitrate_kbps: max_bitrate_kbps,
+                fps: base_fps,
                 scale: 1.0,
             },
-            max_bitrate_kbps: bitrate_kbps,
-            base_fps: fps,
-            scale_enabled: true,
-            health: Health::Healthy,
-            degraded_windows: 0,
+            max_bitrate_kbps,
+            negotiated_fps: fps.max(1),
+            base_fps,
+            min_fps: MIN_REFRESH_FPS.min(base_fps),
+            frame_bits,
+            preferred_frame_bits: (u64::from(max_bitrate_kbps) * 1000 / u64::from(base_fps))
+                .max(frame_bits),
             healthy_since_ms: None,
             last_change_ms: 0,
             now_ms: 0,
-        };
-        if preset != QualityPreset::Auto {
-            let cap = match preset {
-                QualityPreset::Smooth => 4_000,
-                QualityPreset::Balanced => 12_000,
-                QualityPreset::HighQuality => 24_000,
-                QualityPreset::Extreme => 48_000,
-                QualityPreset::Auto => unreachable!(),
-            };
-            c.state.bitrate_kbps = c.state.bitrate_kbps.min(cap);
-            c.state.fps = c.state.fps.min(c.base_fps);
-            c.max_bitrate_kbps = bitrate_kbps.min(cap);
         }
-        c
     }
 
     pub fn state(&self) -> QualityState {
         self.state
     }
 
-    /// Legacy clients cannot identify the geometry used by queued input events.
-    pub fn set_scale_enabled(&mut self, enabled: bool) {
-        self.scale_enabled = enabled;
+    /// Capture geometry can change when a monitor mode changes. Refresh the
+    /// readability budget before consuming the next delivery sample.
+    pub fn set_dimensions(&mut self, width: u32, height: u32) {
+        let bits = readable_frame_bits(width, height);
+        if self.frame_bits == bits {
+            return;
+        }
+        self.frame_bits = bits;
+        self.base_fps = self
+            .negotiated_fps
+            .min((u64::from(self.max_bitrate_kbps) * 1000 / bits).clamp(1, 255) as u8);
+        self.min_fps = MIN_REFRESH_FPS.min(self.base_fps);
+        self.preferred_frame_bits =
+            (u64::from(self.max_bitrate_kbps) * 1000 / u64::from(self.base_fps)).max(bits);
+        self.state.bitrate_kbps = self.state.bitrate_kbps.max(self.bitrate_floor_kbps());
+        self.state.fps = self
+            .state
+            .fps
+            .min(self.base_fps)
+            .min((u64::from(self.state.bitrate_kbps) * 1000 / bits).clamp(1, 255) as u8)
+            .max(self.min_fps);
+        self.pause_recovery();
     }
 
-    /// No fresh delivery evidence: do not count idle time toward recovery.
+    pub fn bitrate_floor_kbps(&self) -> u32 {
+        (self.frame_bits * u64::from(self.min_fps))
+            .div_ceil(1000)
+            .max(64)
+            .min(u64::from(self.max_bitrate_kbps)) as u32
+    }
+
+    /// No fresh delivery evidence: idle time must not count toward recovery.
     pub fn pause_recovery(&mut self) {
         self.healthy_since_ms = None;
     }
 
-    fn is_bad(s: &Sample) -> bool {
-        s.loss_pct > 2.0 || s.jitter_ms > 20.0
-    }
-
-    /// Feed one window sample; returns the new decision (if any).
     pub fn on_sample(&mut self, sample: &Sample, window_ms: u64) -> Option<QualityState> {
-        self.now_ms += window_ms;
-        let bad = Self::is_bad(sample);
-
-        match bad {
-            true => {
-                self.health = Health::Degrading;
-                self.degraded_windows = self.degraded_windows.saturating_add(1).min(3);
-                self.healthy_since_ms = None;
-            }
-            false => {
-                self.health = Health::Healthy;
-                self.degraded_windows = 0;
-                if self.healthy_since_ms.is_none() {
-                    self.healthy_since_ms = Some(self.now_ms);
-                }
-            }
+        self.now_ms = self.now_ms.saturating_add(window_ms);
+        if !sample.is_valid() {
+            self.pause_recovery();
+            return None;
         }
-
+        // A scheduler pause is not several seconds of healthy observations.
+        if window_ms > 1000 {
+            self.pause_recovery();
+        }
+        // Absolute RTT is not congestion: an otherwise healthy distant path
+        // should retain quality. A slow decoder is receiver-side pressure too.
+        let bad = sample.loss_pct > 2.0
+            || sample.jitter_ms > 20.0
+            || sample.decode_ms > (1000.0 / f32::from(self.state.fps)).max(40.0);
+        if !bad && sample.loss_pct < 0.5 && sample.jitter_ms < 10. {
+            self.healthy_since_ms.get_or_insert(self.now_ms);
+        } else {
+            self.pause_recovery();
+        }
         if self.now_ms.saturating_sub(self.last_change_ms) < MIN_CHANGE_INTERVAL_MS {
             return None;
         }
-
-        match self.health {
-            Health::Degrading if self.degraded_windows >= 1 => {
-                let before = self.state;
-                if self.state.bitrate_kbps > BITRATE_FLOOR_KBPS {
-                    self.state.bitrate_kbps =
-                        ((self.state.bitrate_kbps as f64 * 0.7) as u32).max(BITRATE_FLOOR_KBPS);
-                } else if self.degraded_windows >= 2 && self.state.fps > 15 {
-                    self.state.fps = (self.state.fps / 2).max(15);
-                } else if self.degraded_windows >= 3 && self.scale_enabled {
-                    self.state.scale = (self.state.scale - 0.25).max(0.5);
-                }
-                if self.state != before {
-                    self.last_change_ms = self.now_ms;
-                    Some(self.state)
-                } else {
-                    None
-                }
+        let before = self.state;
+        if bad {
+            let mut bitrate = (u64::from(self.state.bitrate_kbps) * 7 / 10) as u32;
+            let mut fps = self.state.fps;
+            if fps > 15 {
+                // Keep bits/frame while first shedding motion smoothness.
+                fps = ((u16::from(fps) * 7 / 10) as u8).max(15);
+                bitrate = (u64::from(self.state.bitrate_kbps) * u64::from(fps)
+                    / u64::from(self.state.fps)) as u32;
+            } else if sample.recv_kbps > 0 {
+                // Goodput is meaningful only WITH pressure. An idle screen's
+                // tiny byte rate must never be mistaken for a slow link.
+                let observed = (u64::from(sample.recv_kbps) * 85 / 100) as u32;
+                bitrate = bitrate.min(observed.max(self.state.bitrate_kbps / 2));
             }
-            Health::Healthy
-                if self
-                    .healthy_since_ms
-                    .is_some_and(|t0| self.now_ms.saturating_sub(t0) >= HEALTHY_UPGRADE_MS)
-                    && (self.state.bitrate_kbps < self.max_bitrate_kbps
-                        || self.state.fps < self.base_fps
-                        || self.state.scale < 1.0) =>
-            {
-                // Upgrade: recover bitrate toward the peak; also restore the fps/scale cut during downgrade.
-                if self.state.scale < 1.0 {
-                    self.state.scale = (self.state.scale + 0.25).min(1.0);
-                } else if self.state.fps < self.base_fps {
-                    self.state.fps = (self.state.fps.saturating_mul(2)).min(self.base_fps);
-                } else {
-                    self.state.bitrate_kbps = ((self.state.bitrate_kbps as f64 * 1.25).ceil()
-                        as u32)
-                        .min(self.max_bitrate_kbps);
-                }
-                self.healthy_since_ms = Some(self.now_ms);
-                self.last_change_ms = self.now_ms;
-                Some(self.state)
-            }
-            _ => None,
+            self.state.bitrate_kbps = bitrate.max(self.bitrate_floor_kbps());
+            self.state.fps = fps
+                .min(
+                    (u64::from(self.state.bitrate_kbps) * 1000 / self.frame_bits).clamp(1, 255)
+                        as u8,
+                )
+                .max(self.min_fps);
+        } else if self
+            .healthy_since_ms
+            .is_some_and(|t| self.now_ms.saturating_sub(t) >= HEALTHY_UPGRADE_MS)
+        {
+            self.state.bitrate_kbps = ((u64::from(self.state.bitrate_kbps) * 5)
+                .div_ceil(4)
+                .min(u64::from(self.max_bitrate_kbps)))
+                as u32;
+            // Restore detail budget before increasing motion smoothness.
+            let affordable = (u64::from(self.state.bitrate_kbps) * 1000 / self.preferred_frame_bits)
+                .clamp(1, u64::from(self.base_fps)) as u8;
+            self.state.fps = self.state.fps.max(affordable);
+            self.healthy_since_ms = Some(self.now_ms);
+        }
+        if self.state != before {
+            self.last_change_ms = self.now_ms;
+            Some(self.state)
+        } else {
+            None
         }
     }
 }
@@ -167,174 +210,170 @@ impl AdaptationController {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn good() -> Sample {
         Sample {
-            rtt_ms: 1.0,
-            loss_pct: 0.0,
-            recv_kbps: 10_000,
-            jitter_ms: 1.0,
+            rtt_ms: 180.,
+            loss_pct: 0.,
+            recv_kbps: 0,
+            jitter_ms: 1.,
+            decode_ms: 1.,
         }
     }
     fn bad() -> Sample {
         Sample {
-            rtt_ms: 30.0,
-            loss_pct: 5.0,
-            recv_kbps: 4_000,
-            jitter_ms: 40.0,
+            loss_pct: 5.,
+            recv_kbps: 2000,
+            ..good()
+        }
+    }
+    fn feed(c: &mut AdaptationController, s: Sample, seconds: u64) {
+        for _ in 0..seconds * 4 {
+            c.on_sample(&s, 250);
         }
     }
 
     #[test]
-    fn idle_time_cannot_finish_recovery_and_legacy_scale_stays_fixed() {
-        let mut c = AdaptationController::new(1000, 30, QualityPreset::Auto);
-        c.set_scale_enabled(false);
-        for _ in 0..30 {
-            c.on_sample(&bad(), 2500);
+    fn first_downgrade_preserves_bits_per_frame_and_resolution() {
+        let mut c = AdaptationController::new(20_000, 60, QualityPreset::Auto);
+        feed(&mut c, bad(), 2);
+        assert_eq!(
+            c.state(),
+            QualityState {
+                bitrate_kbps: 14_000,
+                fps: 42,
+                scale: 1.
+            }
+        );
+        let before = c.state();
+        feed(&mut c, bad(), 1);
+        assert_eq!(c.state(), before, "two-second change interval");
+    }
+
+    #[test]
+    fn persistent_loss_stops_at_dimension_aware_readability_floor() {
+        for (w, h) in [(1920, 1080), (1280, 720), (320, 240)] {
+            let mut c =
+                AdaptationController::with_dimensions(20_000, 60, QualityPreset::Auto, w, h);
+            for _ in 0..600 {
+                c.on_sample(&bad(), 250);
+                let s = c.state();
+                assert_eq!(s.scale, 1.0);
+                assert!(
+                    u64::from(s.bitrate_kbps) * 1000 / u64::from(s.fps)
+                        >= readable_frame_bits(w, h)
+                );
+            }
+            assert_eq!(c.state().bitrate_kbps, c.bitrate_floor_kbps());
+            assert!(c.state().fps >= MIN_REFRESH_FPS);
         }
-        assert_eq!(c.state().fps, 15);
-        assert_eq!(c.state().scale, 1.0);
-        for _ in 0..8 {
-            c.on_sample(&good(), 250);
-        }
+        assert_eq!(
+            AdaptationController::new(8000, 30, QualityPreset::Auto).bitrate_floor_kbps(),
+            332
+        );
+    }
+
+    #[test]
+    fn recovery_restores_detail_before_fps_and_never_exceeds_ceiling() {
+        let mut c = AdaptationController::new(8000, 30, QualityPreset::Auto);
+        let initial = c.state();
+        feed(&mut c, bad(), 120);
+        let floor = c.state();
+        feed(&mut c, good(), 5);
+        assert_eq!(c.state(), floor);
+        feed(&mut c, good(), 1);
+        assert!(c.state().bitrate_kbps > floor.bitrate_kbps);
+        assert_eq!(c.state().fps, floor.fps);
+        feed(&mut c, good(), 120);
+        assert_eq!(c.state(), initial);
+    }
+
+    #[test]
+    fn static_screen_or_high_rtt_alone_never_downgrades() {
+        let mut c = AdaptationController::new(8000, 30, QualityPreset::Auto);
+        let initial = c.state();
+        feed(&mut c, good(), 120);
+        assert_eq!(c.state(), initial);
+    }
+
+    #[test]
+    fn decode_pressure_also_reduces_frame_rate() {
+        let mut c = AdaptationController::new(8000, 30, QualityPreset::Auto);
+        feed(
+            &mut c,
+            Sample {
+                decode_ms: 90.,
+                ..good()
+            },
+            2,
+        );
+        assert!(c.state().fps < 30);
+    }
+
+    #[test]
+    fn monitor_changes_recompute_the_readability_budget() {
+        let mut c = AdaptationController::with_dimensions(8000, 60, QualityPreset::Auto, 320, 240);
+        feed(&mut c, bad(), 120);
+        c.set_dimensions(1920, 1080);
+        assert_eq!(
+            c.state(),
+            QualityState {
+                bitrate_kbps: 332,
+                fps: 2,
+                scale: 1.
+            }
+        );
+        feed(&mut c, good(), 120);
+        assert_eq!(c.state().fps, 48);
+        c.set_dimensions(320, 240);
+        feed(&mut c, good(), 10);
+        assert_eq!(c.state().fps, 60);
+    }
+
+    #[test]
+    fn missing_invalid_or_stale_evidence_cannot_finish_recovery() {
+        let mut c = AdaptationController::new(8000, 30, QualityPreset::Auto);
+        feed(&mut c, bad(), 20);
+        let before = c.state();
+        feed(&mut c, good(), 4);
         c.pause_recovery();
-        for _ in 0..8 {
-            assert!(c.on_sample(&good(), 250).is_none());
-        }
-        for _ in 0..16 {
-            c.on_sample(&good(), 250);
-        }
-        assert_eq!(c.state().fps, 30);
+        feed(&mut c, good(), 4);
+        c.on_sample(
+            &Sample {
+                jitter_ms: f32::NAN,
+                ..good()
+            },
+            250,
+        );
+        feed(&mut c, good(), 4);
+        c.on_sample(&good(), 30_000);
+        feed(&mut c, good(), 4);
+        assert_eq!(c.state(), before);
     }
 
     #[test]
-    fn sustained_health_recovers_after_a_long_outage() {
-        let mut controller = AdaptationController::new(8000, 60, QualityPreset::Auto);
-        for _ in 0..2400 {
-            controller.on_sample(&bad(), 250);
-        }
-        let degraded = controller.state();
-        for _ in 0..24 {
-            controller.on_sample(&good(), 250);
-        }
-        assert!(controller.state().scale > degraded.scale);
-        assert_eq!(controller.state().bitrate_kbps, degraded.bitrate_kbps);
-        assert_eq!(controller.state().fps, degraded.fps);
-    }
-
-    #[test]
-    fn healthy_samples_never_trigger_another_downgrade() {
-        let mut controller = AdaptationController::new(20000, 60, QualityPreset::Auto);
-        for _ in 0..4 {
-            controller.on_sample(&bad(), 250);
-        }
-        for _ in 0..10 {
-            let before = controller.state();
-            controller.on_sample(&good(), 2500);
-            assert!(controller.state().bitrate_kbps >= before.bitrate_kbps);
-        }
-    }
-
-    #[test]
-    fn manual_preset_does_not_exceed_negotiated_bitrate() {
+    fn manual_caps_and_low_bitrate_are_respected() {
         for preset in [
             QualityPreset::Smooth,
             QualityPreset::Balanced,
             QualityPreset::HighQuality,
             QualityPreset::Extreme,
         ] {
-            let mut controller = AdaptationController::new(2000, 30, preset);
-            for _ in 0..60 {
-                controller.on_sample(&good(), 500);
+            let mut c = AdaptationController::new(2000, 30, preset);
+            assert_eq!(c.state().fps, 12);
+            feed(&mut c, bad(), 60);
+            feed(&mut c, good(), 120);
+            assert_eq!(c.state().bitrate_kbps, 2000);
+            assert_eq!(c.state().fps, 12);
+        }
+        let mut c = AdaptationController::new(10, 1, QualityPreset::Auto);
+        feed(&mut c, bad(), 60);
+        assert_eq!(
+            c.state(),
+            QualityState {
+                bitrate_kbps: 10,
+                fps: 1,
+                scale: 1.
             }
-            assert_eq!(controller.state().bitrate_kbps, 2000);
-        }
-    }
-
-    #[test]
-    fn degrades_bitrate_on_loss() {
-        let mut c = AdaptationController::new(20_000, 60, QualityPreset::Auto);
-        assert!(c.on_sample(&bad(), 500).is_none());
-        let d = c.on_sample(&bad(), 1600).expect("should degrade");
-        assert!(d.bitrate_kbps < 20_000);
-        assert!((d.bitrate_kbps as f64 - 14_000f64).abs() < 100.0);
-        assert_eq!(d.fps, 60);
-    }
-
-    #[test]
-    fn sustained_degradation_hits_floor_then_fps_then_scale() {
-        let mut c = AdaptationController::new(1200, 30, QualityPreset::Auto);
-        for _ in 0..12 {
-            c.on_sample(&bad(), 2100);
-        }
-        let st = c.state();
-        assert!(st.fps <= 15 || st.scale < 1.0, "{st:?}");
-    }
-
-    #[test]
-    fn upgrades_after_sustained_health() {
-        let mut c = AdaptationController::new(8_000, 60, QualityPreset::Auto);
-        assert!(c.on_sample(&bad(), 2500).is_some());
-        let degraded = c.state();
-        let mut upgraded = None;
-        let mut t = 2600u64;
-        while t < 25_000 {
-            if let Some(d) = c.on_sample(&good(), 500)
-                && d.bitrate_kbps > degraded.bitrate_kbps
-            {
-                upgraded = Some(d);
-                break;
-            }
-            t += 500;
-        }
-        let d = upgraded.expect("should upgrade");
-        assert!(d.bitrate_kbps > degraded.bitrate_kbps);
-    }
-
-    #[test]
-    fn upgrade_restores_fps_and_scale() {
-        // Degrade until fps/scale are cut, then restore health: the upgrade must restore fps and scale.
-        let mut c = AdaptationController::new(1200, 30, QualityPreset::Auto);
-        for _ in 0..12 {
-            c.on_sample(&bad(), 2100);
-        }
-        let degraded = c.state();
-        assert!(degraded.fps < 30 || degraded.scale < 1.0, "{degraded:?}");
-        for _ in 0..60 {
-            c.on_sample(&good(), 500);
-        }
-        let st = c.state();
-        assert_eq!(st.fps, 30, "fps should be restored, got {st:?}");
-        assert_eq!(st.scale, 1.0, "scale should be restored, got {st:?}");
-    }
-
-    #[test]
-    fn manual_preset_caps_upgrades() {
-        let mut c = AdaptationController::new(4_000, 60, QualityPreset::Smooth);
-        for _ in 0..60 {
-            c.on_sample(&good(), 300);
-        }
-        assert!(c.state().bitrate_kbps <= 4_000);
-    }
-
-    #[test]
-    fn single_good_sample_does_not_recover() {
-        let mut c = AdaptationController::new(20_000, 60, QualityPreset::Auto);
-        c.on_sample(&bad(), 2500);
-        let after = c.state().bitrate_kbps;
-        assert!(c.on_sample(&good(), 2200).is_none());
-        assert_eq!(c.state().bitrate_kbps, after);
-    }
-
-    #[test]
-    fn auto_keeps_constructor_bounds() {
-        let c = AdaptationController::new(20_000, 60, QualityPreset::Auto);
-        assert_eq!(c.state().bitrate_kbps, 20_000);
-    }
-
-    #[test]
-    fn smooth_clamps_high_constructor() {
-        let c = AdaptationController::new(40_000, 60, QualityPreset::Smooth);
-        assert_eq!(c.state().bitrate_kbps, 4_000);
+        );
     }
 }

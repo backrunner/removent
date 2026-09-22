@@ -9,7 +9,12 @@ use std::sync::Arc;
 rust_i18n::i18n!("locales");
 
 fn main() -> anyhow::Result<()> {
-    let paths = DataPaths::resolve();
+    let login_window = std::env::args().any(|arg| arg == "--login-window");
+    let paths = if login_window {
+        removent_daemon::login_window::paths()?
+    } else {
+        DataPaths::resolve()
+    };
     logging::init_logging(&paths);
     logging::install_panic_hook(&paths);
     let result = start(paths);
@@ -41,7 +46,7 @@ fn start(paths: DataPaths) -> anyhow::Result<()> {
 
     // Automatic launch must reach IPC readiness without waiting on a consent
     // dialog. Status exposes missing grants; initial setup is interactive.
-    if !std::env::args().any(|arg| arg == "--background") {
+    if !std::env::args().any(|arg| arg == "--background" || arg == "--login-window") {
         ensure_host_permissions(settings.host_enabled);
     }
 
@@ -53,14 +58,15 @@ fn start(paths: DataPaths) -> anyhow::Result<()> {
 }
 
 async fn run(paths: DataPaths) -> anyhow::Result<()> {
-    let settings = Settings::load(&paths)?;
+    let mut settings = Settings::load(&paths)?;
+    if std::env::args().any(|arg| arg == "--login-window") {
+        removent_daemon::login_window::restrict(&mut settings);
+    }
     let identity = identity::load_or_create(&paths, &settings.device_name)
         .context(t!("error.load_identity"))?;
-    let state = Arc::new(DaemonState::new(
-        paths,
-        settings,
-        identity.short_fingerprint_hex(),
-    ));
+    let mut state = DaemonState::new(paths, settings, identity.short_fingerprint_hex());
+    state.login_window = std::env::args().any(|arg| arg == "--login-window");
+    let state = Arc::new(state);
     tracing::info!(fp=%state.fp_short, enabled=%state.enabled.load(std::sync::atomic::Ordering::SeqCst), "removentd started");
 
     let mut ipc = tokio::spawn(server::serve(state.clone()));

@@ -1,0 +1,13 @@
+# The same form is used for relay-host.toml and relays/office.toml.
+# Use the HOST token on the daemon, the CLIENT token on the controller.
+# chmod 600 the real file. WSS uses normal CA/hostname verification;
+# do not set server_fingerprint (that field is for the QUIC transport).
+server = "removent://removent-private-relay.YOUR_SUBDOMAIN.workers.dev:443"
+transport = "websocket"
+room = "office"
+token = "REPLACE_WITH_ROLE_SPECIFIC_TOKEN"
+
+# Required on controllers (unused by host registration). Obtain from the host
+# with `removent-cli identity` over a trusted channel.
+host_fingerprint = "REPLACE_WITH_TARGET_HOST_CERTIFICATE_SHA256"
+# token may be omitted only when the relay has registered this role/device key.

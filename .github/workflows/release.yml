@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing release tag, for example v0.1.0-beta.3'
+        description: 'Existing release tag, for example v0.1.0'
         required: true
         type: string
 
@@ -22,7 +22,74 @@ env:
   RELEASE_BUILD_NUMBER: ${{ github.run_number }}
 
 jobs:
+  relay-macos-intel:
+    runs-on: macos-15-intel
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: relay-macos-intel
+      - run: cargo test --locked --release -p removent-relay
+      - run: cargo build --locked --release -p removent-relay
+      - run: python3 scripts/test_relay_launchd.py --live --binary target/release/removent-relay
+  relay-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            platform: linux-x86_64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            platform: linux-aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: relay-${{ matrix.target }}
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools cmake
+      - name: Build and test static native relay
+        env:
+          RELAY_TARGET: ${{ matrix.target }}
+          CC: musl-gcc
+          RUSTFLAGS: -C linker=musl-gcc
+        run: |
+          cargo test --locked --release -p removent-relay --target "$RELAY_TARGET"
+          cargo build --locked --release -p removent-relay --target "$RELAY_TARGET"
+          readelf -l "target/$RELAY_TARGET/release/removent-relay" > "$RUNNER_TEMP/relay-elf.txt"
+          if grep -q INTERP "$RUNNER_TEMP/relay-elf.txt"; then
+            echo 'Relay must be statically linked' >&2
+            exit 1
+          fi
+      - name: Package release binary
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          RELAY_TARGET: ${{ matrix.target }}
+          RELAY_PLATFORM: ${{ matrix.platform }}
+        run: |
+          test "$RELEASE_TAG" = "$(python3 scripts/release_meta.py tag)"
+          python3 scripts/package_relay.py --version "$RELEASE_TAG" --platform "$RELAY_PLATFORM" --binary "target/$RELAY_TARGET/release/removent-relay"
+          sudo install -m 755 "target/$RELAY_TARGET/release/removent-relay" /usr/local/bin/removent-relay
+          sudo python3 scripts/test_relay_systemd.py --live
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-${{ matrix.platform }}
+          path: dist/relay/*
+          if-no-files-found: error
   release:
+    needs: [relay-linux, relay-macos-intel]
     runs-on: macos-15
     timeout-minutes: 120
     permissions:
@@ -73,6 +140,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -127,8 +195,14 @@ jobs:
             dist/*.zip
             dist/latest.json
             dist/SHA256SUMS
+            dist/relay/*
           if-no-files-found: error
           retention-days: 30
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: relay-linux-*
+          path: dist/relay
+          merge-multiple: true
       - name: Publish verified release
         env:
           GH_TOKEN: ${{ github.token }}

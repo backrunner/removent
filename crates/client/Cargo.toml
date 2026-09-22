@@ -28,6 +28,7 @@ ironrdp-bulk = "0.1"
 tokio-native-tls = "0.3"
 x509-cert = "0.2"
 url = "2"
+hex = { workspace = true }
 
 [dev-dependencies]
 ironrdp-server = { version = "0.13", default-features = false, features = ["helper"] }
@@ -35,7 +36,6 @@ async-trait = "0.1"
 rcgen = { workspace = true }
 rustls = { workspace = true }
 tempfile = "3"
-hex = { workspace = true }
 removent-media-capture = { workspace = true }
 removent-host = { workspace = true }
 tracing-subscriber = { workspace = true }

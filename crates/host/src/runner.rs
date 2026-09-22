@@ -36,6 +36,11 @@ pub struct HostRunnerConfig {
 /// runner → host session/pairing events.
 #[derive(Debug, Clone)]
 pub enum HostEvent {
+    Listening,
+    RelayState {
+        connected: bool,
+        error: Option<String>,
+    },
     SessionStarted {
         peer_name: String,
         peer_fp16: String,
@@ -68,6 +73,7 @@ fn known_fingerprints(paths: &DataPaths) -> Vec<[u8; 32]> {
             peers
                 .all()
                 .iter()
+                .filter(|p| p.trusted)
                 .filter_map(|p| {
                     let bytes = hex::decode(&p.fingerprint).ok()?;
                     <[u8; 32]>::try_from(bytes.as_slice()).ok()
@@ -203,7 +209,7 @@ pub async fn serve_forever(
     let (ep_server, _pin) = make_server_endpoint(
         SocketAddr::from(([0, 0, 0, 0], port)),
         &identity,
-        PinState::new(known, true),
+        PinState::new(known, !settings.paired_only),
     )?;
     let advertiser = Arc::new(
         Advertiser::start(&settings.device_name, &fp_short, port, Caps::all())
@@ -240,6 +246,41 @@ pub async fn serve_forever(
     let active_session: Arc<std::sync::Mutex<Option<CancellationToken>>> =
         Arc::new(std::sync::Mutex::new(None));
 
+    (cbs.on_event)(HostEvent::Listening);
+    // The bridge belongs to the host runner, never to desktop/tray lifetime.
+    let relay_config = cfg.paths.root.join("relay-host.toml");
+    if relay_config.exists() {
+        let identity = identity.clone();
+        let cbs = cbs.clone();
+        let stop = shutdown.clone();
+        connections.spawn(async move {
+            let mut delay = 1;
+            loop {
+                let result = async {
+                    let cfg = removent_relay::config::TunnelConfig::load(&relay_config)?;
+                    let tunnel = removent_relay::client::connect_host(&cfg, &identity).await?;
+                    (cbs.on_event)(HostEvent::RelayState {
+                        connected: true,
+                        error: None,
+                    });
+                    tunnel.run(([127, 0, 0, 1], port).into()).await
+                };
+                tokio::select! {
+                    _ = stop.cancelled() => break,
+                    result = result => {
+                        // Library errors never contain credential values.
+                        let error = result.err().map(|e| e.to_string());
+                        (cbs.on_event)(HostEvent::RelayState { connected: false, error });
+                    }
+                }
+                tokio::select! {
+                    _ = stop.cancelled() => break,
+                    _ = tokio::time::sleep(Duration::from_secs(delay)) => {},
+                }
+                delay = (delay * 2).min(30);
+            }
+        });
+    }
     // Accept connections until the service is stopped.
     loop {
         if !running.load(Ordering::SeqCst) {
@@ -329,6 +370,10 @@ async fn run_connection(
     };
     let peer_fp = conn.peer_fingerprint().map(hex::encode).unwrap_or_default();
     let was_known = !peer_fp.is_empty() && peers.by_fingerprint(&peer_fp).is_some();
+    if ctx.settings.paired_only && !peers.by_fingerprint(&peer_fp).is_some_and(|p| p.trusted) {
+        conn.inner().close(1u32.into(), b"paired devices only");
+        return;
+    }
 
     let cb_pin = ctx.cbs.clone();
     let cb_adm = ctx.cbs.clone();
@@ -353,12 +398,18 @@ async fn run_connection(
             });
 
     let host_cfg = HostConfig {
+        audio_available: !ctx.settings.window_server_capture,
+        preapproved_only: ctx.settings.paired_only,
         device_name: ctx.settings.device_name.clone(),
         admission: ctx.settings.admission,
         video_bitrate_kbps: 8_000,
         video_fps: 60,
         input_sink: ctx.input_sink.clone(),
-        local_clip: ctx.local_clip.clone(),
+        local_clip: if ctx.settings.window_server_capture {
+            None
+        } else {
+            ctx.local_clip.clone()
+        },
     };
 
     let served = serve_connection(
@@ -421,6 +472,7 @@ async fn run_connection(
     // Control pump: input injection / clipboard application / adaptive delivery
     // (trimmed by the peer's capabilities).
     let deps = ControlPumpDeps {
+        conn: conn.clone(),
         kf_tx: Some(established.keyframe_req_tx.clone()),
         controller: Some(established.controller.clone()),
         window_ms: 250,
@@ -491,55 +543,95 @@ async fn run_connection(
         ));
     }
 
-    let mut cap = removent_media_capture::start_display_capture(
-        display.id as u32,
-        cap_w,
-        cap_h,
-        video_tx,
-        audio_enabled.then_some(audio_tx),
-    );
-    match &mut cap {
-        Ok(cap) => {
-            // The capture stream may stop on its own (SCK error, display
-            // reconfiguration): end the session explicitly instead of leaving
-            // the client on a frozen frame.
-            if let Some(mut stopped_rx) = cap.take_stopped_rx() {
-                let cmd_tx = established.cmd_tx.clone();
-                let cancel = established.cancel.clone();
-                tasks.0.push(tokio::spawn(async move {
-                    if let Some(reason) = stopped_rx.recv().await {
-                        tracing::error!(%reason, "capture stream stopped unexpectedly");
-                        let _ = cmd_tx
-                            .send(ControlMsg::SessionEnd {
-                                reason: removent_proto::EndReason::InternalError,
-                            })
-                            .await;
-                        let _ =
-                            tokio::time::timeout(Duration::from_secs(1), cancel.cancelled()).await;
-                        cancel.cancel();
+    if ctx.settings.window_server_capture {
+        // Retain control/media tasks during bounded WindowServer restarts. Password
+        // input is still normal HID input; no account secret is stored or parsed.
+        let mut failures = 0;
+        loop {
+            let capture = removent_media_capture::quartz::start(
+                display.id as u32,
+                cap_w,
+                cap_h,
+                video_tx.clone(),
+            );
+            match capture {
+                Ok(mut capture) => {
+                    let started = std::time::Instant::now();
+                    let mut stopped = capture.take_stopped_rx().unwrap();
+                    tokio::select! {
+                        _ = established.cancel.cancelled() => break,
+                        _ = stopped.recv() => {},
                     }
-                }));
+                    if started.elapsed() >= Duration::from_secs(30) {
+                        failures = 0;
+                    }
+                    drop(capture);
+                }
+                Err(error) => tracing::warn!(%error, "WindowServer capture unavailable"),
+            }
+            failures += 1;
+            if failures >= 3 {
+                established.cancel.cancel();
+                break;
+            }
+            tokio::select! {
+                _ = established.cancel.cancelled() => break,
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {},
             }
         }
-        Err(e) => {
-            tracing::error!(err=%e, "SCK capture failed (permission or environment)");
-            // Without capture the client would stare at a black screen forever; end the
-            // session explicitly (same SessionEnd{InternalError} reporting as the
-            // encoder-fatal path in spawn_video_loop) and stop the media loops.
-            let _ = established
-                .cmd_tx
-                .send(ControlMsg::SessionEnd {
-                    reason: removent_proto::EndReason::InternalError,
-                })
-                .await;
-            let _ =
-                tokio::time::timeout(Duration::from_secs(1), established.cancel.cancelled()).await;
-            established.cancel.cancel();
+    } else {
+        let mut cap = removent_media_capture::start_display_capture(
+            display.id as u32,
+            cap_w,
+            cap_h,
+            video_tx,
+            audio_enabled.then_some(audio_tx),
+        );
+        match &mut cap {
+            Ok(cap) => {
+                // The capture stream may stop on its own (SCK error, display
+                // reconfiguration): end the session explicitly instead of leaving
+                // the client on a frozen frame.
+                if let Some(mut stopped_rx) = cap.take_stopped_rx() {
+                    let cmd_tx = established.cmd_tx.clone();
+                    let cancel = established.cancel.clone();
+                    tasks.0.push(tokio::spawn(async move {
+                        if let Some(reason) = stopped_rx.recv().await {
+                            tracing::error!(%reason, "capture stream stopped unexpectedly");
+                            let _ = cmd_tx
+                                .send(ControlMsg::SessionEnd {
+                                    reason: removent_proto::EndReason::InternalError,
+                                })
+                                .await;
+                            let _ =
+                                tokio::time::timeout(Duration::from_secs(1), cancel.cancelled())
+                                    .await;
+                            cancel.cancel();
+                        }
+                    }));
+                }
+            }
+            Err(e) => {
+                tracing::error!(err=%e, "SCK capture failed (permission or environment)");
+                // Without capture the client would stare at a black screen forever; end the
+                // session explicitly (same SessionEnd{InternalError} reporting as the
+                // encoder-fatal path in spawn_video_loop) and stop the media loops.
+                let _ = established
+                    .cmd_tx
+                    .send(ControlMsg::SessionEnd {
+                        reason: removent_proto::EndReason::InternalError,
+                    })
+                    .await;
+                let _ =
+                    tokio::time::timeout(Duration::from_secs(1), established.cancel.cancelled())
+                        .await;
+                established.cancel.cancel();
+            }
         }
-    }
 
-    established.cancel.cancelled().await;
-    drop(cap);
+        established.cancel.cancelled().await;
+        drop(cap);
+    }
     // Release input before returning the session permit. Drop handles safely
     // on early return or cancellation as well.
     tasks.0[0].abort();

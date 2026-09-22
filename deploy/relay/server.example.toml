@@ -1,0 +1,21 @@
+listen = "0.0.0.0:48700"
+identity_dir = "/var/lib/removent-relay"
+# Source IPv4/IPv6 networks for both hosts and controllers. Empty = unrestricted.
+# Match actual socket peers; forwarding headers are never trusted.
+allowed_cidrs = [] # Example: ["203.0.113.0/24", "2001:db8::/32"]
+max_connections = 128
+max_clients_per_room = 4
+# 50 MB/s per authenticated connection, both roles (400 Mbps, 1-second burst).
+max_bytes_per_second = 50000000
+
+[[rooms]]
+name = "office"
+# Generate TWO independent credentials with `removent-relay generate-token`.
+# Copy their sha256 values here; the raw tokens go only on the respective Macs.
+host_token_sha256 = "REPLACE_WITH_HOST_TOKEN_SHA256"
+client_token_sha256 = "REPLACE_WITH_CLIENT_TOKEN_SHA256"
+
+# Optional role-specific Ed25519 public-key allowlists (removent-cli identity).
+# With a token hash: both factors required. Without one: keys are mandatory.
+# host_public_keys = ["HOST_PUBLIC_KEY_64_HEX"]
+# client_public_keys = ["CONTROLLER_PUBLIC_KEY_64_HEX"]

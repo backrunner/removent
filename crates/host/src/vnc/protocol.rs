@@ -14,7 +14,10 @@ pub(super) async fn perform_handshake(
     stream.write_all(RFB_VERSION).await?;
     let mut client_version = [0u8; 12];
     stream.read_exact(&mut client_version).await?;
-    if !client_version.starts_with(b"RFB ") {
+    if !matches!(
+        &client_version,
+        b"RFB 003.003\n" | b"RFB 003.007\n" | b"RFB 003.008\n"
+    ) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "invalid RFB version",
@@ -51,10 +54,10 @@ pub(super) async fn perform_handshake(
             "VNC authentication failed",
         ));
     }
-    // RFB 3.3 has no SecurityResult for the None security type; sending one
+    // RFB 3.3/3.7 have no SecurityResult for the None security type; sending one
     // would leave four bytes in front of ServerInit and desynchronise legacy
-    // clients. RFB 3.7+ always receives SecurityResult.
-    if !legacy_33 || security != SEC_NONE {
+    // clients. RFB 3.8 always receives SecurityResult.
+    if &client_version == RFB_VERSION || security != SEC_NONE {
         stream.write_all(&0u32.to_be_bytes()).await?;
     }
 

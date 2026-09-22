@@ -44,8 +44,18 @@ pub struct SessionInfo {
 /// Status snapshot (Status response + tray polling).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StatusReport {
-    /// Host service (listener + broadcaster) is enabled.
+    /// Desired sharing switch; retained for compatibility with older clients.
     pub running: bool,
+    /// Actual RVP listener readiness, independent of the desired switch.
+    #[serde(default)]
+    pub host_ready: bool,
+    #[serde(default)]
+    pub host_error: Option<String>,
+    /// None when no host relay is configured.
+    #[serde(default)]
+    pub relay_connected: Option<bool>,
+    #[serde(default)]
+    pub relay_error: Option<String>,
     pub port: u16,
     pub device_name: String,
     pub fp_short: String,
@@ -259,6 +269,10 @@ mod tests {
         // StatusReport serialization snapshot (cross-checked against the Swift Codable side).
         let report = StatusReport {
             running: true,
+            host_ready: true,
+            host_error: None,
+            relay_connected: None,
+            relay_error: None,
             port: 48688,
             device_name: "Mac".into(),
             fp_short: "a1b2c3d4".into(),

@@ -20,6 +20,9 @@ pub const BGRA_FOURCC: u32 = u32::from_be_bytes(*b"BGRA");
 /// used for media today; this constant remains useful for hardware probes.
 pub const AV1_CODEC_TYPE: u32 = u32::from_be_bytes(*b"av01");
 const TIMESCALE_US: i32 = 1_000_000;
+/// Limit quantization damage to screen text. A codec guardrail, not a
+/// perceptual guarantee for every font, display scale or chroma pattern.
+pub const SCREEN_MAX_FRAME_QP: i32 = 28;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Av1HardwareSupport {
@@ -273,6 +276,7 @@ struct EncoderSession {
     /// Leaked `Arc<EncoderCallbackState>` handed to the callback; reclaimed on drop.
     callback_state: *mut c_void,
     out_rx: mpsc::Receiver<Result<Option<RawEncodedSample>, i32>>,
+    quality_ceiling_supported: bool,
 }
 
 // SAFETY: VideoToolbox sessions are documented as thread-safe; the output
@@ -313,10 +317,11 @@ impl EncoderSession {
             unsafe { drop(Arc::from_raw(callback_state.cast::<EncoderCallbackState>())) };
             return Err(VideoError::CoreMedia(status));
         }
-        let s = Self {
+        let mut s = Self {
             session,
             callback_state,
             out_rx: rx,
+            quality_ceiling_supported: false,
         };
         s.set_bool_property(
             unsafe { videotoolbox::ffi::kVTCompressionPropertyKey_RealTime },
@@ -338,6 +343,17 @@ impl EncoderSession {
             unsafe { videotoolbox::ffi::kVTCompressionPropertyKey_MaxKeyFrameInterval },
             i32::from(fps) * 2,
         )?;
+        // Apple allows the encoder to drop frames to satisfy this quality
+        // bound. Older hardware/modes may not implement the optional property.
+        match s.set_i32_property(
+            unsafe { cm::kVTCompressionPropertyKey_MaxAllowedFrameQP.cast() },
+            SCREEN_MAX_FRAME_QP,
+        ) {
+            Ok(()) => s.quality_ceiling_supported = true,
+            Err(error) => {
+                tracing::warn!(%error, "encoder has no frame QP ceiling; using frame-budget protection")
+            }
+        }
         // SAFETY: session is valid.
         let status =
             unsafe { videotoolbox::ffi::VTCompressionSessionPrepareToEncodeFrames(session) };
@@ -581,6 +597,15 @@ impl VideoEncoder {
 
     pub fn height(&self) -> usize {
         self.height
+    }
+
+    /// Whether this codec accepted its quantization quality limit.
+    pub fn quality_ceiling_supported(&self) -> bool {
+        self.av1.is_some()
+            || self
+                .session
+                .as_ref()
+                .is_some_and(|s| s.quality_ceiling_supported)
     }
 
     /// Cached parameter sets (re-extracted from the format description on every

@@ -1,5 +1,7 @@
 //! Explicit protocol selection and address validation shared with connection forms.
 
+pub use removent_core::removent_uri::RelayTransport;
+use removent_core::removent_uri::{RemoventEndpoint, valid_room};
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
@@ -55,6 +57,26 @@ pub enum AddressError {
 }
 
 impl ConnectionAddress {
+    pub fn parse_native(host: &str, port: &str) -> Result<Self, AddressError> {
+        if host.trim().starts_with("removent://") {
+            let endpoint = RemoventEndpoint::parse(host).map_err(|_| AddressError::Host)?;
+            return Ok(Self {
+                host: endpoint.host,
+                port: endpoint.port,
+            });
+        }
+        Self::parse(host, port)
+    }
+    pub fn relay_room(room: &str) -> Result<Self, AddressError> {
+        if !valid_room(room.trim()) {
+            return Err(AddressError::Host);
+        }
+        Ok(Self {
+            host: room.trim().to_owned(),
+            port: 0,
+        })
+    }
+
     pub fn parse(host: &str, port: &str) -> Result<Self, AddressError> {
         let port = port
             .trim()
@@ -125,7 +147,9 @@ impl ConnectionAddress {
 
 impl std::fmt::Display for ConnectionAddress {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.host.contains(':') {
+        if self.port == 0 {
+            write!(f, "{}", self.host)
+        } else if self.host.contains(':') {
             write!(f, "[{}]:{}", self.host, self.port)
         } else {
             write!(f, "{}:{}", self.host, self.port)
@@ -134,6 +158,8 @@ impl std::fmt::Display for ConnectionAddress {
 }
 
 /// Credentials are per connection and deliberately excluded from Debug and persistence.
+/// For native relay connections `password` is the relay credential; native RVP
+/// authentication always uses the device identity and pairing grants.
 pub struct ConnectionRequest {
     pub protocol: ConnectionProtocol,
     pub address: ConnectionAddress,
@@ -141,6 +167,7 @@ pub struct ConnectionRequest {
     pub password: String,
     pub domain: String,
     pub accept_invalid_certificate: bool,
+    pub relay: Option<RelayRoute>,
 }
 
 impl ConnectionRequest {
@@ -152,13 +179,127 @@ impl ConnectionRequest {
             password: String::new(),
             domain: String::new(),
             accept_invalid_certificate: false,
+            relay: None,
         }
+    }
+}
+
+/// Only public routing/trust data. Credentials belong in the Keychain.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelayRoute {
+    pub endpoint: String,
+    pub transport: RelayTransport,
+    pub server_fingerprint: String,
+    pub host_fingerprint: String,
+}
+impl RelayRoute {
+    pub fn parse(
+        endpoint: &str,
+        transport: RelayTransport,
+        server_fingerprint: &str,
+        host_fingerprint: &str,
+    ) -> Result<Self, &'static str> {
+        let endpoint = RemoventEndpoint::parse(endpoint).map_err(|_| "connection.invalid_relay")?;
+        let pin = |value: &str| value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit());
+        let server_fingerprint = server_fingerprint.trim().to_lowercase();
+        let host_fingerprint = host_fingerprint.trim().to_lowercase();
+        if !pin(&host_fingerprint) {
+            return Err("connection.invalid_host_fingerprint");
+        }
+        match transport {
+            RelayTransport::Quic if !pin(&server_fingerprint) => {
+                return Err("connection.invalid_relay_pin");
+            }
+            RelayTransport::WebSocket if !server_fingerprint.is_empty() => {
+                return Err("connection.invalid_relay");
+            }
+            _ => {}
+        }
+        Ok(Self {
+            endpoint: endpoint.uri(),
+            transport,
+            server_fingerprint,
+            host_fingerprint,
+        })
+    }
+    pub fn host_pin(&self) -> [u8; 32] {
+        // Called only after parse/validate at the connection boundary.
+        hex::decode(&self.host_fingerprint)
+            .unwrap()
+            .try_into()
+            .unwrap()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn removent_routes_require_the_selected_carriers_trust_and_reject_old_schemes() {
+        let host = "aa".repeat(32);
+        let relay = "bb".repeat(32);
+        let route = RelayRoute::parse(
+            "removent://RELAY.example:443",
+            RelayTransport::WebSocket,
+            "",
+            &host,
+        )
+        .unwrap();
+        assert_eq!(route.endpoint, "removent://relay.example:443");
+        assert_eq!(route.host_pin(), [0xaa; 32]);
+        assert!(
+            RelayRoute::parse(
+                "removent://[::1]:48700",
+                RelayTransport::Quic,
+                &relay,
+                &host
+            )
+            .is_ok()
+        );
+        assert!(
+            RelayRoute::parse(
+                "removent://relay.example:443",
+                RelayTransport::WebSocket,
+                &relay,
+                &host
+            )
+            .is_err()
+        );
+        assert!(
+            RelayRoute::parse(
+                "removent://relay.example:48700",
+                RelayTransport::Quic,
+                "",
+                &host
+            )
+            .is_err()
+        );
+        for old in [
+            "wss://relay.example:443",
+            "quic://relay.example:48700",
+            "relay://office",
+        ] {
+            assert!(RelayRoute::parse(old, RelayTransport::WebSocket, "", &host).is_err());
+            assert!(ConnectionAddress::parse_native(old, "48688").is_err());
+        }
+        assert_eq!(
+            ConnectionAddress::parse_native("removent://[::1]:48688", "0")
+                .unwrap()
+                .to_string(),
+            "[::1]:48688"
+        );
+        assert_eq!(
+            ConnectionAddress::relay_room("office-mac_1")
+                .unwrap()
+                .to_string(),
+            "office-mac_1"
+        );
+        for invalid in ["relay://office", "../office", "office/path", ""] {
+            assert!(ConnectionAddress::relay_room(invalid).is_err());
+        }
+    }
 
     #[test]
     fn protocol_defaults_and_custom_ports_are_independent() {

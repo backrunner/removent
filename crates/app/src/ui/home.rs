@@ -85,6 +85,7 @@ pub struct HomeView {
     selected: Option<Selection>,
     status: String,
     status_tone: StatusTone,
+    save_warning: Option<String>,
     host_on: bool,
     daemon_online: bool,
     /// daemon-reported TCC permissions (screen_recording, accessibility); None until
@@ -107,6 +108,7 @@ pub struct HomeView {
     search_input: Entity<InputState>,
     connection_dialog: Option<Entity<ConnectionDialog>>,
     connection_subscription: Option<gpui::Subscription>,
+    connection_save_task: Option<gpui::Task<()>>,
     settings_open: bool,
     settings_section: usize,
     device_name_input: Entity<InputState>,
@@ -326,6 +328,7 @@ impl HomeView {
             selected: None,
             status: t!("status.ready").to_string(),
             status_tone: StatusTone::Info,
+            save_warning: None,
             host_on: false,
             daemon_online: false,
             daemon_perms: None,
@@ -342,6 +345,7 @@ impl HomeView {
             search_input,
             connection_dialog: None,
             connection_subscription: None,
+            connection_save_task: None,
             settings_open: false,
             settings_section: 0,
             dialog_seq: 0,
@@ -418,17 +422,18 @@ impl HomeView {
     /// credentialed entry has no stored secret left, the prefilled form opens
     /// instead so the user can re-enter it.
     fn connect_saved(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if self.connecting.is_some() {
+        if self.connecting.is_some() || self.connection_save_task.is_some() {
             self.set_status(t!("status.connecting_other").to_string(), StatusTone::Warn);
             cx.notify();
             return;
         }
+        self.saved = self.engine.saved_connections();
         let Some(entry) = self.saved.iter().find(|s| s.id == id).cloned() else {
             return;
         };
         let mut request = entry.to_request();
         if entry.needs_credentials() {
-            match self.engine.saved_password(&entry.id) {
+            match self.engine.saved_password(&entry) {
                 Some(password) => request.password = password,
                 None => {
                     self.open_connection_dialog(Some(&entry), window, cx);
@@ -437,7 +442,7 @@ impl HomeView {
             }
         }
         let name = entry.display_name();
-        self.engine.touch_saved_connection(&entry);
+        self.engine.touch_saved_connection(&entry.id);
         match self.engine.connect_request(request) {
             Ok(()) => {
                 self.connecting = Some(name.clone());
@@ -453,26 +458,49 @@ impl HomeView {
     }
 
     fn remove_saved(&mut self, id: &str, cx: &mut Context<Self>) {
-        match self.engine.remove_saved_connection(id) {
-            Ok(()) => {
-                self.saved = self.engine.saved_connections();
-                if matches!(&self.selected, Some(Selection::Saved(s)) if s == id) {
-                    self.selected = None;
+        let engine = self.engine.clone();
+        let id = id.to_owned();
+        let operation_id = id.clone();
+        let remove = cx.background_executor().spawn(async move {
+            let result = engine.remove_saved_connection(&operation_id);
+            (result, engine.saved_connections())
+        });
+        cx.spawn(async move |this, cx| {
+            let (result, saved) = remove.await;
+            let _ = this.update(cx, |this, cx| {
+                this.saved = saved;
+                if !this.saved.iter().any(|entry| entry.id == id)
+                    && matches!(&this.selected, Some(Selection::Saved(s)) if s == &id)
+                {
+                    this.selected = None;
                 }
-                self.set_status(
-                    t!("status.connection_removed").to_string(),
-                    StatusTone::Info,
-                );
-            }
-            Err(e) => self.set_status(
-                t!("status.connection_save_failed", err = e.to_string()),
-                StatusTone::Err,
-            ),
-        }
-        cx.notify();
+                match result {
+                    Ok(()) => this.set_status(
+                        t!("status.connection_removed").to_string(),
+                        StatusTone::Info,
+                    ),
+                    Err(e) => this.set_status(
+                        t!("status.connection_save_failed", err = e.to_string()),
+                        StatusTone::Err,
+                    ),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn cancel_connection(&mut self, cx: &mut Context<Self>) {
+        // Dropping the UI task prevents a completed disk/Keychain operation
+        // from starting a connection after Cancel. No live session is stopped.
+        if self.connection_save_task.take().is_some() {
+            if let Some(dialog) = &self.connection_dialog {
+                dialog.update(cx, |form, cx| form.cancel(cx));
+            }
+            self.set_status(t!("connection.cancelled").to_string(), StatusTone::Info);
+            cx.notify();
+            return;
+        }
         if self.connecting.take().is_some() {
             self.engine.disconnect_client();
             self.cancelled_generation = Some(self.engine.client_generation());
@@ -507,8 +535,9 @@ impl HomeView {
             return;
         }
         let dialog = cx.new(|cx| ConnectionDialog::new(window, cx));
+        dialog.update(cx, |form, _| form.set_relay_choices(self.saved.clone()));
         if let Some(saved) = prefill {
-            let password = self.engine.saved_password(&saved.id);
+            let password = self.engine.saved_password(saved);
             dialog.update(cx, |form, cx| form.prefill(saved, password, window, cx));
         }
         self.connection_subscription = Some(cx.subscribe_in(
@@ -529,50 +558,113 @@ impl HomeView {
                         this.cancel_connection(cx);
                         window.focus(&dialog.focus_handle(cx));
                     }
-                    ConnectionDialogEvent::Submit => {
-                        if this.connecting.is_some() {
+                    ConnectionDialogEvent::Submit | ConnectionDialogEvent::Save => {
+                        if this.connecting.is_some() || this.connection_save_task.is_some() {
                             return;
                         }
                         let Ok(request) = dialog.read(cx).request(cx) else {
                             return;
                         };
                         let memo = dialog.read(cx).memo_name(cx);
-                        // A submitted form is a saved bookmark (passwords are never
-                        // persisted); a failed save must not block connecting.
-                        match this.engine.save_connection(&request, memo.clone()) {
-                            Ok(()) => this.saved = this.engine.saved_connections(),
-                            Err(e) => this.set_status(
-                                t!("status.connection_save_failed", err = e.to_string()),
-                                StatusTone::Warn,
-                            ),
-                        }
-                        let name = if memo.is_empty() {
-                            format!("{} ({})", request.address, request.protocol.label())
-                        } else {
-                            memo
-                        };
-                        match this.engine.connect_request(request) {
-                            Ok(()) => {
-                                this.connecting = Some(name.clone());
-                                this.connection_stage = ConnectionStage::Resolving;
-                                this.set_status(
-                                    t!("status.connecting", name = name),
-                                    StatusTone::Info,
-                                );
-                                dialog.update(cx, |form, cx| form.set_connecting(true, None, cx));
-                                window.focus(&dialog.focus_handle(cx));
-                            }
-                            Err(error) => dialog.update(cx, |form, cx| {
-                                form.set_connecting(
-                                    false,
-                                    Some(
-                                        t!("status.connect_failed", err = format!("{error:#}"))
-                                            .to_string(),
-                                    ),
-                                    cx,
-                                )
-                            }),
-                        }
+                        let id = dialog.read(cx).saved_id().map(str::to_owned);
+                        let save_only = *event == ConnectionDialogEvent::Save;
+                        let engine = this.engine.clone();
+                        let save_request = request;
+                        let save_name = memo.clone();
+                        dialog.update(cx, |form, cx| {
+                            form.set_connecting(true, None, cx);
+                            form.set_save_warning(None, cx);
+                        });
+                        // Keychain and cross-process file locks must never park GPUI.
+                        let save = cx.background_executor().spawn(async move {
+                            let result =
+                                engine.save_connection(&save_request, save_name, id.as_deref());
+                            (result, engine.saved_connections(), save_request)
+                        });
+                        let dialog = dialog.clone();
+                        this.connection_save_task =
+                            Some(cx.spawn_in(window, async move |this, cx| {
+                                let (result, saved, request) = save.await;
+                                let _ = this.update_in(cx, |this, window, cx| {
+                                    this.connection_save_task = None;
+                                    if this.connection_dialog.as_ref() != Some(&dialog) {
+                                        return;
+                                    }
+                                    this.save_warning = None;
+                                    match result {
+                                        Ok(entry) => {
+                                            this.selected =
+                                                Some(Selection::Saved(entry.id.clone()));
+                                            dialog
+                                                .update(cx, |form, _| form.set_saved_id(entry.id));
+                                        }
+                                        Err(e) => {
+                                            this.save_warning = Some(
+                                                t!(
+                                                    "status.connection_save_failed",
+                                                    err = e.to_string()
+                                                )
+                                                .to_string(),
+                                            )
+                                        }
+                                    }
+                                    this.saved = saved;
+                                    dialog.update(cx, |form, cx| {
+                                        form.set_save_warning(this.save_warning.clone(), cx)
+                                    });
+                                    if save_only {
+                                        dialog.update(cx, |form, cx| {
+                                            form.set_connecting(false, None, cx)
+                                        });
+                                        if this.save_warning.is_none() {
+                                            this.connection_dialog = None;
+                                            this.connection_subscription = None;
+                                            window.focus(&this.focus);
+                                        }
+                                        cx.notify();
+                                        window.refresh();
+                                        return;
+                                    }
+                                    let name = if memo.is_empty() {
+                                        format!(
+                                            "{} ({})",
+                                            request.address,
+                                            request.protocol.label()
+                                        )
+                                    } else {
+                                        memo
+                                    };
+                                    match this.engine.connect_request(request) {
+                                        Ok(()) => {
+                                            this.connecting = Some(name.clone());
+                                            this.connection_stage = ConnectionStage::Resolving;
+                                            this.set_status(
+                                                t!("status.connecting", name = name),
+                                                StatusTone::Info,
+                                            );
+                                            dialog.update(cx, |form, cx| {
+                                                form.set_connecting(true, None, cx)
+                                            });
+                                            window.focus(&dialog.focus_handle(cx));
+                                        }
+                                        Err(error) => dialog.update(cx, |form, cx| {
+                                            form.set_connecting(
+                                                false,
+                                                Some(
+                                                    t!(
+                                                        "status.connect_failed",
+                                                        err = format!("{error:#}")
+                                                    )
+                                                    .to_string(),
+                                                ),
+                                                cx,
+                                            )
+                                        }),
+                                    }
+                                    cx.notify();
+                                    window.refresh();
+                                });
+                            }));
                     }
                 }
                 cx.notify();
@@ -2617,6 +2709,14 @@ impl HomeView {
             .bg(colors.sidebar)
             .border_t_1()
             .border_color(colors.border)
+            .when_some(self.save_warning.clone(), |el, warning| {
+                el.child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(colors.warning)
+                        .child(warning),
+                )
+            })
             .child(dot(tone))
             .child(
                 div()

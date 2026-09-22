@@ -7,6 +7,8 @@ usage: |
   removent-cli — Removent 冒烟测试工具
 
   用法:
+    removent-cli ping --relay-profile /path/to/controller.toml [options]
+    removent-cli identity
     removent-cli ping <addr|名称|短指纹> [选项]
     removent-cli daemon <status|start|stop|restart|enable|disable|permissions|login-on|login-off|service-status>
 

@@ -1,6 +1,6 @@
-# Removent beta 发布指南
+# Removent 发布指南
 
-首个公开版本：`0.1.0-beta.3`，Apple Silicon，macOS 13+。分发采用 Developer ID 签名、公证的 GitHub Releases；这不是 Mac App Store 提交流程。商店提交还需要独立评估沙盒、权限及审核要求，并使用商店更新渠道。
+首发版本：`0.1.0`，协议 v1，桌面 App 支持 Apple Silicon、macOS 13+；独立 relay 同时支持 Linux x86_64 / ARM64 和 macOS Universal。分发采用 Developer ID 签名、公证的 GitHub Releases；这不是 Mac App Store 提交流程。商店提交还需要独立评估沙盒、权限及审核要求，并使用商店更新渠道。
 
 ```mermaid
 flowchart LR
@@ -12,7 +12,7 @@ flowchart LR
     F --> G[DMG 签名、公证并 staple]
     G --> H[签名更新清单、生成 SHA256SUMS]
     H --> I[验收 ZIP、DMG、签名、版本、架构]
-    I --> J[GitHub beta prerelease]
+    I --> J[GitHub stable release]
     J --> K[客户端自动检查]
     K --> L[用户确认、验证下载、会话结束后安装]
 ```
@@ -45,7 +45,15 @@ bash scripts/release.sh
 bash scripts/publish_release.sh
 ```
 
-Beta 标记为 prerelease，且 `--latest=false`，不会占用正式版 latest。每个版本的 ZIP、DMG、清单都使用不可变版本 tag；不移动 beta tag、不覆盖已发布资产。
+发布脚本只接受 `MAJOR.MINOR.PATCH`，发布为正式版并设置 `--latest`。每个正式版本的 ZIP、DMG、清单都使用不可变版本 tag，不覆盖已发布资产。旧开发 beta 的发布与标签按用户要求清理，不提供迁移或兼容通道。
+
+## 私有 relay 发布资产
+
+同一个稳定 tag 还必须包含 `removent-relay-vX.Y.Z-{linux-x86_64,linux-aarch64,macos-universal}.tar.gz`，每个包有独立的 `.sha256` 文件。Linux 使用原生 x86_64 / ARM64 runner 构建静态 musl 二进制，检查不依赖动态 ELF 解释器，运行 relay 测试与真实 systemd 生命周期验收。macOS relay 编译 ARM64 与 x86_64 两个 target，合并 Universal 二进制，再由 `scripts/release.sh` 完成 Developer ID 签名、真实 launchd 验收和公证后打包。构建机器需通过 rustup 安装 `aarch64-apple-darwin` 与 `x86_64-apple-darwin` 标准库；本机发布仍在 Apple Silicon 上运行。
+
+`scripts/package_relay.py` 校验版本、文件内容、架构与校验和。发布工作流收齐全部平台资产至 `dist/relay` 后，`scripts/publish_release.sh` 才会将它们与 App 一起发布；缺失资产会失败。本机发布时必须先取回相同 tag 的两个 Linux 包及校验文件并放入 `dist/relay`，不能用 macOS 产物替代。可执行 `python3 scripts/package_relay.py --version v0.1.0 --verify` 预先检查。
+
+用户通过 `scripts/install_relay.sh` 下载已发布二进制，服务器不编译源码。安装器只负责校验和安装；配置与启停由 `removent-relay` 原生 CLI 完成。安装与更新保留身份及凭据，更新后由用户显式 restart。
 
 ## GitHub Actions secrets
 
@@ -61,13 +69,12 @@ Beta 标记为 prerelease，且 `--latest=false`，不会占用正式版 latest�
 
 公证 API key 可替换为 Apple ID 那组三个 secrets。私钥只在当前 job 临时文件中出现，退出时清除。不要导出整个钥匙串，只导出用于 Removent 发布的身份。签名 Team ID 固定为 `PB8H83VL3Z`，变更身份需要同时审查更新器和发布验收代码。
 
-CI 使用 `macos-15` arm64 runner、锁定的 Cargo.lock、串行测试、失败即停止。发布任务要求同一提交在 main 的 push CI 中完整通过检查和开发打包，再复用构建缓存进行签名构建；不会使用其他提交的检查结果。普通 CI 的 ZIP 明确标记 development/not-notarized，不能替代公开安装包。
+CI 使用 `macos-15` arm64 runner、锁定的 Cargo.lock、串行测试、失败即停止。发布任务要求同一提交在 main 的 CI 和 Relay 两个工作流中完整通过检查、开发打包、官网构建及浏览器测试、跨平台 relay 和真实服务验收，再复用构建缓存进行签名构建；不会使用其他提交的检查结果。普通 CI 的 ZIP 明确标记 development/not-notarized，不能替代公开安装包。官网静态文件以 `Removent-website` artifact 保存，托管发布单独进行。
 
 ## 自动更新
 
 - 启动 30 秒后检查，之后每 24 小时检查；可关闭，可手动检查。
-- Beta 通过 GitHub releases API 选择最高 SemVer 的 beta 或正式版；正式版使用 GitHub latest 正式渠道。忽略 draft、alpha 和没有完整清单的 release。
-- GitHub releases API 单页最多 100 项；需要继续支持长期不升级的 beta 时，可增加分页或引入独立签名 feed。
+- 仅使用 GitHub latest 正式渠道的已签名清单，拒绝预发布版本；没有 beta feed 或旧版本迁移分支。首次正式发布之前，官方 latest 地址返回 404。
 - 下载前校验 Ed25519，下载后核对 SHA-256，再验证 Apple Developer ID 证书、Team ID、bundle ID 和包内完整版本。
 - 只使用 HTTPS（包括重定向），清单 2 MiB 上限、更新 ZIP 1 GiB 上限，连接和低速超时；失败支持再次下载及断点续传。
 - 获取发布列表或清单时，临时网络／服务器错误最多重试两次，每个地址共用 30 秒超时预算；每次响应独立读取，避免重试时拼接损坏的清单。错误提示区分 HTTP 状态、DNS、连接、超时和 TLS 失败，日志记录阶段与状态码，不记录完整更新地址。

@@ -1,5 +1,7 @@
 //! removent-net: QUIC transport, mDNS discovery, SPAKE2 pairing, and session stream wrappers.
 
+pub mod clipboard;
+pub mod control_writer;
 pub mod discovery;
 pub mod error;
 pub mod pairing;

@@ -13,3 +13,4 @@ core-video-rs = "0.3"
 tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+block = "0.1"

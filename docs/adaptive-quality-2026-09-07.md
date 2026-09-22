@@ -2,6 +2,13 @@
 
 Implemented on 2026-09-07, following the third implementation review.
 
+**Policy superseded on 2026-09-20:** the current controller preserves negotiated
+capture dimensions, enforces a per-frame readability budget and uses automatic
+receiver feedback. See [current behavior and measurements](readable-quality-2026-09-20.md).
+The downgrade/recovery order, legacy-client gating and validation counts below
+describe the earlier implementation. Geometry ordering and encoder hot switching
+remain supported, but automatic adaptation no longer shrinks screen text.
+
 ## Runtime behavior
 
 The native RVP control pump now samples media delivery every 250 ms. Measurements
@@ -50,6 +57,14 @@ the cached screen once per second to obtain real delivery measurements. These
 probes allow static screens to recover sharpness. Probes stop at full quality.
 A single successful write expires as health evidence after 1.5 seconds, so it
 cannot by itself satisfy the five-second recovery requirement.
+
+Updated 2026-09-20: unchanged-screen probes bypass exact-frame deduplication but
+preserve codec references; they no longer force a full keyframe every second.
+This avoids making the recovery probe itself saturate a narrow WAN link. Actual
+quality changes, new encoder configurations and explicit decoder recovery still
+force keyframes. Small probe writes establish fresh delivery/liveness evidence,
+not a measurement of available bandwidth; gradual upgrades and subsequent real
+frame delivery still determine whether the higher quality is sustainable.
 
 ## Input and protocol compatibility
 

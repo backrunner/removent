@@ -7,7 +7,9 @@ usage: |
   removent-cli — Removent smoke-test tool
 
   Usage:
-    removent-cli ping <addr|name|short-fingerprint> [options]
+    removent-cli ping --relay-profile /path/to/controller.toml [options]
+    removent-cli identity
+    removent-cli ping <removent://host:port|name|short-fingerprint> [options]
     removent-cli daemon <status|start|stop|restart|enable|disable|permissions|login-on|login-off|service-status>
 
   Options:

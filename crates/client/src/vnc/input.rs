@@ -12,7 +12,7 @@ pub(super) async fn write_commands(
     mut cmd_rx: super::queue::InputReceiver,
     mut signal_rx: mpsc::Receiver<FrameSignal>,
     dimensions: Arc<RwLock<FrameSize>>,
-) {
+) -> io::Result<()> {
     let mut input = InputState::default();
     let mut burst = 0;
     loop {
@@ -21,22 +21,18 @@ pub(super) async fn write_commands(
             cmd = cmd_rx.recv(), if burst < 32 => {
                 let Some(cmd) = cmd else { break };
                 let is_input = matches!(cmd.message, ControlMsg::MouseEvent { .. } | ControlMsg::KeyEvent { .. } | ControlMsg::ScrollEvent { .. });
-                if let Err(error) = write_command(&mut stream, cmd.message, &mut input).await {
-                    tracing::warn!(%error, "VNC stream write failed");
-                    break;
-                }
+                write_with_timeout(write_command(&mut stream, cmd.message, &mut input)).await?;
                 cmd_rx.record_sent(cmd.queued_at, is_input);
                 burst += 1;
             }
             signal = signal_rx.recv() => match signal {
-                Some(FrameSignal::Updated) => {
+                Some(FrameSignal::Updated { incremental }) => {
                     burst = 0;
                     let size = *dimensions.read().await;
-                    if size.width > 0 && size.height > 0
-                        && let Err(error) = write_framebuffer_request(&mut stream, true, size.width, size.height).await {
-                        tracing::warn!(%error, "VNC framebuffer request failed");
-                        break;
-                    }
+                    let (width, height) = if size.width == 0 || size.height == 0 {
+                        (u16::MAX.into(), u16::MAX.into())
+                    } else { (size.width, size.height) };
+                    write_with_timeout(write_framebuffer_request(&mut stream, incremental, width, height)).await?;
                 }
                 Some(FrameSignal::Closed) | None => break,
             },
@@ -45,6 +41,15 @@ pub(super) async fn write_commands(
             _ = tokio::task::yield_now(), if burst >= 32 => { burst = 0; }
         }
     }
+    Ok(())
+}
+
+async fn write_with_timeout(
+    future: impl std::future::Future<Output = io::Result<()>>,
+) -> io::Result<()> {
+    tokio::time::timeout(std::time::Duration::from_secs(10), future)
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "VNC input write timed out"))?
 }
 
 #[derive(Default)]

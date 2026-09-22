@@ -48,6 +48,7 @@ pub struct VncSession {
     pub cmd_tx: InputSender,
     pub decoded_bgra_rx: removent_core::latest::Receiver<DecodedFrame>,
     pub stats: Arc<VncStats>,
+    pub completion: tokio::sync::oneshot::Receiver<io::Result<()>>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
@@ -108,14 +109,15 @@ pub(super) struct FrameSize {
 }
 
 pub(super) enum FrameSignal {
-    Updated,
+    Updated { incremental: bool },
     Closed,
 }
 
 mod auth;
+mod decoders;
 mod framebuffer;
 mod input;
-mod queue;
+use crate::input_queue as queue;
 
 pub use queue::{InputSender, InputSnapshot};
 
@@ -186,6 +188,7 @@ pub async fn connect_vnc_with_progress(
     let (signal_tx, signal_rx) = mpsc::channel(4);
     let stats = Arc::new(VncStats::default());
     let reader_stats = stats.clone();
+    let (completion_tx, completion) = tokio::sync::oneshot::channel();
     // Independently scheduled tasks keep large framebuffer work from blocking
     // input. The supervisor owns both: EOF, writer failure, and session drop
     // still close the entire connection (including any pending read).
@@ -206,9 +209,22 @@ pub async fn connect_vnc_with_progress(
             tasks.spawn(
                 input::write_commands(write_half, cmd_rx, signal_rx, dimensions).in_current_span(),
             );
-            tasks.join_next().await;
+            let mut result = match tasks.join_next().await {
+                Some(Ok(result)) => result,
+                Some(Err(error)) => Err(io::Error::other(format!(
+                    "VNC session task failed: {error}"
+                ))),
+                None => Ok(()),
+            };
             tasks.abort_all();
-            while tasks.join_next().await.is_some() {}
+            while let Some(completed) = tasks.join_next().await {
+                if let Ok(Err(error)) = completed
+                    && result.is_ok()
+                {
+                    result = Err(error);
+                }
+            }
+            let _ = completion_tx.send(result);
         }
         .in_current_span(),
     );
@@ -216,6 +232,7 @@ pub async fn connect_vnc_with_progress(
         cmd_tx,
         decoded_bgra_rx: frame_rx,
         stats,
+        completion,
         tasks: vec![task],
     })
 }

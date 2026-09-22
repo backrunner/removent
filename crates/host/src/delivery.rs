@@ -16,6 +16,7 @@ struct Window {
     slow: bool,
     sent_packets: u64,
     lost_packets: u64,
+    capture_dims: Option<(u32, u32)>,
 }
 
 impl DeliveryHealth {
@@ -25,6 +26,7 @@ impl DeliveryHealth {
             window: Mutex::new(Window {
                 sent_packets: path.sent_packets,
                 lost_packets: path.lost_packets,
+                capture_dims: None,
                 ..Default::default()
             }),
             conn: Some(conn),
@@ -41,6 +43,28 @@ impl DeliveryHealth {
             let healthy = started.elapsed() < Duration::from_millis(100);
             window.last_completed = Some((Instant::now(), healthy));
             window.slow |= !healthy;
+        }
+    }
+
+    pub fn encoder_limited(&self) {
+        self.window.lock().unwrap().slow = true;
+    }
+
+    pub fn set_capture_dims(&self, width: u32, height: u32) {
+        self.window.lock().unwrap().capture_dims = Some((width, height));
+    }
+
+    pub fn capture_dims(&self) -> Option<(u32, u32)> {
+        self.window.lock().unwrap().capture_dims
+    }
+
+    /// A fixed large send budget hides seconds of stale media on narrow links.
+    /// Track the selected bitrate and base RTT, rather than a queue-inflated RTT.
+    /// Keep a small burst allowance and bound fast/high-latency paths as well.
+    pub fn update_send_budget(&self, bitrate_kbps: u32) {
+        if let Some(conn) = &self.conn {
+            let rtt = conn.inner().stats().path.min_rtt;
+            conn.inner().set_send_window(send_budget(bitrate_kbps, rtt));
         }
     }
 
@@ -72,9 +96,24 @@ impl DeliveryHealth {
     }
 }
 
+fn send_budget(bitrate_kbps: u32, base_rtt: Duration) -> u64 {
+    let in_flight = f64::from(bitrate_kbps) * 125. * base_rtt.as_secs_f64().clamp(0.001, 1.);
+    (in_flight as u64 + 32 * 1024).clamp(64 * 1024, 2 * 1024 * 1024)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn send_budget_shrinks_with_quality_without_capping_fast_wan_to_lan_bursts() {
+        assert_eq!(send_budget(1000, Duration::from_millis(150)), 64 * 1024);
+        assert_eq!(send_budget(48000, Duration::from_millis(1)), 64 * 1024);
+        assert!(send_budget(24000, Duration::from_millis(80)) >= 240_000);
+        assert_eq!(
+            send_budget(u32::MAX, Duration::from_secs(10)),
+            2 * 1024 * 1024
+        );
+    }
     #[test]
     fn idle_stalls_and_recovery_require_fresh_writes() {
         let health = DeliveryHealth::default();

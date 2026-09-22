@@ -43,6 +43,21 @@ pub async fn send_control(sink: &mut ControlSink, msg: ControlMsg) -> Result<()>
         .map_err(|_| NetError::Timeout)?
 }
 
+/// Keep retransmission storage in small allocations. Quinn retains an entire
+/// write allocation until its last byte is acknowledged; writing a large video
+/// frame in one allocation can exhaust the connection budget and prevent even
+/// higher-priority control bytes from entering the scheduler after packet loss.
+/// Callers must end the stream if this future is cancelled mid-frame.
+pub async fn write_media(stream: &mut quinn::SendStream, wire: &[u8]) -> Result<()> {
+    for chunk in wire.chunks(4096) {
+        stream.write_all(chunk).await.map_err(write_err)?;
+        // Give a ready control writer a chance to claim newly released buffer
+        // credit before the next media chunk consumes it again.
+        tokio::task::yield_now().await;
+    }
+    Ok(())
+}
+
 /// Control-stream item: a normal message or a skipped unknown variant (protocol.md §8).
 #[derive(Debug, PartialEq)]
 pub enum ControlItem {
@@ -168,6 +183,7 @@ impl RvpConnection {
         hello: HandshakeClient,
     ) -> Result<(HandshakeServer, ControlSink, ControlSource)> {
         let (mut send, mut recv) = self.conn.open_bi().await?;
+        let _ = send.set_priority(crate::control_writer::CONTROL_PRIORITY);
 
         let body = postcard::to_allocvec(&hello).map_err(|e| NetError::Framing(e.to_string()))?;
         let mut wire = Vec::with_capacity(8 + body.len());
@@ -246,6 +262,7 @@ impl RvpConnection {
         &self,
     ) -> Result<(quinn::SendStream, quinn::RecvStream, HandshakeClient)> {
         let (send, mut recv) = self.conn.accept_bi().await?;
+        let _ = send.set_priority(crate::control_writer::CONTROL_PRIORITY);
 
         let mut head = [0u8; 8];
         recv.read_exact(&mut head).await.map_err(read_err)?;
@@ -282,7 +299,9 @@ impl RvpConnection {
 
     /// Open a media uni-stream (sending).
     pub async fn open_media_stream(&self) -> Result<quinn::SendStream> {
-        Ok(self.conn.open_uni().await?)
+        let stream = self.conn.open_uni().await?;
+        let _ = stream.set_priority(crate::control_writer::MEDIA_PRIORITY);
+        Ok(stream)
     }
 
     /// Accept a media uni-stream (receiving).

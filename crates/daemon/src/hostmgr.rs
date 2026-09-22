@@ -37,6 +37,13 @@ fn build_callbacks(state: &Arc<DaemonState>) -> HostCallbacks {
             Box::pin(async move { st.request_admission(peer_name, fp16).await })
         }),
         on_event: Box::new(move |ev| match ev {
+            HostEvent::RelayState { connected, error } => {
+                *st_ev.relay_state.lock().unwrap() = (Some(connected), error);
+            }
+            HostEvent::Listening => {
+                *st_ev.host_error.lock().unwrap() = None;
+                st_ev.host_ready.store(true, Ordering::SeqCst);
+            }
             HostEvent::SessionStarted {
                 peer_name,
                 peer_fp16,
@@ -77,6 +84,16 @@ pub async fn run(state: Arc<DaemonState>) {
         }
 
         let settings = state.settings.lock().unwrap().clone();
+        state.host_ready.store(false, Ordering::SeqCst);
+        *state.relay_state.lock().unwrap() = (
+            state
+                .paths
+                .root
+                .join("relay-host.toml")
+                .exists()
+                .then_some(false),
+            None,
+        );
         let cfg = HostRunnerConfig {
             paths: state.paths.clone(),
             settings,
@@ -94,10 +111,13 @@ pub async fn run(state: Arc<DaemonState>) {
 
         tokio::select! {
             _ = state.shutdown.cancelled() => {
+                state.host_ready.store(false, Ordering::SeqCst);
                 stop_runner(&running, &runner_shutdown, &mut task).await;
                 break;
             }
             changed = enabled_rx.changed() => {
+                state.host_ready.store(false, Ordering::SeqCst);
+                *state.host_error.lock().unwrap() = None;
                 // Switch flipped (or watch closed): stop the runner and loop back to re-evaluate.
                 stop_runner(&running, &runner_shutdown, &mut task).await;
                 if changed.is_err() {
@@ -105,6 +125,12 @@ pub async fn run(state: Arc<DaemonState>) {
                 }
             }
             res = &mut task => {
+                state.host_ready.store(false, Ordering::SeqCst);
+                *state.host_error.lock().unwrap() = Some(match &res {
+                    Ok(Ok(())) => "Host listener exited; retrying".into(),
+                    Ok(Err(e)) => format!("{e:#}"),
+                    Err(_) => "Host task failed; retrying".into(),
+                });
                 match res {
                     Ok(Ok(())) => tracing::info!("host runner exited"),
                     Ok(Err(e)) => tracing::error!(err=%format!("{e:#}"), "host runner failed"),
@@ -112,7 +138,11 @@ pub async fn run(state: Arc<DaemonState>) {
                 }
                 // Abnormal exit with the switch still on: restart after a delay to
                 // avoid a crash storm.
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::select! {
+                    _ = state.shutdown.cancelled() => break,
+                    _ = enabled_rx.changed() => {},
+                    _ = tokio::time::sleep(Duration::from_secs(1)) => {},
+                }
             }
         }
     }

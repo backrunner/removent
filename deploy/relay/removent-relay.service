@@ -1,0 +1,29 @@
+[Unit]
+Description=Removent private protocol relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+TimeoutStartSec=30
+DynamicUser=yes
+StateDirectory=removent-relay
+StateDirectoryMode=0700
+LoadCredential=server.toml:/etc/removent-relay/server.toml
+ExecStart=/usr/local/bin/removent-relay serve %d/server.toml
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

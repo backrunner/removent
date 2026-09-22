@@ -129,6 +129,7 @@ struct ClientChannels {
 
 enum ClientCommands {
     Standard(tokio::sync::mpsc::Sender<ControlMsg>),
+    Native(removent_client::InputSender),
     Vnc(
         removent_client::vnc::InputSender,
         Arc<removent_client::vnc::VncStats>,
@@ -141,6 +142,12 @@ impl From<tokio::sync::mpsc::Sender<ControlMsg>> for ClientCommands {
     }
 }
 
+impl From<removent_client::InputSender> for ClientCommands {
+    fn from(tx: removent_client::InputSender) -> Self {
+        Self::Native(tx)
+    }
+}
+
 impl ClientCommands {
     fn try_send(
         &self,
@@ -148,6 +155,7 @@ impl ClientCommands {
     ) -> Result<(), tokio::sync::mpsc::error::TrySendError<ControlMsg>> {
         match self {
             Self::Standard(tx) => enqueue_input(tx, message),
+            Self::Native(tx) => tx.try_send(message),
             Self::Vnc(tx, _) => tx.try_send(message),
         }
     }
@@ -229,7 +237,7 @@ impl ClientAttempt {
         }
     }
 
-    fn resume(&self, cmd: tokio::sync::mpsc::Sender<ControlMsg>) -> Result<()> {
+    fn resume(&self, cmd: impl Into<ClientCommands>) -> Result<()> {
         let mut channels = self.channels.lock().unwrap();
         anyhow::ensure!(
             channels.generation == self.generation,
@@ -533,24 +541,25 @@ impl Engine {
 
     /// Persist a submitted connection form as a reusable bookmark. Same-endpoint
     /// submissions update the existing entry instead of duplicating it. The
-    /// password goes to the Keychain under the bookmark id — empty means the
-    /// user cleared it, so the stored secret is removed too.
-    pub fn save_connection(&self, request: &ConnectionRequest, name: String) -> Result<()> {
+    /// password goes to a versioned Keychain item referenced by the bookmark;
+    /// empty means the reference is cleared and the old item is retired.
+    pub fn save_connection(
+        &self,
+        request: &ConnectionRequest,
+        name: String,
+        id: Option<&str>,
+    ) -> Result<SavedConnection> {
         let mut store = SavedConnections::load(&self.paths)?;
-        let entry = store.upsert(SavedConnection::from_request(request, name))?;
-        if request.password.is_empty() {
-            let _ = keychain::delete(&entry.id);
-        } else if let Err(e) = keychain::store(&entry.id, &request.password) {
-            // The bookmark is saved; a keychain failure just means the next
-            // connect falls back to the prefilled form — keep it non-fatal.
-            tracing::warn!(err = %e, "failed to store connection password in keychain");
-        }
-        Ok(())
+        let mut entry = SavedConnection::from_request(request, name);
+        entry.id = id.unwrap_or_default().to_owned();
+        Ok(store.save_with_password(entry, &request.password)?)
     }
 
-    /// Password for a saved connection, if one was stored in the Keychain.
-    pub fn saved_password(&self, id: &str) -> Option<String> {
-        match keychain::load(id) {
+    /// Only read the item referenced by the current bookmark. Cleared passwords
+    /// must not reappear even when deleting an old Keychain item failed.
+    pub fn saved_password(&self, entry: &SavedConnection) -> Option<String> {
+        let account = entry.credential_account()?;
+        match keychain::load(account) {
             Ok(password) => password,
             Err(e) => {
                 tracing::warn!(err = %e, "failed to read connection password from keychain");
@@ -559,18 +568,17 @@ impl Engine {
         }
     }
 
-    /// Refresh a bookmark's last-used timestamp (direct reconnects from the list).
-    pub fn touch_saved_connection(&self, entry: &SavedConnection) {
-        if let Ok(mut store) = SavedConnections::load(&self.paths) {
-            let _ = store.upsert(entry.clone());
+    pub fn touch_saved_connection(&self, id: &str) {
+        if let Ok(mut store) = SavedConnections::load(&self.paths)
+            && let Err(error) = store.touch(id)
+        {
+            tracing::warn!(%error, "could not refresh bookmark timestamp");
         }
     }
 
     pub fn remove_saved_connection(&self, id: &str) -> Result<()> {
         let mut store = SavedConnections::load(&self.paths)?;
-        store.remove(id)?;
-        let _ = keychain::delete(id);
-        Ok(())
+        Ok(store.remove_with_password(id)?)
     }
 
     /// Short-fingerprint set of trusted devices (the "Paired" marker in the device list).
@@ -905,7 +913,7 @@ impl Engine {
         }
     }
 
-    /// Buffer VNC transitions and coalesce motion; other transports reserve FIFO
+    /// Buffer native/VNC transitions and coalesce motion; RDP reserves FIFO
     /// space for transitions. A hard overflow closes the session explicitly
     /// instead of silently losing a key/button release.
     fn try_send_cmd(&self, msg: ControlMsg) {
@@ -1126,12 +1134,16 @@ async fn run_client(
     paths: DataPaths,
     settings: Settings,
     attempt: ClientAttempt,
+    expected_host: Option<[u8; 32]>,
 ) -> Result<()> {
     let known = known_fingerprints(&paths);
     let (ep_client, _pin) = make_client_endpoint(
         client_bind_addr(addr),
         &identity,
-        PinState::new(known, true),
+        match expected_host {
+            Some(pin) => PinState::new([pin], false),
+            None => PinState::new(known, true),
+        },
     )?;
 
     let audio_player = match tokio::task::spawn_blocking(AudioPlayer::new).await? {
@@ -1176,7 +1188,7 @@ async fn run_client(
     // Frame bridge: install the channel before telling the UI to open the viewer
     // (eliminates the race of not being able to take rx).
     let ftx = attempt.publish(
-        session.cmd_tx.clone(),
+        session.input_tx.clone(),
         format!("{:?}", session.negotiated.video.codec),
     )?;
     let mut audio_task = audio_player.as_ref().map(|player| {
@@ -1231,7 +1243,10 @@ async fn run_client(
             let (ep, _pin) = make_client_endpoint(
                 client_bind_addr(addr),
                 &identity,
-                PinState::new(known, true),
+                match expected_host {
+                    Some(pin) => PinState::new([pin], false),
+                    None => PinState::new(known, true),
+                },
             )?;
             match tokio::time::timeout(
                 std::time::Duration::from_secs(8),
@@ -1259,7 +1274,7 @@ async fn run_client(
         match resumed {
             Some(s) => {
                 session = s;
-                attempt.resume(session.cmd_tx.clone())?;
+                attempt.resume(session.input_tx.clone())?;
                 audio_task = audio_player.as_ref().map(|player| {
                     let player = player.clone();
                     let (_drop_tx, drop_rx) = tokio::sync::mpsc::channel(1);
@@ -1347,13 +1362,16 @@ async fn run_vnc_client(request: ConnectionRequest, attempt: ClientAttempt) -> R
     })??;
     let ftx = attempt.publish(
         ClientCommands::Vnc(session.cmd_tx.clone(), session.stats.clone()),
-        "RFB/VNC · Raw BGRA".into(),
+        "RFB/VNC · BGRA".into(),
     )?;
     while let Some(frame) = session.decoded_bgra_rx.recv().await {
         if ftx.send(frame).is_err() {
-            break;
+            return Ok(());
         }
     }
+    (&mut session.completion)
+        .await
+        .map_err(|_| anyhow::anyhow!("VNC session task stopped unexpectedly"))??;
     Ok(())
 }
 
@@ -1367,6 +1385,39 @@ async fn run_requested_client(
     match request.protocol {
         ConnectionProtocol::Removent => {
             attempt.progress(ConnectionStage::Resolving);
+            if let Some(route) = &request.relay {
+                let route = removent_client::connection::RelayRoute::parse(
+                    &route.endpoint,
+                    route.transport,
+                    &route.server_fingerprint,
+                    &route.host_fingerprint,
+                )
+                .map_err(|key| anyhow::anyhow!(t!(key).to_string()))?;
+                let room = &request.address.host;
+                let config = removent_relay::config::TunnelConfig {
+                    server: route.endpoint.clone(),
+                    transport: route.transport,
+                    insecure_loopback: false,
+                    server_fingerprint: route.server_fingerprint.clone(),
+                    room: room.to_owned(),
+                    token: request.password.clone(),
+                    host_fingerprint: route.host_fingerprint.clone(),
+                };
+                let identity =
+                    identity.ok_or_else(|| anyhow::anyhow!("Device identity missing"))?;
+                attempt.progress(ConnectionStage::Connecting);
+                let bridge =
+                    removent_relay::client::ClientBridge::start(&config, &identity).await?;
+                return run_client(
+                    identity,
+                    bridge.address,
+                    paths,
+                    settings,
+                    attempt,
+                    Some(route.host_pin()),
+                )
+                .await;
+            }
             let addr = tokio::time::timeout(
                 std::time::Duration::from_secs(10),
                 tokio::net::lookup_host((request.address.host.as_str(), request.address.port)),
@@ -1380,6 +1431,7 @@ async fn run_requested_client(
                 paths,
                 settings,
                 attempt,
+                None,
             )
             .await
         }

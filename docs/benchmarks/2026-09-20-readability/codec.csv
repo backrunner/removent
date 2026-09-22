@@ -1,0 +1,7 @@
+codec,kbps,fps,quantizer_bound,encoded,dropped,first_frame_bytes,payload_kbps,encode_p95_ms,rgb_psnr_db
+H264,8000,30,true,30,0,47112,916.02,6.39,46.99
+H264,2000,12,true,30,0,45135,612.60,6.58,46.88
+H264,332,2,true,30,0,45135,296.20,7.14,46.98
+Hevc,8000,30,true,30,0,50866,827.63,6.86,48.90
+Hevc,2000,12,true,30,0,49457,486.83,6.69,48.93
+Hevc,332,2,true,30,0,49457,268.35,6.33,49.01

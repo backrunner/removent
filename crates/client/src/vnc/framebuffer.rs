@@ -22,9 +22,9 @@ pub(super) async fn write_pixel_format(stream: &mut OwnedWriteHalf) -> io::Resul
 }
 
 pub(super) async fn write_set_encodings(stream: &mut OwnedWriteHalf) -> io::Result<()> {
-    // Keep Raw as the only requested encoding so every supported server can
-    // produce pixels without a codec-specific decoder.
-    let encodings: &[i32] = &[0];
+    // Prefer bandwidth-saving encodings with mandatory Raw fallback. Declare
+    // resize support so conforming servers can report display changes.
+    let encodings: &[i32] = &[1, 5, 0, -223, -308, -224];
     let count = u16::try_from(encodings.len()).expect("static encoding list fits u16");
     let mut msg = Vec::with_capacity(4 + encodings.len() * 4);
     msg.extend_from_slice(&[2, 0]);
@@ -70,7 +70,7 @@ pub(super) async fn read_frames(
     dimensions: Arc<RwLock<FrameSize>>,
     format: PixelFormat,
     stats: Arc<VncStats>,
-) {
+) -> io::Result<()> {
     let mut stream = BufReader::with_capacity(
         256 * 1024,
         CountingReader {
@@ -87,10 +87,11 @@ pub(super) async fn read_frames(
             if error.kind() == io::ErrorKind::UnexpectedEof {
                 tracing::info!("VNC server closed the stream");
             } else {
-                tracing::warn!(%error, "VNC stream read failed");
+                return Err(error);
             }
             break;
         }
+        let previous_size = *dimensions.read().await;
         let update_started = Instant::now();
         let mut decode_time = Duration::ZERO;
         let result = match kind[0] {
@@ -119,15 +120,12 @@ pub(super) async fn read_frames(
             Ok(changed) => changed,
             Err(error) => {
                 tracing::warn!(%error, message_type = kind[0], "VNC server message failed");
-                break;
+                return Err(error);
             }
         };
         if kind[0] == 0 {
             let size = *dimensions.read().await;
-            if size.width == 0 || size.height == 0 {
-                continue;
-            }
-            if changed {
+            if changed && size.width > 0 && size.height > 0 {
                 let copy_started = Instant::now();
                 let frame = DecodedFrame {
                     data: framebuffer.clone(),
@@ -148,12 +146,18 @@ pub(super) async fn read_frames(
                     break;
                 }
             }
-            if signal_tx.send(FrameSignal::Updated).await.is_err() {
+            let incremental = size.width > 0 && size.height > 0 && size == previous_size;
+            if signal_tx
+                .send(FrameSignal::Updated { incremental })
+                .await
+                .is_err()
+            {
                 break;
             }
         }
     }
     let _ = signal_tx.send(FrameSignal::Closed).await;
+    Ok(())
 }
 
 struct CountingReader {
@@ -227,6 +231,7 @@ async fn read_update(
     let mut head = [0u8; 3];
     stream.read_exact(&mut head).await?;
     let count = u16::from_be_bytes([head[1], head[2]]) as usize;
+    let mut changed = false;
     for rectangle in 0..count {
         if rectangle % 32 == 31 {
             tokio::task::yield_now().await;
@@ -248,6 +253,7 @@ async fn read_update(
                 ));
             }
             let old = *dimensions.read().await;
+            changed |= old.width != w || old.height != h;
             resize_framebuffer(
                 framebuffer,
                 old,
@@ -282,6 +288,9 @@ async fn read_update(
             }
             let mut payload = vec![0u8; payload_len];
             stream.read_exact(&mut payload).await?;
+            if x == 1 && y != 0 {
+                continue;
+            }
             if w == 0 || h == 0 || w as usize * h as usize > MAX_PIXELS {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -294,6 +303,7 @@ async fn read_update(
                 height: h,
                 authoritative: true,
             };
+            changed |= old.width != new.width || old.height != new.height;
             resize_framebuffer(framebuffer, old, new);
             *dimensions.write().await = new;
             continue;
@@ -336,6 +346,7 @@ async fn read_update(
                     height: display_height,
                     authoritative: true,
                 };
+                changed |= old.width != new.width || old.height != new.height;
                 resize_framebuffer(framebuffer, old, new);
                 *dimensions.write().await = new;
             }
@@ -360,17 +371,20 @@ async fn read_update(
                     height: h,
                     authoritative: true,
                 };
+                changed |= old.width != new.width || old.height != new.height;
                 resize_framebuffer(framebuffer, old, new);
                 *dimensions.write().await = new;
             }
             continue;
         }
         let mut size = *dimensions.read().await;
-        if (size.width == 0 || size.height == 0) && encoding == 0 {
+        if (size.width == 0 || size.height == 0) && matches!(encoding, 0 | 5) {
             let new_width = x.saturating_add(w);
             let new_height = y.saturating_add(h);
             if new_width == 0
                 || new_height == 0
+                || new_width > u16::MAX.into()
+                || new_height > u16::MAX.into()
                 || new_width as usize * new_height as usize > MAX_PIXELS
             {
                 return Err(io::Error::new(
@@ -386,7 +400,7 @@ async fn read_update(
             resize_framebuffer(framebuffer, *dimensions.read().await, size);
             *dimensions.write().await = size;
         }
-        if encoding == 0
+        if matches!(encoding, 0 | 5)
             && !size.authoritative
             && (x.saturating_add(w) > size.width || y.saturating_add(h) > size.height)
         {
@@ -397,6 +411,8 @@ async fn read_update(
             };
             if expanded.width == 0
                 || expanded.height == 0
+                || expanded.width > u16::MAX.into()
+                || expanded.height > u16::MAX.into()
                 || expanded.width as usize * expanded.height as usize > MAX_PIXELS
             {
                 return Err(io::Error::new(
@@ -416,12 +432,35 @@ async fn read_update(
                 "VNC rectangle outside framebuffer",
             ));
         }
+        if encoding == 1 || encoding == 5 {
+            let rect = super::decoders::Rectangle {
+                x: x as usize,
+                y: y as usize,
+                width: w as usize,
+                height: h as usize,
+            };
+            *decode_time += if encoding == 1 {
+                super::decoders::copy_rect(
+                    stream,
+                    framebuffer,
+                    width as usize,
+                    height as usize,
+                    rect,
+                )
+                .await?
+            } else {
+                super::decoders::hextile(stream, framebuffer, width as usize, rect).await?
+            };
+            changed |= w > 0 && h > 0;
+            continue;
+        }
         if encoding != 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "VNC server did not use raw encoding",
+                format!("unsupported VNC encoding {encoding}"),
             ));
         }
+        changed |= w > 0 && h > 0;
         let bytes_per_pixel = (format.bits_per_pixel / 8) as usize;
         if !matches!(bytes_per_pixel, 2 | 4) || format.depth == 0 {
             return Err(io::Error::new(
@@ -494,7 +533,7 @@ async fn read_update(
             }
         }
     }
-    Ok(count > 0)
+    Ok(changed)
 }
 
 fn resize_framebuffer(framebuffer: &mut Vec<u8>, old: FrameSize, new: FrameSize) {
@@ -639,5 +678,49 @@ mod tests {
                 .iter()
                 .all(|pixel| *pixel == [0, 0, 0, 255])
         );
+    }
+
+    #[tokio::test]
+    async fn metadata_only_updates_do_not_republish_or_resize_on_failure() {
+        let dimensions = Arc::new(RwLock::new(FrameSize {
+            width: 2,
+            height: 2,
+            authoritative: true,
+        }));
+        let original = vec![42; 16];
+        let mut pixels = original.clone();
+        let mut decode_time = Duration::ZERO;
+        // LastRect can terminate a nominal 65535-rectangle update.
+        let mut last = vec![0, 255, 255];
+        last.extend_from_slice(&[0; 8]);
+        last.extend_from_slice(&(-224i32).to_be_bytes());
+        assert!(
+            !read_update(
+                &mut last.as_slice(),
+                &mut pixels,
+                &dimensions,
+                requested_pixel_format(),
+                &mut decode_time
+            )
+            .await
+            .unwrap()
+        );
+        // ExtendedDesktopSize: x=1 is a client request reply; y=1 means failure.
+        let mut rejected = vec![0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0];
+        rejected.extend_from_slice(&(-308i32).to_be_bytes());
+        rejected.extend_from_slice(&[0; 4]);
+        assert!(
+            !read_update(
+                &mut rejected.as_slice(),
+                &mut pixels,
+                &dimensions,
+                requested_pixel_format(),
+                &mut decode_time
+            )
+            .await
+            .unwrap()
+        );
+        assert_eq!(pixels, original);
+        assert_eq!(dimensions.read().await.width, 2);
     }
 }

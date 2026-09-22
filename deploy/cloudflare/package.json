@@ -1,0 +1,22 @@
+{
+  "name": "removent-relay-cloudflare",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "bundle:check": "wrangler deploy --dry-run --containers-rollout none --outdir ../../target/cloudflare-worker",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7",
+    "ipaddr.js": "2.2.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260920.1",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "wrangler": "4.135.0"
+  }
+}

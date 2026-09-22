@@ -1,0 +1,13 @@
+.git
+target
+userdata
+dist
+tray
+**/.DS_Store
+**/*.key
+**/relay-host.toml
+**/relays
+**/node_modules
+**/.wrangler
+**/.dev.vars*
+**/.env*

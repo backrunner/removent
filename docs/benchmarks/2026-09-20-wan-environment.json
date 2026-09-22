@@ -1,0 +1,36 @@
+{
+  "system": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "logical_cpus": 10,
+  "started_at_utc": "2026-09-20T20:01:39Z",
+  "load_at_start": [
+    87.29541015625,
+    101.1396484375,
+    70.25390625
+  ],
+  "duration_seconds": 15,
+  "note": "local impairment; mock input injection; other workloads active; no live Cloudflare deployment",
+  "websocket": {
+    "exit_code": 0,
+    "load_at_end": [
+      129.36279296875,
+      114.943359375,
+      78.3544921875
+    ]
+  },
+  "quic": {
+    "exit_code": 0,
+    "load_at_end": [
+      140.2646484375,
+      123.21044921875,
+      85.24755859375
+    ]
+  },
+  "direct": {
+    "exit_code": 0,
+    "load_at_end": [
+      89.41943359375,
+      109.87060546875,
+      83.49072265625
+    ]
+  }
+}

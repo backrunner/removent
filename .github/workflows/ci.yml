@@ -12,6 +12,40 @@ env:
   CARGO_TERM_COLOR: always
   MACOSX_DEPLOYMENT_TARGET: '13.0'
 jobs:
+  website:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: website/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm check:docs
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium webkit
+      - run: pnpm test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Removent-website
+          path: website/build/
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: website-browser-failures
+          path: website/test-results/
+          retention-days: 7
   check:
     runs-on: macos-15
     timeout-minutes: 60
@@ -32,6 +66,8 @@ jobs:
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace -- --test-threads=1
       - run: python3 scripts/gen_latest.py --self-test
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - run: bash tray/Tests/run_integration_test.sh
       - run: for script in scripts/*.sh; do bash -n "$script" || exit; done
       - name: Check installer
         run: xcrun swiftc -typecheck -target arm64-apple-macosx13.0 scripts/launcher.swift

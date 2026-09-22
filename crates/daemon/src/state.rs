@@ -14,12 +14,17 @@ use tokio_util::sync::CancellationToken;
 pub const DEFAULT_ADMISSION_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct DaemonState {
+    /// Set only by the validated system-agent entry point, never by IPC/settings.
+    pub login_window: bool,
     pub paths: DataPaths,
     pub settings: Mutex<Settings>,
     /// Local certificate short fingerprint (computed at startup, used by Status snapshots).
     pub fp_short: String,
     /// Controlled-service switch (whether the host runner should be online).
     pub enabled: AtomicBool,
+    pub host_ready: AtomicBool,
+    pub host_error: Mutex<Option<String>>,
+    pub relay_state: Mutex<(Option<bool>, Option<String>)>,
     /// Notification of `enabled` changes (subscribed by the host manager).
     pub enabled_watch: watch::Sender<bool>,
     pub sessions: Mutex<Vec<SessionInfo>>,
@@ -66,13 +71,18 @@ impl Drop for PendingAdmission<'_> {
 impl DaemonState {
     pub fn new(paths: DataPaths, settings: Settings, fp_short: String) -> Self {
         let enabled = settings.host_enabled;
+        let relay_configured = paths.root.join("relay-host.toml").exists();
         let (events, _) = broadcast::channel(64);
         let (enabled_watch, _) = watch::channel(enabled);
         Self {
+            login_window: false,
             paths,
             settings: Mutex::new(settings),
             fp_short,
             enabled: AtomicBool::new(enabled),
+            host_ready: AtomicBool::new(false),
+            host_error: Mutex::new(None),
+            relay_state: Mutex::new((relay_configured.then_some(false), None)),
             enabled_watch,
             sessions: Mutex::new(Vec::new()),
             next_session_id: AtomicU64::new(1),
@@ -95,8 +105,17 @@ impl DaemonState {
     /// Status snapshot.
     pub fn snapshot(&self) -> StatusReport {
         let settings = self.settings.lock().unwrap();
+        let relay = self.relay_state.lock().unwrap().clone();
+        let enabled = self.enabled.load(Ordering::SeqCst);
+        let ready = enabled && self.host_ready.load(Ordering::SeqCst);
         StatusReport {
-            running: self.enabled.load(Ordering::SeqCst),
+            running: enabled,
+            host_ready: ready,
+            host_error: enabled
+                .then(|| self.host_error.lock().unwrap().clone())
+                .flatten(),
+            relay_connected: relay.0.map(|connected| connected && ready),
+            relay_error: relay.1,
             port: settings.host_port,
             device_name: settings.device_name.clone(),
             fp_short: self.fp_short.clone(),
@@ -115,6 +134,9 @@ impl DaemonState {
         // access after a reboot. Preserve settings changed by another client.
         let mut settings = self.settings.lock().unwrap();
         *settings = Settings::update(&self.paths, |s| s.host_enabled = on)?;
+        if self.login_window {
+            crate::login_window::restrict(&mut settings);
+        }
         if self.enabled.swap(on, Ordering::SeqCst) != on {
             self.enabled_watch.send_replace(on);
             self.broadcast(IpcEvent::StateChanged { running: on });

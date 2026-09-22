@@ -2,7 +2,7 @@
 //!
 //! `connections.json` only records that a password exists (`password_hint`);
 //! the secret itself lives in the macOS Keychain as a generic password keyed by
-//! the bookmark's stable id. Items created by this app are readable by it
+//! the bookmark's versioned `password_key`. Items created by this app are readable by it
 //! without an interactive prompt.
 
 use removent_core::{CoreError, Result};
@@ -15,7 +15,7 @@ fn err(e: impl std::fmt::Display) -> CoreError {
     CoreError::SecureStore(e.to_string())
 }
 
-/// Create or update the stored password for a bookmark id.
+/// Create or update the stored password for an item account.
 pub fn store(account: &str, password: &str) -> Result<()> {
     store_imp(account, password).map_err(err)
 }

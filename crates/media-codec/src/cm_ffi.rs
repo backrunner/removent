@@ -53,6 +53,9 @@ unsafe extern "C" {
     /// option for VTCompressionSessionEncodeFrame.
     pub static kVTEncodeFrameOptionKey_ForceKeyFrame: CFStringRef;
 
+    /// Available since macOS 12 (the app requires macOS 13).
+    pub static kVTCompressionPropertyKey_MaxAllowedFrameQP: CFStringRef;
+
     pub fn CMSampleBufferGetSampleAttachmentsArray(
         sbuf: CMSampleBufferRef,
         createIfNecessary: u8,

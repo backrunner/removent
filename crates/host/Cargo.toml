@@ -8,6 +8,7 @@ license.workspace = true
 removent-core = { workspace = true }
 removent-proto = { workspace = true }
 removent-net = { workspace = true }
+removent-relay = { workspace = true }
 removent-media-codec = { workspace = true }
 removent-media-capture = { workspace = true }
 removent-input = { workspace = true }

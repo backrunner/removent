@@ -5,13 +5,12 @@ import subprocess
 import time
 
 
-def main():
-    sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+def wait_for_workflow(sha, workflow):
     deadline = time.monotonic() + 3600
     while time.monotonic() < deadline:
         runs = json.loads(subprocess.check_output([
             'gh', 'run', 'list', '--repo', 'backrunner/removent',
-            '--workflow', 'ci.yml', '--branch', 'main', '--commit', sha,
+            '--workflow', workflow, '--branch', 'main', '--commit', sha,
             '--event', 'push', '--limit', '5',
             '--json', 'databaseId,headSha,headBranch,event,status,conclusion',
         ], text=True, timeout=60))
@@ -21,12 +20,18 @@ def main():
             run = max(matches, key=lambda item: item['databaseId'])
             if run['status'] == 'completed':
                 if run['conclusion'] != 'success':
-                    raise SystemExit('Main CI did not pass: {}'.format(run['databaseId']))
-                print('Verified main CI {} for {}'.format(run['databaseId'], sha), flush=True)
+                    raise SystemExit('{} did not pass: {}'.format(workflow, run['databaseId']))
+                print('Verified {} run {} for {}'.format(workflow, run['databaseId'], sha), flush=True)
                 return
-        print('Waiting for main CI for {}'.format(sha), flush=True)
+        print('Waiting for {} on main for {}'.format(workflow, sha), flush=True)
         time.sleep(30)
-    raise SystemExit('Timed out waiting for main CI; release is blocked')
+    raise SystemExit('Timed out waiting for {}; release is blocked'.format(workflow))
+
+
+def main():
+    sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+    for workflow in ('ci.yml', 'relay.yml'):
+        wait_for_workflow(sha, workflow)
 
 
 if __name__ == '__main__':

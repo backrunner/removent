@@ -26,6 +26,13 @@ or both leaves the server running. The existing Swift tray is retained because
 it provides pairing PINs, admission prompts, permission setup and service controls
 without keeping a desktop window open. It is optional for a configured host.
 
+The desktop starts the tray separately, passing the same data directory. A
+per-directory kernel lock prevents duplicate trays even when desktop and login
+startup race. Status separates the saved sharing switch (`running`, retained
+for IPC compatibility) from actual RVP listener readiness (`host_ready`) and
+startup failure (`host_error`). Optional relay connection/error fields report
+the daemon-owned tunnel; see [private relay setup](private-relay.md).
+
 Packaged launches use a per-user **LaunchAgent** in the graphical `gui/<uid>`
 session, with `KeepAlive`, a 10-second restart throttle and graceful SIGTERM
 handling. Normal starts bootstrap a transient job from the data directory.
@@ -81,6 +88,10 @@ ScreenCaptureKit host's support. A locked session and display-less operation nee
 hardware/macOS-specific validation; do not equate them with a guaranteed remotely
 controllable login screen. Background registration cannot grant privacy access,
 unlock FileVault or wake a sleeping Mac by itself.
+
+See the [macOS unlock investigation](macos-unlock.md) for login-window service
+requirements and Apple's macOS 26+ Apple-silicon SSH FileVault unlock path. That
+system feature does not make this user-session RVP daemon available at preboot.
 
 ## Server-only operation
 

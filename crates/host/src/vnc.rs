@@ -96,7 +96,7 @@ pub(super) fn default_pixel_format() -> PixelFormat {
 impl PixelFormat {
     pub(super) fn supported(self) -> bool {
         self.true_colour
-            && matches!(self.bits_per_pixel, 16 | 32)
+            && matches!(self.bits_per_pixel, 8 | 16 | 32)
             && self.depth > 0
             && self.depth <= self.bits_per_pixel
             && self.red_max > 0

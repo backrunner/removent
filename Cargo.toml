@@ -12,10 +12,11 @@ members = [
     "crates/input",
     "crates/cli",
     "crates/daemon",
+    "crates/relay",
 ]
 
 [workspace.package]
-version = "0.1.0-beta.5"
+version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/backrunner/removent"
@@ -30,6 +31,7 @@ removent-media-codec = { path = "crates/media-codec" }
 removent-input = { path = "crates/input" }
 removent-client = { path = "crates/client" }
 removent-host = { path = "crates/host" }
+removent-relay = { path = "crates/relay" }
 
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }

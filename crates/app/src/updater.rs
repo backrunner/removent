@@ -22,11 +22,6 @@ use std::time::{Duration, Instant};
 pub const DEFAULT_MANIFEST_URL: &str =
     "https://github.com/backrunner/removent/releases/latest/download/latest.json";
 
-/// GitHub's latest endpoint excludes prereleases. Beta builds discover immutable
-/// per-release manifests through the releases API, including a later stable release.
-pub const BETA_RELEASES_URL: &str =
-    "https://api.github.com/repos/backrunner/removent/releases?per_page=100";
-
 /// Release-signing public key (Ed25519, hex). The private key only lives in the
 /// CI secrets of the release pipeline (release.md §2).
 const RELEASE_PUBLIC_KEY_HEX: &str =
@@ -119,15 +114,11 @@ impl UpdateShared {
 }
 
 /// Manifest endpoint: the settings override wins (enterprise mirrors), otherwise
-/// choose the GitHub channel from the compiled-in SemVer.
+/// use the stable GitHub release channel.
 pub fn manifest_endpoint(settings: &Settings) -> String {
     let custom = settings.update_endpoint.trim();
     if custom.is_empty() {
-        if parse_version(env!("CARGO_PKG_VERSION")).is_some_and(|v| !v.pre.is_empty()) {
-            BETA_RELEASES_URL.to_string()
-        } else {
-            DEFAULT_MANIFEST_URL.to_string()
-        }
+        DEFAULT_MANIFEST_URL.to_string()
     } else {
         custom.to_string()
     }
@@ -144,9 +135,11 @@ fn set_status(
 
 // ---- pure logic (unit-tested) ----
 
-/// Strict SemVer including beta identifiers (beta.10 sorts after beta.2).
+/// Stable SemVer; unreleased prerelease builds are not an update channel.
 pub fn parse_version(s: &str) -> Option<semver::Version> {
-    semver::Version::parse(s.trim().strip_prefix('v').unwrap_or(s.trim())).ok()
+    semver::Version::parse(s.trim().strip_prefix('v').unwrap_or(s.trim()))
+        .ok()
+        .filter(|v| v.pre.is_empty())
 }
 
 pub fn is_newer(remote: &str, local: &str) -> bool {
@@ -154,38 +147,6 @@ pub fn is_newer(remote: &str, local: &str) -> bool {
         (Some(r), Some(l)) => r.cmp_precedence(&l).is_gt(),
         _ => false,
     }
-}
-
-#[derive(Deserialize)]
-struct GithubRelease {
-    tag_name: String,
-    draft: bool,
-    assets: Vec<GithubAsset>,
-}
-
-#[derive(Deserialize)]
-struct GithubAsset {
-    name: String,
-    browser_download_url: String,
-}
-
-fn beta_manifest_url(body: &str) -> Result<Option<String>, String> {
-    let releases: Vec<GithubRelease> = serde_json::from_str(body)
-        .map_err(|e| t!("update.err.bad_manifest", err = e.to_string()).to_string())?;
-    Ok(releases
-        .into_iter()
-        .filter(|r| !r.draft)
-        .filter_map(|r| {
-            let version = parse_version(&r.tag_name)?;
-            // Beta users can graduate to stable; never opt them into alpha/nightly.
-            if !version.pre.is_empty() && !version.pre.as_str().starts_with("beta.") {
-                return None;
-            }
-            let asset = r.assets.into_iter().find(|a| a.name == "latest.json")?;
-            Some((version, asset.browser_download_url))
-        })
-        .max_by(|a, b| a.0.cmp_precedence(&b.0))
-        .map(|(_, url)| url))
 }
 
 /// Ed25519 signature payload: `"{version}\n{url}\n{sha256}\n{min_compatible_proto}"`
@@ -263,14 +224,6 @@ pub fn run_check(
 /// Fetch and validate the manifest; Ok(Some) = a newer compatible version exists.
 fn fetch_and_validate(endpoint: &str) -> Result<Option<UpdateManifest>, String> {
     let body = curl_get(endpoint)?;
-    let body = if endpoint == BETA_RELEASES_URL {
-        let Some(url) = beta_manifest_url(&body)? else {
-            return Ok(None);
-        };
-        curl_get(&url)?
-    } else {
-        body
-    };
     let m: UpdateManifest = serde_json::from_str(&body)
         .map_err(|e| t!("update.err.bad_manifest", err = e.to_string()).to_string())?;
     // Signature before anything else: a tampered or unsigned manifest is
@@ -679,11 +632,7 @@ fn fetch_with_retry(
                 // Avoid recording mirror URLs or raw curl stderr: either can
                 // contain credentials. Keep enough context to diagnose failures.
                 tracing::warn!(
-                    source = if url == BETA_RELEASES_URL {
-                        "beta releases"
-                    } else {
-                        "manifest"
-                    },
+                    source = "manifest",
                     attempt = attempt + 1,
                     exit_code = error.exit_code,
                     http_status = error.http_status,
@@ -839,7 +788,7 @@ mod tests {
 
     #[test]
     fn fetch_preserves_manifest_body_without_status_metadata() {
-        let body = b"{\"version\":\"0.1.0-beta.4\"}\n";
+        let body = b"{\"version\":\"0.1.0\"}\n";
         assert_eq!(
             decode_fetch_output(fetch_output(0, body, "\n200")).unwrap(),
             body
@@ -924,18 +873,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires access to the public GitHub release feed"]
-    fn official_beta_feed_fetches_a_valid_signed_manifest() {
-        // Exercise the same discovery, HTTPS requests and signature validation
-        // as the app without downloading or installing an update.
-        let feed = curl_get(BETA_RELEASES_URL).unwrap();
-        let url = beta_manifest_url(&feed)
-            .unwrap()
-            .expect("the official feed must contain a release manifest");
-        fetch_and_validate(&url).unwrap();
-    }
-
-    #[test]
     fn release_requirement_is_accepted_as_inline_source() {
         let result = Command::new("/usr/bin/csreq")
             .args(["-r", &release_codesign_requirement(), "-t"])
@@ -981,39 +918,8 @@ mod tests {
         assert!(!is_newer("0.1.0", "0.1.0"));
         assert!(!is_newer("0.1.0", "0.1.1"));
         assert!(!is_newer("garbage", "0.1.0"));
-        assert!(is_newer("0.1.0-beta.2", "0.1.0-beta.1"));
-        assert!(is_newer("0.1.0-beta.10", "0.1.0-beta.2"));
-        assert!(is_newer("0.1.0", "0.1.0-beta.10"));
-        assert!(!is_newer("0.1.0-beta.10", "0.1.0"));
+        assert!(!is_newer("9.0.0-preview.1", "0.1.0"));
         assert!(!is_newer("0.1.0+build2", "0.1.0+build1"));
-    }
-
-    #[test]
-    fn beta_feed_selects_semver_and_excludes_drafts_and_missing_assets() {
-        let release = |tag: &str, draft: bool, asset: &str| {
-            serde_json::json!({
-                "tag_name": tag, "draft": draft,
-                "assets": [{"name": asset, "browser_download_url": format!("https://example.com/{tag}")}]
-            })
-        };
-        let mut feed = vec![
-            release("v0.1.0-beta.2", false, "latest.json"),
-            release("v0.1.0-beta.10", false, "latest.json"),
-            release("v2.0.0", true, "latest.json"),
-            release("v3.0.0-alpha.1", false, "latest.json"),
-            release("v4.0.0", false, "other.json"),
-        ];
-        assert_eq!(
-            beta_manifest_url(&serde_json::to_string(&feed).unwrap()).unwrap(),
-            Some("https://example.com/v0.1.0-beta.10".into())
-        );
-        feed.push(release("v0.1.0", false, "latest.json"));
-        assert_eq!(
-            beta_manifest_url(&serde_json::to_string(&feed).unwrap()).unwrap(),
-            Some("https://example.com/v0.1.0".into())
-        );
-        assert_eq!(beta_manifest_url("[]").unwrap(), None);
-        assert!(beta_manifest_url("{}").is_err());
     }
 
     #[test]

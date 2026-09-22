@@ -1,0 +1,30 @@
+---
+title: "A closer connection starts here."
+description: "Get Removent for your Apple silicon Mac. Free and open source under Apache 2.0."
+---
+
+## Removent for Mac
+
+**macOS 13 Ventura or later · Apple silicon (arm64)**
+
+[Browse downloads on GitHub ↗](https://github.com/backrunner/removent/releases)
+
+Choose the latest published `Removent-<version>-macos-arm64.dmg`. GitHub Releases is the source of truth for available builds and release notes. Removent is in early development; review the release notes before relying on it for unattended access.
+
+## Install and connect
+
+1. Open the DMG and choose **Install and Open**, or drag Removent into Applications.
+2. Open the app. To share this Mac, complete [screen recording and input permissions](/docs/permissions).
+3. Install Removent on your other Mac and [make your first connection](/docs/connecting).
+
+Official distribution builds use Developer ID signing and notarization. Updates are announced in the app and installed only when you request them.
+
+## Already using Removent?
+
+Check for updates in the app's Settings. The updater verifies the downloaded app before replacement and keeps the previous version for rollback. The stable update feed excludes prereleases.
+
+## Prefer to build it yourself?
+
+The [source code](https://github.com/backrunner/removent) is available under Apache 2.0. Follow [Build from source](/docs/building) to create a local development build.
+
+The app currently targets macOS on Apple silicon. RDP lets this Mac app connect to a Windows host; it does not mean a Windows edition of Removent is available.

@@ -116,7 +116,10 @@ fn handle_request(state: &Arc<DaemonState>, req: IpcRequest) -> IpcResponse {
             },
         },
         IpcRequest::ReloadSettings => match Settings::load(&state.paths) {
-            Ok(s) => {
+            Ok(mut s) => {
+                if state.login_window {
+                    crate::login_window::restrict(&mut s);
+                }
                 *state.settings.lock().unwrap() = s;
                 IpcResponse::Ok
             }

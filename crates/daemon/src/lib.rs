@@ -9,6 +9,7 @@
 rust_i18n::i18n!("locales");
 
 pub mod hostmgr;
+pub mod login_window;
 pub mod server;
 pub mod state;
 pub mod tcc;

@@ -1,0 +1,97 @@
+name: Relay
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths: ['crates/relay/**', 'crates/net/**', 'crates/core/**', 'crates/proto/**', 'Cargo.*', 'deploy/relay/**', 'deploy/cloudflare/**', 'scripts/*cloudflare*', 'scripts/*relay*', '.github/workflows/relay.yml', '.github/workflows/release.yml']
+permissions:
+  contents: read
+jobs:
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked -p removent-relay
+      - run: cargo clippy --locked -p removent-relay --all-targets -- -D warnings
+      - run: cargo build --locked -p removent-relay
+      - run: python3 scripts/test_relay_launchd.py --live
+      - run: python3 -m unittest discover -s scripts -p 'test_*relay*.py'
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: relay-${{ matrix.target }}
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools cmake
+      - run: cargo test --locked -p removent-relay
+      - run: cargo clippy --locked -p removent-relay --all-targets -- -D warnings
+      - run: sh -n scripts/install_relay.sh && shellcheck scripts/install_relay.sh
+      - name: Exercise the installed systemd service
+        env:
+          RELAY_TARGET: ${{ matrix.target }}
+          CC: musl-gcc
+          RUSTFLAGS: -C linker=musl-gcc
+        run: |
+          cargo test --locked --release -p removent-relay --target "$RELAY_TARGET"
+          cargo build --locked --release -p removent-relay --target "$RELAY_TARGET"
+          readelf -l "target/$RELAY_TARGET/release/removent-relay" > "$RUNNER_TEMP/relay-elf.txt"
+          if grep -q INTERP "$RUNNER_TEMP/relay-elf.txt"; then
+            echo 'Relay must be statically linked' >&2
+            exit 1
+          fi
+          sudo install -m 755 "target/$RELAY_TARGET/release/removent-relay" /usr/local/bin/removent-relay
+          sudo python3 scripts/test_relay_systemd.py --live
+      - run: docker build -f deploy/relay/Dockerfile -t removent-relay .
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+      - run: docker build -f deploy/cloudflare/Dockerfile -t removent-relay-cloudflare .
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+  cloudflare-worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/cloudflare
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+      REMOVENT_COMPOSE_VALIDATE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: deploy/cloudflare/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: bash -n scripts/deploy_relay.sh
+        working-directory: .
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run bundle:check
+      - run: python3 -m unittest discover -s scripts -p 'test_*relay*.py'
+        working-directory: .

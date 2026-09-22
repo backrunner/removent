@@ -101,6 +101,61 @@ fn sample_hello(device_name: &str) -> HandshakeClient {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn control_writer_resumes_partial_frames_after_select_cancellation() {
+    use removent_net::{ControlCodec, control_writer::ControlWriter};
+    use tokio_util::codec::Framed;
+    let (client, host, _, _, _eps, _cd, _hd) = setup_pair().await;
+    client.inner().set_send_window(4096);
+    let (send, _recv) = client.inner().open_bi().await.unwrap();
+    let mut writer = ControlWriter::new(Framed::new(send, ControlCodec));
+    let payload = vec![0x5a; 2 * 1024 * 1024];
+    writer
+        .enqueue(ControlMsg::ClipboardSync {
+            seq: 123,
+            format: removent_proto::ClipFormat::TextUtf8,
+            data: payload.clone(),
+        })
+        .unwrap();
+    writer.enqueue(ControlMsg::Ping { ts_us: 987 }).unwrap();
+    // No receiver is consuming. This send must be partial and repeatedly
+    // cancelled, just as inbound work cancels a select! progress branch.
+    for _ in 0..4 {
+        assert!(
+            timeout(Duration::from_millis(20), writer.progress())
+                .await
+                .is_err()
+        );
+    }
+    client.inner().set_send_window(64 * 1024);
+    let (_send, recv) = host.inner().accept_bi().await.unwrap();
+    let reader = tokio::spawn(async move {
+        let mut source = Framed::new(recv, ControlCodec);
+        assert_eq!(
+            source.next().await.unwrap().unwrap(),
+            ControlItem::Msg(Box::new(ControlMsg::ClipboardSync {
+                seq: 123,
+                format: removent_proto::ClipFormat::TextUtf8,
+                data: payload,
+            }))
+        );
+        assert_eq!(
+            source.next().await.unwrap().unwrap(),
+            ControlItem::Msg(Box::new(ControlMsg::Ping { ts_us: 987 }))
+        );
+    });
+    timeout(Duration::from_secs(8), async {
+        while writer.has_pending() {
+            if let Ok(result) = timeout(Duration::from_millis(1), writer.progress()).await {
+                assert!(!result.unwrap());
+            }
+        }
+        reader.await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn minimal_stream_echo() {
     let (client, host, _cid, _hid, _eps, _cd, _hd) = setup_pair().await;
@@ -122,6 +177,65 @@ async fn minimal_stream_echo() {
         other => panic!("[m-c] recv failed: {other:?}"),
     }
     server.await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stalled_clipboard_does_not_hold_key_release_on_control_stream() {
+    use removent_net::{
+        ControlCodec, ControlSource, clipboard::ClipboardReader, control_writer::ControlWriter,
+    };
+    use tokio_util::codec::Framed;
+    let (client, host, _, _, _eps, _cd, _hd) = setup_pair().await;
+    let (mut send, _recv) = client.inner().open_bi().await.unwrap();
+    send.write_all(&removent_proto::encode_control(&ControlMsg::Ping { ts_us: 1 }).unwrap())
+        .await
+        .unwrap();
+    let (_send, recv) = host.inner().accept_bi().await.unwrap();
+    let mut source = ControlSource::new(recv, ControlCodec);
+    source.next().await.unwrap().unwrap();
+    let (_client_clipboard, clipboard_tx) = ClipboardReader::new(client.clone());
+    let mut writer = ControlWriter::with_clipboard(Framed::new(send, ControlCodec), clipboard_tx);
+    let data = vec![b'a'; removent_core::clip::MAX_CLIPBOARD_BYTES];
+    writer
+        .enqueue(ControlMsg::ClipboardSync {
+            seq: 42,
+            format: removent_proto::ClipFormat::TextUtf8,
+            data: data.clone(),
+        })
+        .unwrap();
+    // No host task accepts the clipboard stream; its receive credit runs out.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let release = ControlMsg::KeyEvent {
+        vk_code: 7,
+        modifiers: removent_proto::KeyModifiers::empty(),
+        kind: removent_proto::KeyKind::Up,
+        unicode: None,
+    };
+    writer.enqueue(release.clone()).unwrap();
+    timeout(Duration::from_millis(500), async {
+        writer.progress().await.unwrap();
+        assert_eq!(
+            source.next().await.unwrap().unwrap(),
+            ControlItem::Msg(Box::new(release))
+        );
+    })
+    .await
+    .unwrap();
+    // The independent snapshot is still intact and can finish after input.
+    let (mut host_clipboard, _clipboard_tx) = ClipboardReader::new(host);
+    let item = timeout(Duration::from_secs(5), host_clipboard.next(&mut source))
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        item,
+        ControlItem::Msg(Box::new(ControlMsg::ClipboardSync {
+            seq: 42,
+            format: removent_proto::ClipFormat::TextUtf8,
+            data
+        }))
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

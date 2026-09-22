@@ -42,7 +42,13 @@ pub(super) async fn handshake(
         Ok(if legacy_33 {
             let mut kind = [0u8; 4];
             stream.read_exact(&mut kind).await?;
-            u32::from_be_bytes(kind) as u8
+            let kind = u32::from_be_bytes(kind);
+            if !matches!(kind, 1 | 2) {
+                return Err(VncError::Protocol(format!(
+                    "unsupported RFB 3.3 security type {kind}"
+                )));
+            }
+            kind as u8
         } else {
             let mut count = [0u8; 1];
             stream.read_exact(&mut count).await?;
@@ -63,7 +69,7 @@ pub(super) async fn handshake(
     tracing::info!(security, apple_ard, "VNC security method selected");
     report_progress(progress, ConnectionStage::Authenticating);
     super::with_timeout("authentication challenge", 30, async {
-        if matches!(security, SEC_ARD | SEC_ARD_MACOS) {
+        if security == SEC_ARD {
             ard_auth(stream, username, password).await?;
         } else if security == SEC_VNC_AUTH {
             let mut challenge = [0u8; 16];
@@ -77,9 +83,8 @@ pub(super) async fn handshake(
         Ok(())
     })
     .await?;
-    // RFB 3.3 omits SecurityResult for the None type; newer versions send it
-    // for every selected security method.
-    if !legacy_33 || security != SEC_NONE {
+    // RFC 6143 appendix A: both 3.3 and 3.7 omit SecurityResult for None.
+    if client_version == RFB_VERSION || security != SEC_NONE {
         let mut result = [0u8; 4];
         super::with_timeout("authentication result", 30, async {
             Ok(stream.read_exact(&mut result).await?)
@@ -144,12 +149,18 @@ pub(super) async fn handshake(
 }
 
 pub(super) fn negotiated_version(server_version: &[u8; 12]) -> Option<&'static [u8]> {
+    if !server_version.starts_with(b"RFB ")
+        || server_version[7] != b'.'
+        || server_version[11] != b'\n'
+    {
+        return None;
+    }
     let major = parse_version_component(server_version.get(4..7)?)?;
     let minor = parse_version_component(server_version.get(8..11)?)?;
     match (major, minor) {
-        (3, 0..=6) => Some(b"RFB 003.003\n"),
         (3, 7) => Some(b"RFB 003.007\n"),
-        (3, 8..=999) | (4..=999, _) => Some(RFB_VERSION),
+        (3, 8 | 889) | (4..=999, _) => Some(RFB_VERSION),
+        (3, _) => Some(b"RFB 003.003\n"),
         _ => None,
     }
 }
@@ -247,13 +258,8 @@ pub(super) fn choose_security_type(
     // Current Screen Sharing servers advertise both 30 and 35. Type 30
     // immediately supplies the standard ARD DH challenge; selecting 35 first
     // can leave both peers waiting for data (observed on RFB 003.889).
-    if !username.is_empty() {
-        if types.contains(&SEC_ARD) {
-            return Ok(SEC_ARD);
-        }
-        if types.contains(&SEC_ARD_MACOS) {
-            return Ok(SEC_ARD_MACOS);
-        }
+    if !username.is_empty() && types.contains(&SEC_ARD) {
+        return Ok(SEC_ARD);
     }
     // macOS can also expose the separate legacy "VNC viewers" password. This
     // path deliberately remains available when no account username is set.
@@ -275,7 +281,9 @@ pub(super) fn choose_security_type(
             "Apple Remote Desktop requires a macOS username".into(),
         ));
     }
-    Err(VncError::Protocol("unsupported security type".into()))
+    Err(VncError::Protocol(format!(
+        "unsupported security types {types:?}; supported: None (1), VNC password (2), Apple ARD (30)"
+    )))
 }
 
 async fn ard_auth(stream: &mut TcpStream, username: &str, password: &[u8]) -> Result<(), VncError> {
@@ -347,6 +355,9 @@ pub(super) fn fixed_be_bytes(value: &BigUint, len: usize) -> Result<Vec<u8>, Vnc
 }
 
 pub(super) fn copy_c_string(dst: &mut [u8], src: &[u8], label: &str) -> Result<(), VncError> {
+    if src.contains(&0) {
+        return Err(VncError::Protocol(format!("{label} contains a NUL byte")));
+    }
     if dst.is_empty() || src.len() >= dst.len() {
         return Err(VncError::Protocol(format!(
             "{label} is too long for Apple ARD (maximum {} bytes)",

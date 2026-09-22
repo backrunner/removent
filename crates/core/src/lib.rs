@@ -10,6 +10,7 @@ pub mod ipc;
 pub mod logging;
 pub mod paths;
 pub mod peers;
+pub mod removent_uri;
 #[cfg(target_os = "macos")]
 pub mod service;
 pub mod settings;

@@ -12,6 +12,7 @@ path = "src/main.rs"
 removent-core = { workspace = true }
 removent-proto = { workspace = true }
 removent-net = { workspace = true }
+removent-relay = { workspace = true }
 removent-input = { workspace = true }
 removent-client = { workspace = true }
 

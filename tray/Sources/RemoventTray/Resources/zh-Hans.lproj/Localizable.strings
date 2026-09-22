@@ -42,3 +42,8 @@
 "alert.service_failed" = "无法管理后台服务";
 
 "menu.setup_permissions" = "设置屏幕共享权限…";
+
+"status.starting" = "启动中 / 正在重试";
+"menu.relay_online" = "Relay 已连接";
+"menu.relay_offline" = "Relay 未连接";
+"menu.loginwindow_managed" = "登录窗口访问由管理员独立管理";

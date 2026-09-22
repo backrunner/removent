@@ -42,3 +42,8 @@
 "alert.service_failed" = "Could Not Manage Background Service";
 
 "menu.setup_permissions" = "Set Up Screen Sharing Permissions…";
+
+"status.starting" = "Starting / retrying";
+"menu.relay_online" = "Relay connected";
+"menu.relay_offline" = "Relay disconnected";
+"menu.loginwindow_managed" = "Login-window access is managed separately by an administrator";

@@ -43,6 +43,20 @@ REMOVENT_DATA_DIR="$TMPDIR_TEST" REMOVENT_TRAY_NO_ALERTS=1 \
     tray/.build/debug/RemoventTray >"$TRAY_LOG" 2>&1 &
 TRAY_PID=$!
 
+sleep 1
+# Same data directory must not create a second menu-bar controller or IPC client.
+REMOVENT_DATA_DIR="$TMPDIR_TEST" REMOVENT_TRAY_NO_ALERTS=1 \
+    tray/.build/debug/RemoventTray >"$TMPDIR_TEST/duplicate.log" 2>&1 &
+DUPLICATE_PID=$!
+sleep 1
+if kill -0 "$DUPLICATE_PID" 2>/dev/null; then
+    kill "$DUPLICATE_PID"
+    echo "FAIL: duplicate tray did not exit"
+    exit 1
+fi
+wait "$DUPLICATE_PID" || { echo "FAIL: duplicate tray did not exit cleanly"; exit 1; }
+echo "PASS: duplicate tray exits without replacing the first"
+
 sleep 6
 
 kill "$TRAY_PID" 2>/dev/null

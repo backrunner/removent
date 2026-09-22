@@ -46,6 +46,8 @@ pub(super) fn send_frame_message(
                     value.to_le_bytes()
                 };
                 out.extend_from_slice(&bytes);
+            } else if bytes_per_pixel == 1 {
+                out.push(value as u8);
             } else if format.big_endian {
                 out.extend_from_slice(&(value as u16).to_be_bytes());
             } else {

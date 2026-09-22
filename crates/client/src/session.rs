@@ -6,10 +6,10 @@
 //! recovery: [`quick_resume`].
 
 use crate::jitter::{AudioPacketIn, JitterBuffer, PopOutcome};
+use crate::video_feedback::VideoFeedback;
 use futures::{SinkExt, StreamExt};
 use removent_core::{ClipSyncState, DeviceIdentity};
 use removent_media_codec::{AudioDecoder, VideoDecoder, extract_param_sets};
-use removent_net::session::send_control;
 use removent_net::{
     ControlItem, ControlSink, ControlSource, PairingMsg, RvpConnection, client_begin,
     client_confirm_check, client_verify,
@@ -71,6 +71,9 @@ pub struct ClientSession {
     pub conn: RvpConnection,
     /// App layer → peer control-message egress (mouse/keyboard/clipboard/keyframe/end).
     pub cmd_tx: mpsc::Sender<ControlMsg>,
+    /// Ordered UI input: coalesces adjacent motion while preserving transitions
+    /// and the final pointer position during network backpressure.
+    pub input_tx: crate::InputSender,
     pub negotiated: NegotiateAck,
     /// Most recently received quick-resume token (the host rotates it every session, §7.4).
     pub resume_token: Arc<Mutex<Option<[u8; 16]>>>,
@@ -155,7 +158,7 @@ impl ClientSession {
         buttons: u8,
         kind: removent_proto::MouseKind,
     ) -> Result<(), ConnectError> {
-        self.send(ControlMsg::MouseEvent {
+        self.send_input(ControlMsg::MouseEvent {
             display_id,
             x_px,
             y_px,
@@ -172,7 +175,7 @@ impl ClientSession {
         kind: removent_proto::KeyKind,
         unicode: Option<char>,
     ) -> Result<(), ConnectError> {
-        self.send(ControlMsg::KeyEvent {
+        self.send_input(ControlMsg::KeyEvent {
             vk_code,
             modifiers,
             kind,
@@ -188,7 +191,7 @@ impl ClientSession {
         dy_mm: f32,
         phase: removent_proto::ScrollPhase,
     ) -> Result<(), ConnectError> {
-        self.send(ControlMsg::ScrollEvent {
+        self.send_input(ControlMsg::ScrollEvent {
             display_id,
             dx_mm,
             dy_mm,
@@ -234,6 +237,13 @@ impl ClientSession {
 
     async fn send(&self, msg: ControlMsg) -> Result<(), ConnectError> {
         self.cmd_tx
+            .send(msg)
+            .await
+            .map_err(|_| ConnectError::Rejected("session closed".into()))
+    }
+
+    async fn send_input(&self, msg: ControlMsg) -> Result<(), ConnectError> {
+        self.input_tx
             .send(msg)
             .await
             .map_err(|_| ConnectError::Rejected("session closed".into()))
@@ -475,7 +485,7 @@ pub async fn connect_session(
 /// Build the session: media loops + control pump + clipboard poller.
 fn build_session(
     conn: RvpConnection,
-    mut sink: ControlSink,
+    sink: ControlSink,
     mut source: ControlSource,
     ack: NegotiateAck,
     cfg: ClientConfig,
@@ -485,6 +495,16 @@ fn build_session(
         cfg.local_clip = None;
     }
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<ControlMsg>(64);
+    let (input_tx, mut input_rx) = crate::input_queue::channel();
+    let input_commands = cmd_tx.clone();
+    let input_forwarder = tokio::spawn(async move {
+        while let Some(event) = input_rx.recv().await {
+            if input_commands.send(event.message).await.is_err() {
+                break;
+            }
+            input_rx.record_sent(event.queued_at, true);
+        }
+    });
     let (decoded_bgra_tx, decoded_bgra_rx) = removent_core::latest::channel();
     let (decoded_pcm_tx, decoded_pcm_rx) = mpsc::channel(128);
 
@@ -528,18 +548,26 @@ fn build_session(
     let cleanup = PumpCleanup {
         conn: conn.clone(),
         media: dispatch.abort_handle(),
+        input: input_forwarder.abort_handle(),
         clipboard: poller.as_ref().map(|task| task.abort_handle()),
         closed: Some(closed_tx),
     };
     let clean_end = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let pump_clean_end = clean_end.clone();
+    let clipboard_conn = conn.clone();
     let pump = tokio::spawn(async move {
         let _cleanup = cleanup;
+        let (mut clipboard, clipboard_tx) =
+            removent_net::clipboard::ClipboardReader::new(clipboard_conn);
+        let mut writer =
+            removent_net::control_writer::ControlWriter::with_clipboard(sink, clipboard_tx);
         let local_suppress = std::sync::atomic::AtomicU64::new(0);
         loop {
-            let sink = &mut sink;
             tokio::select! {
-                item = source.next() => {
+                result = writer.progress(), if writer.has_pending() => {
+                    if !matches!(result, Ok(false)) { break; }
+                }
+                item = clipboard.next(&mut source) => {
                     let Some(item) = item else { break };
                     let Ok(item) = item else { break };
                     match item {
@@ -563,12 +591,12 @@ fn build_session(
                                 // local pasteboard bridge. Always acknowledge the message
                                 // so a sender cannot remain blocked when clipboard support
                                 // is disabled or unavailable on this side.
-                                if send_control(sink, ControlMsg::ClipboardAck { seq }).await.is_err() {
+                                if writer.enqueue(ControlMsg::ClipboardAck { seq }).is_err() {
                                     break;
                                 }
                             }
                             ControlMsg::Ping { ts_us } => {
-                                if send_control(sink, ControlMsg::Pong { ts_us }).await.is_err() {
+                                if writer.enqueue(ControlMsg::Pong { ts_us }).is_err() {
                                     break;
                                 }
                             }
@@ -596,19 +624,16 @@ fn build_session(
                         ControlItem::Skipped => continue,
                     }
                 }
-                maybe_cmd = cmd_rx.recv() => {
+                maybe_cmd = cmd_rx.recv(), if writer.accepts_commands() => {
                     match maybe_cmd {
                         Some(msg @ ControlMsg::SessionEnd { .. }) => {
                             pump_clean_end.store(true, std::sync::atomic::Ordering::SeqCst);
                             // Outbound SessionEnd must actually reach the peer before we exit.
-                            if send_control(sink, msg).await.is_ok() && sink.get_mut().finish().is_ok() {
-                                let _ = tokio::time::timeout(Duration::from_secs(1), sink.get_mut().stopped()).await;
-                            }
-                            break;
+                            if writer.enqueue(msg).is_err() { break; }
                         }
                         None => break,
                         Some(msg) => {
-                            if send_control(sink, msg).await.is_err() {
+                            if writer.enqueue(msg).is_err() {
                                 break;
                             }
                         }
@@ -618,7 +643,7 @@ fn build_session(
         }
     });
 
-    let mut tasks = vec![dispatch, pump];
+    let mut tasks = vec![dispatch, pump, input_forwarder];
     if let Some(p) = poller {
         tasks.push(p);
     }
@@ -626,6 +651,7 @@ fn build_session(
     Ok(ClientSession {
         conn,
         cmd_tx,
+        input_tx,
         resume_token,
         negotiated: ack,
         decoded_bgra_rx,
@@ -642,6 +668,7 @@ fn build_session(
 struct PumpCleanup {
     conn: RvpConnection,
     media: tokio::task::AbortHandle,
+    input: tokio::task::AbortHandle,
     clipboard: Option<tokio::task::AbortHandle>,
     closed: Option<oneshot::Sender<()>>,
 }
@@ -649,6 +676,7 @@ struct PumpCleanup {
 impl Drop for PumpCleanup {
     fn drop(&mut self) {
         self.media.abort();
+        self.input.abort();
         if let Some(task) = &self.clipboard {
             task.abort();
         }
@@ -848,6 +876,12 @@ async fn media_dispatch_loop(
 ) {
     use removent_proto::{STREAM_TYPE_AUDIO, STREAM_TYPE_VIDEO};
     let mut media = tokio::task::JoinSet::new();
+    let feedback = Arc::new(VideoFeedback::default());
+    let _reporter = AbortOnDrop(tokio::spawn(crate::video_feedback::report_loop(
+        conn.clone(),
+        feedback.clone(),
+        cmd_tx.clone(),
+    )));
     let expected = if audio_enabled { 2 } else { 1 };
     let startup = async {
         for _ in 0..expected {
@@ -864,6 +898,7 @@ async fn media_dispatch_loop(
                     bgra_tx.clone(),
                     cmd_tx.clone(),
                     last_kf.clone(),
+                    feedback.clone(),
                 )),
                 STREAM_TYPE_AUDIO => media.spawn(audio_recv_loop(stream, pcm_tx.clone())),
                 other => {
@@ -894,6 +929,7 @@ fn rebuild_decoder(
     hdr: &removent_proto::VideoFrameHeader,
     payload: &[u8],
     tx: removent_core::latest::Sender<DecodedFrame>,
+    feedback: Arc<VideoFeedback>,
 ) -> Option<VideoDecoder> {
     let ps = if hdr.codec == removent_proto::CodecId::Av1 {
         Vec::new()
@@ -907,6 +943,7 @@ fn rebuild_decoder(
         height as usize,
         &ps,
         move |frame| {
+            feedback.decoded(frame.pts_us);
             let _ = tx.send(DecodedFrame {
                 data: frame.data,
                 width,
@@ -980,8 +1017,10 @@ async fn video_recv_loop(
     bgra_tx: removent_core::latest::Sender<DecodedFrame>,
     cmd_tx: mpsc::Sender<ControlMsg>,
     last_kf: Arc<Mutex<Option<Instant>>>,
+    feedback: Arc<VideoFeedback>,
 ) {
     use removent_proto::video_flags;
+    feedback.begin_frame();
     // The first byte was already consumed; the remaining header is 26 bytes.
     let mut rest = [0u8; 26];
     if !read_media_part(&mut stream, &mut rest).await {
@@ -1010,10 +1049,13 @@ async fn video_recv_loop(
     if !read_media_part(&mut stream, &mut first_payload).await {
         return;
     }
+    feedback.received(hdr0.pts_us, first_payload.len() + 27);
     if hdr0.is_keyframe() {
-        match rebuild_decoder(&hdr0, &first_payload, bgra_tx.clone()) {
+        match rebuild_decoder(&hdr0, &first_payload, bgra_tx.clone(), feedback.clone()) {
             Some(d) => {
+                feedback.decoding(hdr0.pts_us);
                 if let Err(e) = d.decode_annexb(&first_payload, hdr0.pts_us) {
+                    feedback.decode_failed(hdr0.pts_us);
                     // First-frame decode failure: nudge the host for a fresh keyframe
                     // (rate-limited, shared limiter with the other request paths)
                     // instead of only logging and waiting for the periodic IDR.
@@ -1041,9 +1083,11 @@ async fn video_recv_loop(
             return;
         }
         // Subsequent frames: full 27-byte header.
-        if stream.read_exact(&mut head_bytes[..1]).await.is_err()
-            || !read_media_part(&mut stream, &mut head_bytes[1..]).await
-        {
+        if stream.read_exact(&mut head_bytes[..1]).await.is_err() {
+            break;
+        }
+        feedback.begin_frame();
+        if !read_media_part(&mut stream, &mut head_bytes[1..]).await {
             break;
         }
         let Ok((hdr, _)) = parse_video_header(&head_bytes) else {
@@ -1058,6 +1102,8 @@ async fn video_recv_loop(
             break;
         }
 
+        feedback.received(hdr.pts_us, payload.len() + 27);
+
         // CONFIG_CHANGED or a resolution/codec change → hot-rebuild the decoder from
         // this keyframe.
         let stale = cur_cfg != Some((hdr.codec, hdr.width, hdr.height));
@@ -1069,7 +1115,7 @@ async fn video_recv_loop(
                 request_keyframe(&cmd_tx, &last_kf);
                 continue;
             }
-            match rebuild_decoder(&hdr, &payload, bgra_tx.clone()) {
+            match rebuild_decoder(&hdr, &payload, bgra_tx.clone(), feedback.clone()) {
                 Some(d) => {
                     tracing::info!(
                         codec = ?hdr.codec, w = hdr.width, h = hdr.height,
@@ -1085,11 +1131,16 @@ async fn video_recv_loop(
                 }
             }
         }
+        feedback.decoding(hdr.pts_us);
         let result = decoder
             .as_ref()
             .map(|d| d.decode_annexb(&payload, hdr.pts_us));
-        let Some(result) = result else { continue };
+        let Some(result) = result else {
+            feedback.decode_failed(hdr.pts_us);
+            continue;
+        };
         if let Err(e) = result {
+            feedback.decode_failed(hdr.pts_us);
             // Mid-stream decode failure: nudge the host for a keyframe (rate-limited)
             // so recovery does not wait for the 2s periodic IDR (or forever on a
             // static screen).
@@ -1278,6 +1329,171 @@ mod lifecycle_tests {
                 source,
             },
         )
+    }
+
+    #[tokio::test]
+    async fn receiver_stall_drives_host_adaptation_and_keeps_input_live() {
+        use removent_core::{AdaptationController, QualityPreset};
+        use removent_media_codec::VideoEncoder;
+        use removent_proto::{CodecId, KeyKind, VideoFrameHeader, build_video_frame, video_flags};
+        let caps = Caps {
+            audio: false,
+            ..Caps::all()
+        };
+        let (mut session, peer) = fixture(caps, None).await;
+        let controller = Arc::new(Mutex::new(AdaptationController::with_dimensions(
+            3000,
+            30,
+            QualityPreset::Auto,
+            320,
+            240,
+        )));
+        let (quality_tx, quality_rx) =
+            tokio::sync::watch::channel(controller.lock().unwrap().state());
+        let input = Arc::new(removent_host::RecorderInputSink::default());
+        let (_commands, commands_rx) = mpsc::channel(4);
+        let (_keyframes, keyframes_rx) = mpsc::channel(4);
+        let deps = removent_host::ControlPumpDeps {
+            conn: peer.conn.clone(),
+            kf_tx: None,
+            controller: Some(controller.clone()),
+            window_ms: 250,
+            input: Some(input.clone()),
+            local_clip: None,
+            quality_tx: Some(quality_tx),
+            caps,
+            clip_state: None,
+            cancel: Default::default(),
+            peer_fp: None,
+            // Deliberately omit sender evidence: only real receiver reports
+            // can cause adaptation in this test.
+            delivery: None,
+        };
+        let cancel = deps.cancel.clone();
+        let _pump = AbortOnDrop(removent_host::spawn_control_pump(
+            peer.source,
+            peer.sink,
+            deps,
+            commands_rx,
+        ));
+        let mut stream = peer.conn.open_media_stream().await.unwrap();
+        stream
+            .write_all(&[removent_proto::STREAM_TYPE_VIDEO])
+            .await
+            .unwrap();
+        // Leave a partial frame pending, as ordered-stream retransmission can.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if session.last_quality.lock().unwrap().is_some() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("automatic receiver feedback must reach the host");
+        let degraded = controller.lock().unwrap().state();
+        assert!(degraded.bitrate_kbps < 3000 && degraded.fps < 30);
+        assert_eq!(degraded.scale, 1.);
+        for kind in [KeyKind::Down, KeyKind::Up] {
+            session
+                .send(ControlMsg::KeyEvent {
+                    vk_code: 0,
+                    modifiers: Default::default(),
+                    kind,
+                    unicode: None,
+                })
+                .await
+                .unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if input.events.lock().unwrap().len() == 2 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("key release must arrive while video is still incomplete");
+        assert!(matches!(
+            input.events.lock().unwrap()[1],
+            removent_host::RecordedInput::Key {
+                kind: KeyKind::Up,
+                ..
+            }
+        ));
+        let mut encoder = VideoEncoder::new(CodecId::Hevc, 320, 240, 3000, 30).unwrap();
+        let raw = [40, 80, 160, 255].repeat(320 * 240);
+        let frame = encoder.encode_bgra(&raw, 0).unwrap().remove(0);
+        let packet = build_video_frame(
+            &VideoFrameHeader {
+                frame_id: 0,
+                pts_us: 0,
+                flags: video_flags::KEYFRAME,
+                codec: CodecId::Hevc,
+                width: 320,
+                height: 240,
+                payload_len: frame.data.len() as u32,
+            },
+            &frame.data,
+        );
+        stream.write_all(&packet[1..]).await.unwrap();
+        let decoded = tokio::time::timeout(Duration::from_secs(3), session.decoded_bgra_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!((decoded.width, decoded.height), (320, 240));
+        let (frames, frames_rx) = removent_core::latest::channel();
+        let _video = AbortOnDrop(removent_host::spawn_video_loop(
+            stream,
+            frames_rx,
+            keyframes_rx,
+            quality_rx,
+            CodecId::Hevc,
+            320,
+            240,
+            3000,
+            30,
+            cancel.clone(),
+            None,
+            0,
+            None,
+            None,
+        ));
+        let _producer = AbortOnDrop(tokio::spawn(async move {
+            let start = Instant::now();
+            let mut n = 0u8;
+            loop {
+                n = n.wrapping_add(1);
+                if frames
+                    .send((
+                        [n, 80, 160, 255].repeat(320 * 240),
+                        start.elapsed().as_micros() as i64 + 1,
+                    ))
+                    .is_err()
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }));
+        tokio::time::timeout(Duration::from_secs(12), async {
+            loop {
+                let frame = session
+                    .decoded_bgra_rx
+                    .recv()
+                    .await
+                    .expect("video remains live");
+                assert_eq!((frame.width, frame.height), (320, 240));
+                if controller.lock().unwrap().state().bitrate_kbps > degraded.bitrate_kbps {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("healthy decoded traffic must permit recovery");
+        cancel.cancel();
     }
 
     #[tokio::test]

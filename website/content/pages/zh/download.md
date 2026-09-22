@@ -1,0 +1,30 @@
+---
+title: "让连接，从这里开始。"
+description: "为 Apple 芯片 Mac 获取 Removent，免费开源，采用 Apache 2.0 许可。"
+---
+
+## Mac 版 Removent
+
+**macOS 13 Ventura 或更新版本 · Apple 芯片（arm64）**
+
+[在 GitHub 查看下载 ↗](https://github.com/backrunner/removent/releases)
+
+选择最新已发布的 `Removent-<version>-macos-arm64.dmg`。可用安装包与版本说明以 GitHub Releases 为准。Removent 处于早期开发阶段，用于无人值守访问前请阅读版本说明。
+
+## 安装并连接
+
+1. 打开 DMG，选择**安装并打开**，或将 Removent 拖入应用程序目录。
+2. 打开应用。如需共享这台 Mac，请配置[屏幕录制和输入权限](/docs/permissions)。
+3. 在另一台 Mac 上安装 Removent，完成[第一次连接](/docs/connecting)。
+
+正式分发构建使用 Developer ID 签名与公证。应用会提示更新，只有你主动请求时才安装。
+
+## 已经安装了 Removent？
+
+在应用设置中检查更新。更新器在替换前验证下载内容，并保留旧版本以便回滚。稳定更新源不包含预发布版本。
+
+## 想自己构建？
+
+[源代码](https://github.com/backrunner/removent)采用 Apache 2.0 许可。按照[从源码构建](/docs/building)创建本地开发版本。
+
+应用目前面向 Apple 芯片 macOS。RDP 允许这款 Mac 应用连接 Windows 主机，并不表示已有 Windows 版 Removent。

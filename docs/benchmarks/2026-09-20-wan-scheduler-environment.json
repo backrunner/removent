@@ -1,0 +1,34 @@
+{
+  "started_at_utc": "2026-09-20T20:08:08Z",
+  "load_at_start": [
+    11.53662109375,
+    69.7646484375,
+    71.34033203125
+  ],
+  "duration_seconds": 10,
+  "note": "scheduler-instrumented recheck; own compilation and resource benchmark finished before starting",
+  "quic": {
+    "exit_code": 0,
+    "load_at_end": [
+      7.22265625,
+      58.73779296875,
+      67.134765625
+    ]
+  },
+  "websocket": {
+    "exit_code": 0,
+    "load_at_end": [
+      4.861328125,
+      49.443359375,
+      63.15087890625
+    ]
+  },
+  "direct": {
+    "exit_code": 0,
+    "load_at_end": [
+      3.96435546875,
+      42.3154296875,
+      59.728515625
+    ]
+  }
+}

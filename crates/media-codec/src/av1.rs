@@ -46,6 +46,9 @@ impl Av1Encoder {
         enc.low_latency = true;
         enc.speed_settings.rdo_lookahead_frames = 1;
         enc.bitrate = (bitrate_kbps.saturating_mul(1_000)).min(i32::MAX as u32) as i32;
+        // In rav1e bitrate mode, quantizer is also the maximum allowed
+        // base quantizer. Its 0..255 scale is different from H.264/HEVC QP.
+        enc.quantizer = 100;
         enc.min_key_frame_interval = u64::from(fps.max(1));
         enc.max_key_frame_interval = u64::from(fps.max(1)).saturating_mul(2);
         let threads = std::thread::available_parallelism()

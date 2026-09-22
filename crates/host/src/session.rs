@@ -14,7 +14,6 @@ use removent_core::{
     adapt::{AdaptationController, QualityState, Sample},
 };
 use removent_media_codec::VideoEncoder;
-use removent_net::session::send_control;
 use removent_net::{ControlItem, ControlSink, ControlSource, RvpConnection};
 use removent_proto::{
     AudioPacketHeader, Caps, CodecId, ControlMsg, HandshakeServer, KeyKind, MouseKind, Negotiate,
@@ -66,6 +65,9 @@ impl HostInteractions {
 
 /// Host-side configuration.
 pub struct HostConfig {
+    pub audio_available: bool,
+    /// LoginWindow cannot display pairing or capability-expansion prompts.
+    pub preapproved_only: bool,
     pub device_name: String,
     pub admission: AdmissionMode,
     pub video_bitrate_kbps: u32,
@@ -74,6 +76,17 @@ pub struct HostConfig {
     pub input_sink: Option<Arc<dyn InputSink>>,
     /// Local clipboard bridge (NSPasteboard on real machines; an in-memory impl in tests).
     pub local_clip: Option<Arc<dyn TextClipboard>>,
+}
+
+impl HostConfig {
+    fn available_caps(&self, mut caps: Caps) -> Caps {
+        caps.audio &= self.audio_available;
+        caps.input &= self.input_sink.is_some();
+        caps.clipboard &= self.local_clip.is_some();
+        // No file-transfer implementation is offered by this host.
+        caps.file = false;
+        caps
+    }
 }
 
 /// Media sources (host-side capture implementation or test injection).
@@ -96,14 +109,18 @@ type SessionChannels = (
     tokio::sync::watch::Receiver<QualityState>,
 );
 
-fn build_session_channels(bitrate_kbps: u32, fps: u8) -> SessionChannels {
+fn build_session_channels(bitrate_kbps: u32, fps: u8, width: u32, height: u32) -> SessionChannels {
     let (cmd_tx, cmd_rx) = mpsc::channel::<ControlMsg>(64);
     let (kf_tx, kf_rx) = mpsc::channel::<()>(4);
-    let controller = Arc::new(std::sync::Mutex::new(AdaptationController::new(
-        bitrate_kbps,
-        fps,
-        removent_core::QualityPreset::Auto,
-    )));
+    let controller = Arc::new(std::sync::Mutex::new(
+        AdaptationController::with_dimensions(
+            bitrate_kbps,
+            fps,
+            removent_core::QualityPreset::Auto,
+            width,
+            height,
+        ),
+    ));
     let (quality_tx, quality_rx) = tokio::sync::watch::channel(controller.lock().unwrap().state());
     (
         cmd_tx, cmd_rx, controller, kf_tx, kf_rx, quality_tx, quality_rx,
@@ -335,6 +352,11 @@ pub async fn serve_connection(
         .peer_fingerprint()
         .map(hex::encode)
         .ok_or_else(|| HostError::Rejected("peer fingerprint missing".into()))?;
+    if cfg.preapproved_only && !peers.by_fingerprint(&peer_fp).is_some_and(|p| p.trusted) {
+        return Err(HostError::Rejected(
+            "previously trusted devices only".into(),
+        ));
+    }
 
     // The resume token is validated exactly once, inside the handshake closure, and
     // the verdict is reused for the branch below: two independent validations could
@@ -349,7 +371,12 @@ pub async fn serve_connection(
                 .hello
                 .resume_token
                 .as_ref()
-                .and_then(|t| validate_resume_full(&peer_fp, t));
+                .and_then(|t| validate_resume_full(&peer_fp, t))
+                .filter(|(_, caps, _)| {
+                    !cfg.preapproved_only
+                        || decide(cfg.admission, peers, &peer_fp, cfg.available_caps(*caps))
+                            == AdmissionDecision::Allow
+                });
             let accepted = verdict.is_some();
             *resume_verdict.lock().unwrap() = verdict;
             HandshakeServer {
@@ -376,7 +403,9 @@ pub async fn serve_connection(
     {
         invalidate_resume(&peer_fp);
         let new_token = new_token();
+        let peer_caps = cfg.available_caps(peer_caps);
         let mut ack = prev_ack;
+        ack.audio.enabled &= peer_caps.audio;
         ack.resume_token = Some(new_token);
         // Tolerate one lost rotation reply: the just-consumed current token stays
         // valid once more as the previous generation, so a client that never
@@ -391,8 +420,9 @@ pub async fn serve_connection(
         })
         .await?;
         let cancel = CancellationToken::new();
+        let (cap_w, cap_h) = fit_capture_dims(main_display.w_px, main_display.h_px);
         let (cmd_tx, cmd_rx, controller, kf_tx, kf_rx, quality_tx, quality_rx) =
-            build_session_channels(ack.video.max_bitrate_kbps, ack.video.max_fps);
+            build_session_channels(ack.video.max_bitrate_kbps, ack.video.max_fps, cap_w, cap_h);
         let clip_state = cfg
             .local_clip
             .clone()
@@ -443,11 +473,32 @@ pub async fn serve_connection(
     let ControlMsg::SessionRequest { caps } = req else {
         unreachable!()
     };
+    // Unsupported services must neither expand trust nor block unattended
+    // video/input behind a prompt for unavailable audio/clipboard/file access.
+    let caps = cfg.available_caps(caps);
+    // This session always produces a video stream. A request omitting video
+    // must not evade the corresponding stored capability grant.
+    if !caps.video {
+        sink.send(ControlMsg::SessionReject {
+            reason: removent_proto::RejectReason::Denied,
+        })
+        .await?;
+        return Err(HostError::Rejected("video capability is required".into()));
+    }
 
     // Admission ruling.
     match decide(cfg.admission, peers, &peer_fp, caps) {
         AdmissionDecision::Allow => {}
         AdmissionDecision::Ask => {
+            if cfg.preapproved_only {
+                sink.send(ControlMsg::SessionReject {
+                    reason: removent_proto::RejectReason::Denied,
+                })
+                .await?;
+                return Err(HostError::Rejected(
+                    "capabilities require prior approval".into(),
+                ));
+            }
             let short = peer_fp.chars().take(16).collect::<String>();
             // protocol.md §4.4: an admission prompt with no response within 30s is treated as a rejection.
             let prompt = (interactions.admission_prompt)(hello.hello.device_name.clone(), short);
@@ -507,7 +558,10 @@ pub async fn serve_connection(
             max_bitrate_kbps: cfg.video_bitrate_kbps,
             initial_scale: 1.0,
         },
-        audio: removent_proto::AudioParams::default(),
+        audio: removent_proto::AudioParams {
+            enabled: caps.audio,
+            ..Default::default()
+        },
     };
     sink.send(ControlMsg::NegotiateOffer {
         n: Box::new(negotiate.clone()),
@@ -524,6 +578,7 @@ pub async fn serve_connection(
 
     // Issue a resume token and send it back.
     let mut ack = *ack;
+    ack.audio.enabled &= caps.audio;
     let token = new_token();
     remember_resume(&peer_fp, &token, &ack, caps, None);
     ack.resume_token = Some(token);
@@ -533,8 +588,9 @@ pub async fn serve_connection(
     .await?;
 
     let cancel = CancellationToken::new();
+    let (cap_w, cap_h) = fit_capture_dims(display_w, display_h);
     let (cmd_tx, cmd_rx, controller, kf_tx, kf_rx, quality_tx, quality_rx) =
-        build_session_channels(ack.video.max_bitrate_kbps, ack.video.max_fps);
+        build_session_channels(ack.video.max_bitrate_kbps, ack.video.max_fps, cap_w, cap_h);
     let clip_state = cfg
         .local_clip
         .clone()
@@ -711,13 +767,19 @@ pub fn spawn_video_loop(
     tokio::spawn(async move {
         let _cancel_on_exit = cancel_on_exit;
         let work = async {
-            let ceiling = QualityState {
+            let mut ceiling = AdaptationController::with_dimensions(
                 bitrate_kbps,
-                fps: fps.max(1),
-                scale: 1.0,
-            };
+                fps,
+                removent_core::QualityPreset::Auto,
+                width as u32,
+                height as u32,
+            )
+            .state();
             let mut quality = bounded_quality(*quality_rx.borrow_and_update(), ceiling);
             let mut source_dims = (width, height);
+            if let Some(health) = &delivery {
+                health.set_capture_dims(width as u32, height as u32);
+            }
             let mut dims = scaled_dims(source_dims, quality.scale);
             let mut encoder =
                 VideoEncoder::new(codec, dims.0, dims.1, quality.bitrate_kbps, quality.fps)
@@ -729,6 +791,7 @@ pub fn spawn_video_loop(
             let mut pending = false;
             let mut last_sent = tokio::time::Instant::now();
             let mut force = false;
+            let mut refresh_unchanged = false;
             let mut config_changed = false;
             let mut frame_id = 0;
             let mut failed_encodes = 0;
@@ -741,10 +804,12 @@ pub fn spawn_video_loop(
                 }
                 tokio::select! {
                     _ = tokio::time::sleep_until(last_sent + Duration::from_secs(1)), if quality != ceiling && last_raw.is_some() && !pending => {
-                        // Probe only while degraded; cached refreshes also restore
-                        // sharpness after a static screen's network recovers.
+                        // Probe only while degraded. Reuse temporal references:
+                        // forcing a large I-frame every second can itself congest
+                        // a WAN link. Quality changes and explicit requests still
+                        // force keyframes to restore detail / reset the decoder.
                         pending = true;
-                        force = true;
+                        refresh_unchanged = true;
                     }
                     changed = quality_rx.changed(), if quality_open => {
                         if changed.is_err() { quality_open = false; continue; }
@@ -782,6 +847,10 @@ pub fn spawn_video_loop(
                                 continue;
                             };
                             source_dims = new_dims;
+                            if let Some(health) = &delivery { health.set_capture_dims(new_dims.0 as u32, new_dims.1 as u32); }
+                            ceiling = AdaptationController::with_dimensions(
+                                bitrate_kbps, fps, removent_core::QualityPreset::Auto, new_dims.0 as u32, new_dims.1 as u32,
+                            ).state();
                             dims = scaled_dims(source_dims, quality.scale);
                             encoder = VideoEncoder::new(codec, dims.0, dims.1, quality.bitrate_kbps, quality.fps)
                                 .map_err(|e| e.to_string())?;
@@ -799,7 +868,7 @@ pub fn spawn_video_loop(
                         let bgra: Arc<[u8]> = if dims == source_dims { raw.clone() } else {
                             removent_media_codec::scale::scale_bgra(raw, source_dims, dims)?.into()
                         };
-                        if !dedup.should_encode(&bgra, force) {
+                        if !dedup.should_encode(&bgra, force || refresh_unchanged) {
                             next_frame = tokio::time::Instant::now() + frame_interval(quality.fps);
                             continue;
                         }
@@ -839,7 +908,7 @@ pub fn spawn_video_loop(
                             };
                             let wire = build_video_frame(&hdr, &ef.data);
                             if let Some(health) = &delivery { health.begin_write(); }
-                            let result = tokio::time::timeout(Duration::from_secs(10), stream.write_all(&wire)).await;
+                            let result = tokio::time::timeout(Duration::from_secs(10), removent_net::session::write_media(&mut stream, &wire)).await;
                             if let Some(health) = &delivery { health.end_write(); }
                             if !matches!(result, Ok(Ok(()))) { return Ok::<(), String>(()); }
                             sent = true;
@@ -848,13 +917,17 @@ pub fn spawn_video_loop(
                         if sent {
                             failed_encodes = 0;
                             force = false;
+                            refresh_unchanged = false;
                             last_sent = tokio::time::Instant::now();
                         } else {
-                            // Software encoders can delay their first packet; a
-                            // static capture must still finish a requested refresh.
+                            // A quality-limited VT encoder may intentionally
+                            // drop frames. Let adaptation reduce the frame rate;
+                            // retain the cached refresh, with a real time bound.
                             pending = true;
-                            failed_encodes += 1;
-                            if failed_encodes >= 8 { return Err("encoder produced no frames after repeated submissions".into()); }
+                            if let Some(health) = &delivery { health.encoder_limited(); }
+                            if last_sent.elapsed() >= Duration::from_secs(10) {
+                                return Err("encoder produced no frames for ten seconds".into());
+                            }
                         }
                         if codec != CodecId::Av1 { submitted.remove(&pts); }
                         // Schedule from completion: a stalled writer must never
@@ -1012,6 +1085,7 @@ pub fn spawn_audio_loop(
 /// Resident processing pump for the control stream: Pong replies, KeyframeRequest
 /// forwarding (rate-limited), StatsReport → adaptation controller → QualityControl delivery.
 pub struct ControlPumpDeps {
+    pub conn: RvpConnection,
     /// Keyframe injection endpoint for the video loop (None when there is no video loop).
     pub kf_tx: Option<mpsc::Sender<()>>,
     pub controller: Option<std::sync::Arc<std::sync::Mutex<AdaptationController>>>,
@@ -1107,16 +1181,10 @@ impl Drop for ControlCleanup {
 /// holding the sink for the duration of the session.
 pub fn spawn_control_pump(
     mut source: ControlSource,
-    mut sink: ControlSink,
+    sink: ControlSink,
     deps: ControlPumpDeps,
     mut cmd_rx: mpsc::Receiver<ControlMsg>,
 ) -> tokio::task::JoinHandle<()> {
-    if let Some(controller) = &deps.controller {
-        controller
-            .lock()
-            .unwrap()
-            .set_scale_enabled(!deps.caps.input);
-    }
     let mut cleanup = ControlCleanup {
         tracker: Default::default(),
         input: deps.input.clone(),
@@ -1125,6 +1193,10 @@ pub fn spawn_control_pump(
     };
     tokio::spawn(async move {
         let cancel = deps.cancel.clone();
+        let (mut clipboard, clipboard_tx) =
+            removent_net::clipboard::ClipboardReader::new(deps.conn.clone());
+        let mut writer =
+            removent_net::control_writer::ControlWriter::with_clipboard(sink, clipboard_tx);
         let work = async {
             let mut last_kf: Option<std::time::Instant> = None;
             let mut input_bucket = TokenBucket::new(INPUT_RATE_LIMIT_PER_SEC);
@@ -1150,13 +1222,16 @@ pub fn spawn_control_pump(
             loop {
                 tokio::select! {
                     _ = cancel.cancelled() => break,
-                    item = source.next() => {
+                    result = writer.progress(), if writer.has_pending() => {
+                        if !matches!(result, Ok(false)) { break; }
+                    }
+                    item = clipboard.next(&mut source) => {
                         let Some(item) = item else { break };
                         let Ok(item) = item else { break };
                         match item {
                             ControlItem::Msg(m) => match *m {
                                 ControlMsg::Ping { ts_us } => {
-                                    if send_control(&mut sink, ControlMsg::Pong { ts_us }).await.is_err() {
+                                    if writer.enqueue(ControlMsg::Pong { ts_us }).is_err() {
                                         break;
                                     }
                                 }
@@ -1175,9 +1250,13 @@ pub fn spawn_control_pump(
                                     loss_pct,
                                     recv_kbps,
                                     jitter_ms,
+                                    decode_ms,
                                     ..
                                 } => {
-                                    remote_sample = Some((std::time::Instant::now(), Sample { rtt_ms, loss_pct, recv_kbps, jitter_ms }));
+                                    let sample = Sample { rtt_ms, loss_pct, recv_kbps, jitter_ms, decode_ms };
+                                    if sample.is_valid() {
+                                        remote_sample = Some((std::time::Instant::now(), sample));
+                                    }
                                 }
                                 ControlMsg::FrameGeometry { width, height } => {
                                     if (2..=MAX_CAPTURE_W).contains(&width) && (2..=MAX_CAPTURE_H).contains(&height) {
@@ -1185,9 +1264,6 @@ pub fn spawn_control_pump(
                                             cleanup.tracker.rescale_position(old, (width, height));
                                         }
                                         if let Some(input) = &deps.input { input.set_capture_dims(width, height); }
-                                        if let Some(controller) = &deps.controller {
-                                            controller.lock().unwrap().set_scale_enabled(true);
-                                        }
                                     }
                                 }
                                 ControlMsg::MouseEvent { display_id, x_px, y_px, buttons, kind } => {
@@ -1255,7 +1331,7 @@ pub fn spawn_control_pump(
                                         // Ack receipt even when this peer did not negotiate
                                         // clipboard application; otherwise a sender waiting
                                         // for confirmation can stall indefinitely.
-                                        if send_control(&mut sink, ControlMsg::ClipboardAck { seq }).await.is_err() {
+                                        if writer.enqueue(ControlMsg::ClipboardAck { seq }).is_err() {
                                             break;
                                         }
                                         continue;
@@ -1279,7 +1355,7 @@ pub fn spawn_control_pump(
                                     }
                                     // Receipt is acknowledged independently of whether a local
                                     // clipboard implementation exists.
-                                    if send_control(&mut sink, ControlMsg::ClipboardAck { seq }).await.is_err() {
+                                    if writer.enqueue(ControlMsg::ClipboardAck { seq }).is_err() {
                                         break;
                                     }
                                 }
@@ -1289,16 +1365,15 @@ pub fn spawn_control_pump(
                             ControlItem::Skipped => continue,
                         }
                     }
-                    maybe_cmd = cmd_rx.recv() => {
+                    maybe_cmd = cmd_rx.recv(), if writer.accepts_commands() => {
                         match maybe_cmd {
                             Some(msg @ ControlMsg::SessionEnd { .. }) => {
                                 // Outbound SessionEnd must actually reach the peer before we exit.
-                                let _ = send_control(&mut sink, msg).await;
-                                break;
+                                if writer.enqueue(msg).is_err() { break; }
                             }
                             None => break,
                             Some(msg) => {
-                                if send_control(&mut sink, msg).await.is_err() {
+                                if writer.enqueue(msg).is_err() {
                                     break;
                                 }
                             }
@@ -1310,7 +1385,7 @@ pub fn spawn_control_pump(
                         let remote = remote_sample.as_ref().filter(|(at, _)| at.elapsed() <= Duration::from_millis(750)).map(|(_, sample)| *sample);
                         let sample = match (local, remote) {
                             (Some(healthy), remote) => {
-                                let mut sample = remote.unwrap_or(Sample { rtt_ms: 0., loss_pct: 0., recv_kbps: 0, jitter_ms: 0. });
+                                let mut sample = remote.unwrap_or(Sample { rtt_ms: 0., loss_pct: 0., recv_kbps: 0, jitter_ms: 0., decode_ms: 0. });
                                 if !healthy { sample.jitter_ms = sample.jitter_ms.max(100.); }
                                 Some(sample)
                             }
@@ -1318,14 +1393,22 @@ pub fn spawn_control_pump(
                         };
                         let decision = deps.controller.as_ref().and_then(|controller| {
                             let mut controller = controller.lock().unwrap();
+                            let before = controller.state();
+                            if let Some((width, height)) = deps.delivery.as_ref().and_then(|d| d.capture_dims()) {
+                                controller.set_dimensions(width, height);
+                            }
                             if elapsed > 1000 || sample.is_none() { controller.pause_recovery(); }
-                            sample.and_then(|sample| controller.on_sample(&sample, elapsed.min(1000)))
+                            if let Some(sample) = sample { controller.on_sample(&sample, elapsed.min(1000)); }
+                            if let Some(delivery) = &deps.delivery {
+                                delivery.update_send_budget(controller.state().bitrate_kbps);
+                            }
+                            (before != controller.state()).then(|| controller.state())
                         });
                         if let Some(st) = decision {
                             if let Some(tx) = &deps.quality_tx { tx.send_replace(st); }
-                            if send_control(&mut sink, ControlMsg::QualityControl {
+                            if writer.enqueue(ControlMsg::QualityControl {
                                 bitrate_kbps: st.bitrate_kbps, fps: st.fps, scale: st.scale,
-                            }).await.is_err() { break; }
+                            }).is_err() { break; }
                         }
                     }
                 }
@@ -1347,7 +1430,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn adaptive_recovery_uses_real_static_refreshes_and_updates_wire_size() {
+    async fn adaptive_recovery_uses_real_static_refreshes_without_reducing_text_size() {
         let (_endpoints, client, host) = quic_pair().await;
         let (send, recv_client) = client.inner().open_bi().await.unwrap();
         let mut client_sink = ControlSink::new(send, removent_net::ControlCodec);
@@ -1358,8 +1441,13 @@ mod tests {
         let (send, recv) = host.inner().accept_bi().await.unwrap();
         let mut source = ControlSource::new(recv, removent_net::ControlCodec);
         source.next().await.unwrap().unwrap();
-        let mut controller =
-            AdaptationController::new(3000, 30, removent_core::QualityPreset::Auto);
+        let mut controller = AdaptationController::with_dimensions(
+            3000,
+            30,
+            removent_core::QualityPreset::Auto,
+            320,
+            240,
+        );
         for _ in 0..20 {
             controller.on_sample(
                 &Sample {
@@ -1367,11 +1455,13 @@ mod tests {
                     loss_pct: 10.,
                     recv_kbps: 0,
                     jitter_ms: 100.,
+                    decode_ms: 0.,
                 },
                 2500,
             );
         }
-        assert_eq!(controller.state().scale, 0.5);
+        assert_eq!(controller.state().scale, 1.0);
+        let degraded = controller.state();
         let (quality_tx, quality_rx) = tokio::sync::watch::channel(controller.state());
         let health = Arc::new(crate::delivery::DeliveryHealth::new(host.clone()));
         let (cmd_tx, cmd_rx) = mpsc::channel(4);
@@ -1381,6 +1471,7 @@ mod tests {
             source,
             ControlSink::new(send, removent_net::ControlCodec),
             ControlPumpDeps {
+                conn: host.clone(),
                 kf_tx: None,
                 controller: Some(Arc::new(std::sync::Mutex::new(controller))),
                 window_ms: 250,
@@ -1421,12 +1512,12 @@ mod tests {
             .unwrap();
         let mut stream = client.accept_media_stream().await.unwrap();
         let (first, _) = video_packet(&mut stream).await;
-        assert_eq!((first.width, first.height), (160, 120));
+        assert_eq!((first.width, first.height), (320, 240));
         let start = tokio::time::Instant::now();
         let recovered = tokio::time::timeout(Duration::from_secs(9), async {
             loop {
                 let (header, _) = video_packet(&mut stream).await;
-                if header.width > first.width {
+                if header.is_keyframe() {
                     break header;
                 }
             }
@@ -1437,8 +1528,8 @@ mod tests {
             start.elapsed() >= Duration::from_secs(4),
             "must not immediately upgrade from one write"
         );
-        assert_eq!((recovered.width, recovered.height), (240, 180));
-        assert!(recovered.is_keyframe() && recovered.config_changed());
+        assert_eq!((recovered.width, recovered.height), (320, 240));
+        assert!(recovered.is_keyframe());
         let mut replies = ControlSource::new(recv_client, removent_net::ControlCodec);
         let reply = tokio::time::timeout(Duration::from_secs(1), replies.next())
             .await
@@ -1446,7 +1537,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(
-            matches!(reply, ControlItem::Msg(msg) if matches!(*msg, ControlMsg::QualityControl { scale: 0.75, fps: 15, bitrate_kbps: 1000 }))
+            matches!(reply, ControlItem::Msg(msg) if matches!(*msg, ControlMsg::QualityControl { scale: 1.0, fps, bitrate_kbps } if fps >= degraded.fps && bitrate_kbps > degraded.bitrate_kbps))
         );
         drop(cmd_tx);
         cancel.cancel();
@@ -1517,6 +1608,7 @@ mod tests {
             ControlSource::new(recv, removent_net::ControlCodec),
             ControlSink::new(send, removent_net::ControlCodec),
             ControlPumpDeps {
+                conn: host.clone(),
                 kf_tx: None,
                 controller: None,
                 window_ms: 250,
@@ -1551,6 +1643,93 @@ mod tests {
         })
         .await
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn static_recovery_probe_uses_temporal_compression_and_explicit_refresh_is_keyframe() {
+        for codec in [CodecId::H264, CodecId::Hevc] {
+            let (_endpoints, client, host) = quic_pair().await;
+            let max = QualityState {
+                bitrate_kbps: 3000,
+                fps: 30,
+                scale: 1.0,
+            };
+            let (tx, rx) = removent_core::latest::channel();
+            let (kf_tx, kf_rx) = mpsc::channel(4);
+            let (quality_tx, quality_rx) = tokio::sync::watch::channel(max);
+            let cancel = CancellationToken::new();
+            let _stop_on_drop = cancel.clone().drop_guard();
+            let task = spawn_video_loop(
+                host.open_media_stream().await.unwrap(),
+                rx,
+                kf_rx,
+                quality_rx,
+                codec,
+                320,
+                240,
+                3000,
+                30,
+                cancel.clone(),
+                None,
+                0,
+                None,
+                None,
+            );
+            let frame: Vec<_> = (0..320 * 240)
+                .flat_map(|i| {
+                    [
+                        ((i % 320) / 8 * 7) as u8,
+                        ((i / 320) / 8 * 5) as u8,
+                        160,
+                        255,
+                    ]
+                })
+                .collect();
+            tx.send((frame, 10)).unwrap();
+            let mut stream = client.accept_media_stream().await.unwrap();
+            video_packet(&mut stream).await;
+            quality_tx.send_replace(QualityState {
+                bitrate_kbps: 1000,
+                ..max
+            });
+            let (refresh, payload) = video_packet(&mut stream).await;
+            assert!(refresh.is_keyframe());
+            let params = removent_media_codec::extract_param_sets(&payload, codec == CodecId::Hevc);
+            let decoder =
+                removent_media_codec::VideoDecoder::new(codec, 320, 240, &params).unwrap();
+            decoder.decode_annexb(&payload, refresh.pts_us).unwrap();
+            let (probe, delta) = video_packet(&mut stream).await;
+            assert!(
+                !probe.is_keyframe(),
+                "unchanged probe must preserve references"
+            );
+            assert!(
+                delta.len() < payload.len(),
+                "probe should avoid another full refresh"
+            );
+            decoder.decode_annexb(&delta, probe.pts_us).unwrap();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    if let Some(frame) = decoder.try_recv_decoded()
+                        && frame.pts_us == probe.pts_us
+                    {
+                        assert_eq!(frame.data.len(), 320 * 240 * 4);
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .unwrap();
+            kf_tx.send(()).await.unwrap();
+            let (requested, _) = video_packet(&mut stream).await;
+            assert!(
+                requested.is_keyframe(),
+                "explicit decoder recovery still forces a keyframe"
+            );
+            cancel.cancel();
+            task.await.unwrap();
+        }
     }
 
     #[tokio::test]
@@ -1786,6 +1965,7 @@ mod tests {
                 ControlSource::new(recv, removent_net::ControlCodec),
                 ControlSink::new(send, removent_net::ControlCodec),
                 ControlPumpDeps {
+                    conn: host.clone(),
                     kf_tx: None,
                     controller: None,
                     window_ms: 250,
@@ -1816,6 +1996,27 @@ mod tests {
             .await
             .unwrap();
             assert!(!task.is_finished());
+            if mode == 0 {
+                // A blocked outgoing Pong/command must not prevent a real
+                // incoming release from being injected before teardown.
+                client_sink
+                    .send(ControlMsg::KeyEvent {
+                        vk_code: 0,
+                        modifiers: KeyModifiers::empty(),
+                        kind: KeyKind::Up,
+                        unicode: None,
+                    })
+                    .await
+                    .unwrap();
+                tokio::time::timeout(Duration::from_millis(500), async {
+                    while recorder.events.lock().unwrap().len() != 2 {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .expect("outgoing congestion blocked an incoming key release");
+                assert!(!task.is_finished());
+            }
             match mode {
                 0 => cancel.cancel(),
                 1 => task.abort(),

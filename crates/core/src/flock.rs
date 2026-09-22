@@ -21,7 +21,7 @@ impl DataDirLock {
     }
 
     /// Serialize short initialization transactions shared by app and daemon.
-    pub(crate) fn acquire_blocking(lock_file: &std::path::Path) -> Result<Self> {
+    pub fn acquire_blocking(lock_file: &std::path::Path) -> Result<Self> {
         Self::lock_at(lock_file, true)
     }
 

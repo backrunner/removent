@@ -1,5 +1,6 @@
 //! removent-media-capture: ScreenCaptureKit screen frame and system audio capture.
 
+pub mod quartz;
 pub mod sck;
 pub mod sck_ffi;
 

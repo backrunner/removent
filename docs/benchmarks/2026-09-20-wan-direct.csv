@@ -1,0 +1,5 @@
+carrier,scenario,nominal_rtt_ms,link_kbps,udp_loss_pct_per_leg,tcp_stall_ms,sent,down_received,up_received,timeouts,input_p50_ms,input_p95_ms,control_rtt_p95_ms,control_rtt_p99_ms,media_mbps,final_video_kbps,proxy_dropped_packets
+direct,idle,80,8000,0,0,142,142,142,0,54.04,171.11,306.65,397.14,0.000,12000,0
+direct,video-overload,80,8000,0,0,139,139,139,0,50.75,133.14,265.30,571.86,3.033,2881,99
+direct,loss-or-stall,80,8000,2,0,143,143,143,0,49.15,227.29,413.08,641.07,2.224,1000,162
+direct,severe,150,2000,5,0,151,151,151,0,82.95,268.22,825.22,994.44,1.397,1000,1208

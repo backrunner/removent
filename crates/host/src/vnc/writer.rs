@@ -23,7 +23,7 @@ impl Drop for InputCleanup {
 }
 
 pub(super) async fn write_frames(
-    mut stream: impl tokio::io::AsyncWrite + Unpin,
+    mut stream: impl tokio::io::AsyncWrite + Unpin + Send + 'static,
     mut frame_rx: removent_core::latest::Receiver<Frame>,
     mut msg_rx: mpsc::Receiver<ClientMessage>,
     target: DisplayTarget,
@@ -34,25 +34,48 @@ pub(super) async fn write_frames(
         tracker: Default::default(),
         input: input.clone(),
     };
+    // A blocked TCP write must not hold input releases behind a large frame.
+    // At most one packet is in flight; capture still uses a latest-frame slot.
+    let (packet_tx, mut packet_rx) = mpsc::channel::<Vec<u8>>(1);
+    let (sent_tx, mut sent_rx) = mpsc::channel(1);
+    let mut writers = tokio::task::JoinSet::new();
+    writers.spawn(async move {
+        while let Some(packet) = packet_rx.recv().await {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                stream.write_all(&packet),
+            )
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "VNC frame write timed out"))??;
+            if sent_tx.send(()).await.is_err() {
+                break;
+            }
+        }
+        Ok::<(), io::Error>(())
+    });
     let work = async {
         let mut latest: Option<Frame> = None;
         let mut request: Option<(bool, u16, u16, u16, u16)> = None;
         let mut button_mask = 0u8;
         let mut modifiers = KeyModifiers::empty();
         let mut pixel_format = default_pixel_format();
+        let mut writing = false;
+        let mut fresh_frame = false;
         loop {
             tokio::select! {
                 _ = shutdown.cancelled() => break,
+                result = writers.join_next() => {
+                    return result.ok_or_else(|| io::Error::other("VNC writer task disappeared"))?
+                        .map_err(|e| io::Error::other(e.to_string()))?;
+                }
+                sent = sent_rx.recv(), if writing => {
+                    if sent.is_none() { continue; }
+                    writing = false;
+                }
                 frame = frame_rx.recv() => {
                     let Some(frame) = frame else { break };
                     latest = Some(frame);
-                    if let Some((_, x, y, w, h)) = request.take() {
-                        let frame = latest.as_ref().unwrap();
-                        let mut packet = Vec::with_capacity(16 + frame.data.len());
-                        send_frame_message(&mut packet, frame, x, y, w, h, pixel_format);
-                        tokio::time::timeout(std::time::Duration::from_secs(10), stream.write_all(&packet))
-                            .await.map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "VNC frame write timed out"))??;
-                    }
+                    fresh_frame = true;
                 }
                 msg = msg_rx.recv() => {
                     let Some(msg) = msg else { break };
@@ -61,22 +84,11 @@ pub(super) async fn write_frames(
                         if format.supported() {
                             pixel_format = format;
                         } else {
-                            tracing::debug!(
-                                bits_per_pixel = format.bits_per_pixel,
-                                depth = format.depth,
-                                "ignoring unsupported VNC pixel format"
-                            );
+                            return Err(io::Error::new(io::ErrorKind::InvalidData, "unsupported VNC pixel format"));
                         }
                     }
                     ClientMessage::FramebufferRequest { incremental, x, y, width, height } => {
                         request = Some((incremental, x, y, width, height));
-                        if !incremental && let Some(frame) = latest.as_ref() {
-                            let mut packet = Vec::with_capacity(16 + frame.data.len());
-                            send_frame_message(&mut packet, frame, x, y, width, height, pixel_format);
-                            tokio::time::timeout(std::time::Duration::from_secs(10), stream.write_all(&packet))
-                            .await.map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "VNC frame write timed out"))??;
-                            request = None;
-                        }
                     }
                     ClientMessage::Pointer { mask, x, y } => {
                         let ours = ((mask & 1 != 0) as u8 * BUTTON_LEFT)
@@ -120,6 +132,20 @@ pub(super) async fn write_frames(
                     }
                 },
             }
+            if !writing
+                && let Some((incremental, x, y, w, h)) = request
+                && (!incremental || fresh_frame)
+                && let Some(frame) = latest.as_ref()
+            {
+                let mut packet = Vec::with_capacity(16 + frame.data.len());
+                send_frame_message(&mut packet, frame, x, y, w, h, pixel_format);
+                packet_tx
+                    .try_send(packet)
+                    .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "VNC writer closed"))?;
+                writing = true;
+                fresh_frame = false;
+                request = None;
+            }
         }
         Ok(())
     };
@@ -135,6 +161,84 @@ mod tests {
     use super::*;
     use crate::input_sink::{RecordedInput, RecorderInputSink};
     use std::time::Duration;
+
+    #[tokio::test]
+    async fn stalled_frame_write_does_not_block_key_release() {
+        use tokio::io::AsyncReadExt;
+        let (stream, mut peer) = tokio::io::duplex(32);
+        let (frames, frame_rx) = removent_core::latest::channel();
+        let (messages, msg_rx) = mpsc::channel(4);
+        let input = Arc::new(RecorderInputSink::default());
+        let stop = CancellationToken::new();
+        let target = DisplayTarget {
+            id: 1,
+            capture_width: 64,
+            capture_height: 64,
+            width: 64,
+            height: 64,
+        };
+        let task = tokio::spawn(write_frames(
+            stream,
+            frame_rx,
+            msg_rx,
+            target,
+            Some(input.clone()),
+            stop.clone(),
+        ));
+        assert!(
+            frames
+                .send(Frame {
+                    data: vec![0; 64 * 64 * 4],
+                    width: 64,
+                    height: 64,
+                })
+                .is_ok()
+        );
+        messages
+            .send(ClientMessage::FramebufferRequest {
+                incremental: false,
+                x: 0,
+                y: 0,
+                width: 64,
+                height: 64,
+            })
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), peer.read_exact(&mut [0; 32]))
+            .await
+            .unwrap()
+            .unwrap();
+        // Leave the remaining frame blocked in the 32-byte transport buffer.
+        for down in [true, false] {
+            messages
+                .send(ClientMessage::Key {
+                    down,
+                    keysym: 'a' as u32,
+                })
+                .await
+                .unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if input.events.lock().unwrap().iter().any(|event| {
+                    matches!(
+                        event,
+                        RecordedInput::Key {
+                            kind: KeyKind::Up,
+                            ..
+                        }
+                    )
+                }) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("input release waited behind blocked video");
+        stop.cancel();
+        task.await.unwrap().unwrap();
+    }
 
     #[tokio::test]
     async fn stalled_or_failed_frame_write_always_releases_held_keys() {

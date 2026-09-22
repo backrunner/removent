@@ -35,4 +35,15 @@ python3 scripts/gen_latest.py "$VERSION" \
     --notes-file "docs/releases/v${VERSION}.md" > dist/latest.json
 (cd dist && shasum -a 256 "$(basename "$ZIP")" "$(basename "$DMG")" latest.json > SHA256SUMS)
 python3 scripts/verify_release.py
+# Ship the native relay manager with the same signed and notarized release.
+cargo build --locked --release -p removent-relay --target aarch64-apple-darwin --target x86_64-apple-darwin
+RELAY_NOTARY_DIR=$(mktemp -d "${TMPDIR:-/tmp}/removent-relay-notary.XXXXXXXX")
+trap 'rm -rf "$RELAY_NOTARY_DIR"' EXIT
+lipo -create target/aarch64-apple-darwin/release/removent-relay target/x86_64-apple-darwin/release/removent-relay -output "$RELAY_NOTARY_DIR/removent-relay"
+codesign --force --timestamp --options runtime --sign "$APPLE_SIGNING_IDENTITY" "$RELAY_NOTARY_DIR/removent-relay"
+python3 scripts/test_relay_launchd.py --live --binary "$RELAY_NOTARY_DIR/removent-relay"
+ditto -c -k --keepParent "$RELAY_NOTARY_DIR/removent-relay" "$RELAY_NOTARY_DIR/removent-relay.zip"
+scripts/notarize.sh "$RELAY_NOTARY_DIR/removent-relay.zip"
+codesign --verify --strict -R 'anchor apple generic and certificate leaf[subject.OU] = "PB8H83VL3Z"' "$RELAY_NOTARY_DIR/removent-relay"
+python3 scripts/package_relay.py --version "v${VERSION}" --platform macos-universal --binary "$RELAY_NOTARY_DIR/removent-relay"
 echo "Release v${VERSION} verified and ready to publish."

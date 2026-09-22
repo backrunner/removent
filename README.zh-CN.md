@@ -2,8 +2,8 @@
 
 [English](README.md)
 
-Removent 是一个用 Rust 编写的 macOS 局域网远程桌面工具：在同一局域网内查看并控制另一台
-Mac —— 无中转服务器、无账号，流量不出局域网。
+Removent 是一个用 Rust 编写的 macOS 远程桌面工具：可以在局域网直连，也可以通过自行部署的
+Rust relay 跨网络使用 RVP 私有协议，无需托管账号。
 
 - **为速度而生**：QUIC 传输、VideoToolbox 硬件 HEVC/H.264 编码、可选的软件 AV1、
   ScreenCaptureKit 采集和 Opus 音频。
@@ -16,7 +16,7 @@ Mac —— 无中转服务器、无账号，流量不出局域网。
 ## 系统要求
 
 - macOS 13.0 或更高版本，Apple Silicon（arm64）
-- 使用 Removent 原生协议时，两台 Mac 处于同一局域网（通过 mDNS 自动发现）
+- 使用 Removent 原生协议时，主机在局域网可达，或两端已配置私有 relay
 - 使用兼容连接时，远端提供可访问的 VNC 或 RDP 服务
 
 ## 快速开始
@@ -43,6 +43,24 @@ macOS 会请求两项权限 —— 共享本机时都必需：
 在「系统设置 → 隐私与安全性」中授予后，从菜单栏托盘开启被控服务。在另一台 Mac 上从设备
 列表找到本机（或手动输入 IP），输入被控端显示的配对 PIN，即可连接。
 
+### 私有 relay
+
+Linux x86_64 / ARM64 和 macOS 13+（Apple Silicon / Intel）均可一键安装预编译 relay：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install_relay.sh | sh
+```
+
+安装器校验版本与 SHA-256，随后运行二进制自带的设置向导。日常使用 `removent-relay start / stop / restart / status / logs` 管理，Linux 使用 systemd 247+，修改服务时加 sudo；macOS 使用当前用户的 LaunchAgent，无需 sudo，登录启动、退出登录停止。中继机器无需 Rust 或 Docker。需要正式发布中包含 relay 资产，详见[安装、升级与 Cloudflare 管理](docs/relay-quick-deploy.md)。
+
+新增可在 VPS 自部署的 Rust/QUIC relay，主机与控制端使用独立凭据，固定 relay 证书指纹，保留 RVP 端到端加密和设备配对。添加 Removent 主机时启用「通过 relay 连接」，可选已有 relay 或输入 `removent://域名或IP:端口`、房间和目标主机指纹，并单独选择 Cloudflare / HTTPS 或 VPS / QUIC。当前协议为 v1。凭据保存在钥匙串；不填凭据时须预先登记设备公钥。配置步骤见[私有 relay 部署](docs/private-relay.md)。
+
+也支持 [Cloudflare Containers 部署](docs/cloudflare-relay.md)：使用 WSS 承载加密 RVP，提供独立管理凭据保护的启动、停止、状态接口。没有控制端连接时默认 5 分钟休眠；手动停止状态会持久保存，被控端重试不会重新拉起容器。
+
+原生连接根据发送压力和接收端自动反馈调整码率/帧率，保留捕获尺寸与最低每帧细节预算；弱网优先保文字清晰，降低刷新频率。实测结果与能力边界见[动态清晰度报告](docs/readable-quality-2026-09-20.md)。
+
+macOS 锁屏、登录窗口和 FileVault 的能力边界见[解锁调研](docs/macos-unlock.md)。Apple Silicon + macOS 26 及以后可在满足系统条件时通过 SSH 完成重启后的 FileVault 解锁；这与 RVP relay 是独立路径，尚未接入。
+
 ### 无人值守与登录自启
 
 server 由 macOS launchd 独立管理，退出主窗口或托盘后继续运行。在托盘选择「登录时启动服务器」
@@ -66,8 +84,13 @@ server 由 macOS launchd 独立管理，退出主窗口或托盘后继续运行�
 
 在 Removent 主控端点击「添加连接」，先选择 VNC，再填写地址、端口（默认 `5900`）和本次连接
 的凭据。标准 VNC 服务只需密码；Apple Remote Desktop / macOS「屏幕共享」使用 macOS 用户名
-和密码，并执行 Apple type-30/type-35 Diffie-Hellman/AES 认证。地址支持主机名、IPv4 和 IPv6，
+和密码，并执行 Apple type-30 Diffie-Hellman/AES 认证。地址支持主机名、IPv4 和 IPv6，
 端口独立填写，协议不再由端口号推断。
+
+主控端协商 RFB 3.3／3.7／3.8，支持 Raw、CopyRect、Hextile 和桌面尺寸变化。
+当前认证支持 None（1）、VNC 密码（2）和 Apple ARD（30）。Apple type 35、VeNCrypt/TLS、
+RealVNC 私有认证和 UltraVNC MS-Logon 尚未实现，服务端须提供已支持的认证方式。验证记录和
+具体边界见[兼容性审查](docs/review-2026-09-16.md)。
 
 VNC 输入发送与画面处理独立运行，连续鼠标移动会合并为最新位置，按键、点击和滚动保持顺序，
 以减少高分辨率画面下的输入积压。查看窗口的性能信息默认隐藏；将鼠标移至窗口顶边，点击
@@ -83,6 +106,11 @@ VNC 输入发送与画面处理独立运行，连续鼠标移动会合并为最�
 RDP 默认验证服务器证书。自签名证书可导入系统信任，或在本次连接中显式开启「允许不受信任的
 服务器证书」。连接弹窗中的密码不写入设置文件。当前 RDP 兼容范围为主控端连接；不提供 RDP
 被控服务、音频、剪贴板、文件重定向或自动重连。Windows 被控端需启用远程桌面并允许该账户登录。
+
+## 官方网站
+
+官网源码位于 [`website/`](website/README.md)，基于 svedocs 构建，包含定制首页、
+中英文文档和本地搜索。开发、验证与静态托管方式见网站 README。
 
 ## 从源码构建
 
@@ -149,8 +177,7 @@ HEVC。目前使用 rav1e 软件编码和 rav1d 软件解码。Benchmark 同时�
 
 ## 自动更新
 
-Removent 在启动 30 秒后、之后每 24 小时检查新版本。Beta 版本通过 GitHub Releases API
-选择最新的 beta 或正式版，再获取对应版本已签名的 `latest.json`。正式版使用 GitHub 的
+Removent 在启动 30 秒后、之后每 24 小时检查新版本，使用 GitHub 的
 `releases/latest/download/latest.json` 地址；该地址不包含预发布版本，尚未发布正式版时会返回
 404。可在应用设置中关闭检查；该检查不影响纯局域网使用。
 
@@ -175,4 +202,4 @@ Removent 在启动 30 秒后、之后每 24 小时检查新版本。Beta 版本�
 
 [Apache-2.0](LICENSE)
 
-Beta 构建会检查后续 beta 和正式版；正式版只检查正式更新。发布与签名配置见 [发布指南](docs/release-pipeline.md)。
+更新器仅接受正式 SemVer 版本。发布与签名配置见 [发布指南](docs/release-pipeline.md)。

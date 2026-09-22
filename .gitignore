@@ -17,3 +17,7 @@
 # Local release tooling
 /.venv-release/
 __pycache__/
+node_modules/
+.wrangler/
+.dev.vars*
+!*.example

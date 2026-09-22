@@ -1,0 +1,6 @@
+{
+  "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "hardware": "Apple M4",
+  "notes": "Local synthetic UI; codec payload vs presentation time, not WAN timing. Shared development machine."
+}

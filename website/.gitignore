@@ -1,0 +1,10 @@
+node_modules/
+.svelte-kit/
+.svedocs/
+build/
+static/og/
+static/_svedocs/
+test-results/
+playwright-report/
+.env*
+!.env.example

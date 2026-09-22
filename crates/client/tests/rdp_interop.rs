@@ -132,6 +132,7 @@ impl TestServer {
             password: password.into(),
             domain: String::new(),
             accept_invalid_certificate: allow_untrusted,
+            relay: None,
         }
     }
 }

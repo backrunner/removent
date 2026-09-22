@@ -14,6 +14,12 @@ fn transport_config() -> Result<quinn::TransportConfig> {
         .map_err(|e| NetError::Endpoint(e.to_string()))?;
     tc.max_idle_timeout(Some(idle));
     tc.keep_alive_interval(Some(Duration::from_secs(2)));
+    // Default Quinn permits ~10 MB of unacknowledged application data. On a
+    // 2 Mbps uplink that can hide tens of seconds of stale video from adaptation.
+    tc.send_window(512 * 1024);
+    // Loss-based congestion control compounds badly inside a lossy relay
+    // tunnel. Estimate delivery rate/RTT while retaining QUIC pacing and bounds.
+    tc.congestion_controller_factory(Arc::new(quinn::congestion::BbrConfig::default()));
     Ok(tc)
 }
 

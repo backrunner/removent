@@ -47,7 +47,8 @@ fn run(paths: DataPaths) -> Result<()> {
     let engine = engine::Engine::new(rt, paths.clone(), settings);
     engine.start_background_daemon();
     // Tray process lookup/launch must not delay the first window.
-    engine.rt.spawn_blocking(autostart_tray);
+    let tray_paths = paths.clone();
+    engine.rt.spawn_blocking(move || autostart_tray(tray_paths));
 
     // mDNS discovery is resident: device table changes → UiEvent.
     {
@@ -230,19 +231,17 @@ fn run(paths: DataPaths) -> Result<()> {
 /// The tray is an independent process: the main app exiting does not take it down; only the
 /// user can quit it explicitly from the tray menu. Not launched again when already running.
 /// `REMOVENT_NO_TRAY=1` disables this (escape hatch for automated tests).
-fn autostart_tray() {
+fn autostart_tray(paths: DataPaths) {
     if std::env::var("REMOVENT_NO_TRAY").as_deref() == Ok("1") {
         return;
     }
-    // Already running (packaged and dev builds share the executable name).
-    let running = std::process::Command::new("pgrep")
-        .args(["-xq", "RemoventTray"])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if running {
-        return;
-    }
+    let data_root = if paths.root.is_absolute() {
+        paths.root
+    } else {
+        std::env::current_dir().unwrap_or_default().join(paths.root)
+    };
+    // The tray owns a per-data-directory flock. Process-name lookup would let
+    // an unrelated development tray suppress the installed tray and is racy.
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
@@ -265,13 +264,17 @@ fn autostart_tray() {
         }
         match std::process::Command::new("open")
             .arg("-g")
+            .arg("-n")
+            .arg("--env")
+            .arg(format!("REMOVENT_DATA_DIR={}", data_root.display()))
             .arg(&app)
-            .spawn()
+            .status()
         {
-            Ok(_) => {
+            Ok(status) if status.success() => {
                 tracing::info!(path=%app.display(), "RemoventTray launched");
                 return;
             }
+            Ok(status) => tracing::warn!(%status, path=%app.display(), "open RemoventTray failed"),
             Err(e) => tracing::warn!(err=%e, path=%app.display(), "open RemoventTray failed"),
         }
     }
@@ -286,6 +289,7 @@ fn autostart_tray() {
                 continue;
             }
             match std::process::Command::new(&bin)
+                .env("REMOVENT_DATA_DIR", &data_root)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())

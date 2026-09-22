@@ -1,0 +1,16 @@
+{
+  "backend": "vps",
+  "name": "removent-private-relay",
+  "room": "office",
+  "address": "removent://relay.example.com:48700",
+  "listen_ip": "0.0.0.0",
+  "allowed_cidrs": [
+    "203.0.113.0/24",
+    "2001:db8::/32"
+  ],
+  "admin_allowed_cidrs": null,
+  "idle_seconds": 300,
+  "max_connections": 128,
+  "max_clients_per_room": 4,
+  "max_bytes_per_second": 50000000
+}

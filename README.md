@@ -2,9 +2,9 @@
 
 [简体中文](README.zh-CN.md)
 
-Removent is a LAN remote desktop for macOS, written in Rust. It lets you view and control
-another Mac on the same local network — no relay servers, no accounts, no traffic leaving
-your LAN.
+Removent is a remote desktop for macOS, written in Rust. Connect directly on your
+LAN, or use an optional self-hosted Rust relay for private RVP connections across
+networks. No hosted account is required.
 
 - **Fast by design**: QUIC transport, VideoToolbox hardware HEVC/H.264 encoding,
   opt-in software AV1, ScreenCaptureKit capture, and Opus audio.
@@ -18,7 +18,7 @@ are working; expect rough edges).
 ## Requirements
 
 - macOS 13.0 or later, Apple Silicon (arm64)
-- For native Removent connections, both Macs on the same LAN (mDNS discovery)
+- For native Removent connections, a reachable host on the LAN or a configured private relay
 - For compatibility connections, a reachable VNC or RDP server
 
 ## Quick start
@@ -60,8 +60,14 @@ through RVP.
 To use Removent as a VNC viewer, choose **Add connection**, select VNC, then enter the host, port
 (default `5900`), and credentials for that connection. Standard VNC servers only need a password.
 Apple Remote Desktop / macOS Screen Sharing uses a macOS username and password with Apple
-type-30/type-35 Diffie-Hellman/AES authentication. Hostnames, IPv4, IPv6, and custom ports are
+type-30 Diffie-Hellman/AES authentication. Hostnames, IPv4, IPv6, and custom ports are
 supported; the protocol is selected explicitly instead of inferred from the port.
+
+The viewer negotiates RFB 3.3/3.7/3.8 and supports Raw, CopyRect, Hextile, and desktop resizing.
+Authentication currently supports None (1), VNC password (2), and Apple ARD (30).
+Apple type 35, VeNCrypt/TLS, RealVNC proprietary authentication, and UltraVNC MS-Logon
+are not implemented; servers must offer a supported method. See the
+[compatibility review](docs/review-2026-09-16.md) for verification and limits.
 
 VNC sends input independently of framebuffer processing. Consecutive pointer moves retain the
 latest position, while keys, clicks, and scrolls stay ordered through temporary stalls. Performance
@@ -94,6 +100,47 @@ unlock and the initial login window are outside the current host's support.
 The bundle includes `Contents/MacOS/removent-cli` with `daemon start`,
 `daemon login-on` and `daemon status`. See the [macOS background service guide](docs/macos-background-service.md)
 for installation, server-only commands, permissions and verification.
+
+## Private relay and macOS unlock
+
+Install a prebuilt private relay on Linux x86_64 / ARM64 or macOS 13+ (Apple Silicon / Intel):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install_relay.sh | sh
+```
+
+The installer verifies the release binary and opens its setup wizard. Manage it
+with `removent-relay start / stop / restart / status / logs`. Linux uses systemd
+247+ (sudo for changes); macOS uses a user LaunchAgent (no sudo, starts at login
+and stops at logout). Neither needs Rust or Docker on the relay machine. Requires
+a stable release containing relay assets. See [installation, upgrades and Cloudflare
+management](docs/relay-quick-deploy.md).
+
+[Deploy the Rust relay](docs/private-relay.md) on a VPS, configure separate host/controller
+credentials (or registered device keys), then select the relay in **Add connection**
+and enter `removent://host:port` and the target host fingerprint. Select
+Cloudflare / HTTPS or VPS / QUIC separately. The current protocol is v1. Credentials stay in Keychain. The
+daemon maintains the host tunnel independently of the desktop and tray.
+
+[Cloudflare Containers](docs/cloudflare-relay.md) use the Rust WSS relay with
+authenticated start/stop/status commands and controller-aware idle sleep. Manual
+stop persists; background daemon retries cannot restart the container.
+
+Native sessions adapt bitrate and frame rate from sender pressure and automatic
+receiver feedback, preserving capture dimensions and a minimum per-frame detail
+budget. Constrained links favor readable text over motion smoothness. See the
+[quality measurements and limits](docs/readable-quality-2026-09-20.md).
+
+[macOS unlock investigation](docs/macos-unlock.md) distinguishes a locked user
+session, the login window and FileVault. Apple silicon with macOS 26+ has an
+Apple-supported SSH FileVault unlock path after restart; it is separate from RVP
+and is not implemented by the relay. Locked-Mac acceptance is still required.
+
+## Website
+
+The official website source lives in [`website/`](website/README.md), built with svedocs.
+It includes a custom landing page, English and Chinese documentation, and local search.
+See the website README for development, validation, and static hosting instructions.
 
 ## Build from source
 
@@ -170,8 +217,7 @@ architecture, protocol — currently in Chinese).
 ## Updates
 
 Removent checks for updates 30 seconds after launch and then every 24 hours.
-Beta builds use the GitHub Releases API to find the newest beta or stable release,
-then fetch that release's signed `latest.json`. Stable builds use GitHub's
+The updater uses GitHub's
 `releases/latest/download/latest.json` endpoint, which excludes prereleases and
 returns 404 until a stable release exists. You can turn checks off in the app's
 settings; they never interfere with LAN-only operation.
@@ -199,4 +245,4 @@ locally, set `APPLE_SIGNING_IDENTITY` plus notarization credentials
 
 [Apache-2.0](LICENSE)
 
-Beta builds check for later betas and stable releases; stable builds only check stable releases. See the [release guide](docs/release-pipeline.md) for signing and publishing.
+Only stable SemVer releases are accepted. See the [release guide](docs/release-pipeline.md) for signing and publishing.

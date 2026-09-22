@@ -1,0 +1,11 @@
+# Save with mode 0600. Never commit real credentials.
+server = "removent://relay.example.com:48700"
+transport = "quic"
+server_fingerprint = "REPLACE_WITH_RELAY_CERTIFICATE_SHA256"
+room = "office"
+token = "REPLACE_WITH_ROLE_SPECIFIC_TOKEN"
+
+# Required on controllers (unused by host registration). Obtain from the host
+# with `removent-cli identity` over a trusted channel.
+host_fingerprint = "REPLACE_WITH_TARGET_HOST_CERTIFICATE_SHA256"
+# token may be omitted only when the relay has registered this role/device key.

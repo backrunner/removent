@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "removent-private-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-20",
+  "containers": [
+    {
+      "class_name": "RelayContainer",
+      "image": "./Dockerfile",
+      "image_build_context": "../..",
+      "max_instances": 1,
+      "instance_type": "standard-2"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RELAY",
+        "class_name": "RelayContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "RelayContainer"
+      ]
+    }
+  ],
+  "vars": {
+    "RELAY_ROOM": "office",
+    "RELAY_IDLE_SECONDS": "300",
+    "RELAY_ALLOWED_CIDRS": ""
+  }
+}

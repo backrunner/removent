@@ -1,11 +1,14 @@
 //! removent-client: controller-side session engine.
 
 pub mod connection;
+mod input_queue;
+pub use input_queue::{InputSender, InputSnapshot};
 pub mod jitter;
 pub mod keychain;
 pub mod rdp;
 pub mod saved;
 pub mod session;
+mod video_feedback;
 pub mod vnc;
 
 pub use jitter::{AudioPacketIn, JitterBuffer, PopOutcome};

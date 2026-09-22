@@ -1,0 +1,50 @@
+[
+  {
+    "codec": "H264",
+    "scene": "static",
+    "source_bytes": 544576,
+    "zstd1_bytes": 544605
+  },
+  {
+    "codec": "H264",
+    "scene": "local-motion",
+    "source_bytes": 4013762,
+    "zstd1_bytes": 3938880
+  },
+  {
+    "codec": "H264",
+    "scene": "scroll",
+    "source_bytes": 4293254,
+    "zstd1_bytes": 4043429
+  },
+  {
+    "codec": "H264",
+    "scene": "full-motion",
+    "source_bytes": 3794641,
+    "zstd1_bytes": 3794742
+  },
+  {
+    "codec": "Hevc",
+    "scene": "static",
+    "source_bytes": 536743,
+    "zstd1_bytes": 536772
+  },
+  {
+    "codec": "Hevc",
+    "scene": "local-motion",
+    "source_bytes": 4078281,
+    "zstd1_bytes": 4078391
+  },
+  {
+    "codec": "Hevc",
+    "scene": "scroll",
+    "source_bytes": 3522329,
+    "zstd1_bytes": 3511464
+  },
+  {
+    "codec": "Hevc",
+    "scene": "full-motion",
+    "source_bytes": 3118038,
+    "zstd1_bytes": 3118124
+  }
+]

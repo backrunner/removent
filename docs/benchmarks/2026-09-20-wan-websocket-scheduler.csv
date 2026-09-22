@@ -1,0 +1,5 @@
+carrier,scenario,nominal_rtt_ms,link_kbps,udp_loss_pct_per_leg,tcp_stall_ms,sent,down_received,up_received,timeouts,input_p50_ms,input_p95_ms,control_rtt_p95_ms,control_rtt_p99_ms,media_mbps,final_video_kbps,proxy_dropped_packets,sample_seconds,scheduler_lag_max_ms
+websocket,idle,80,8000,0,0,101,101,101,0,43.31,44.96,90.63,91.09,0.000,12000,0,10.001,3.97
+websocket,video-overload,80,8000,0,0,101,101,101,0,42.79,44.11,182.38,190.06,7.680,12000,0,10.002,2.67
+websocket,loss-or-stall,80,8000,0,200,101,101,101,0,43.78,228.58,490.89,514.43,3.320,2016,0,10.002,3.77
+websocket,severe,150,2000,0,300,101,101,101,0,102.51,330.92,1448.20,1632.26,1.263,2016,0,10.002,3.95

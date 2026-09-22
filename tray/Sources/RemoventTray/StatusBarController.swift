@@ -60,7 +60,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             if changed { self.rebuildMenu() }
             self.updateIcon()
         }
-        retireLegacyTrayLoginItem()
         client.start()
         refreshServiceStatus()
 
@@ -265,6 +264,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         if !connected {
             stateText = String(localized: "status.daemon_offline", bundle: .module, comment: "Menu status: daemon not connected")
             stateSymbol = "exclamationmark.circle"
+        } else if status?.running == true && status?.host_ready == false {
+            stateText = String(localized: "status.starting", bundle: .module)
+            stateSymbol = "exclamationmark.circle"
         } else if status?.running == true {
             stateText = String(localized: "status.running", bundle: .module, comment: "Menu status: service running")
             stateSymbol = "checkmark.circle.fill"
@@ -273,6 +275,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             stateSymbol = "pause.circle"
         }
         menu.addItem(infoItem(String(format: String(localized: "menu.service_status", bundle: .module, comment: "Menu status line"), stateText), symbol: stateSymbol))
+        if let error = status?.host_error {
+            menu.addItem(infoItem(error, symbol: "exclamationmark.triangle"))
+        }
+        if let relay = status?.relay_connected {
+            let key = relay ? "menu.relay_online" : "menu.relay_offline"
+            menu.addItem(infoItem(NSLocalizedString(key, bundle: .module, comment: "Relay connection status"), symbol: relay ? "network" : "exclamationmark.triangle"))
+            if let error = status?.relay_error { menu.addItem(infoItem(error)) }
+        }
         if let s = status, !s.fp_short.isEmpty {
             menu.addItem(infoItem(String(format: String(localized: "menu.device_fingerprint", bundle: .module, comment: "Menu device fingerprint line"), s.fp_short)))
         }
@@ -348,11 +358,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
         let trayLogin = NSMenuItem(title: String(localized: "menu.tray_at_login", bundle: .module), action: #selector(toggleTrayAtLogin), keyEquivalent: "")
         trayLogin.target = self
-        trayLogin.state = FileManager.default.fileExists(atPath: trayLoginURL.path) ? .on : .off
-        trayLogin.isEnabled = serviceCLI != nil
+        trayLogin.state = ownsTrayLoginItem && FileManager.default.fileExists(atPath: trayLoginURL.path) ? .on : .off
+        trayLogin.isEnabled = ownsTrayLoginItem && serviceCLI != nil
         menu.addItem(trayLogin)
 
         menu.addItem(infoItem(String(localized: "menu.unattended_hint", bundle: .module)))
+        if FileManager.default.fileExists(atPath: "/Library/LaunchAgents/com.alkinum.removent.loginwindow.plist") {
+            menu.addItem(infoItem(String(localized: "menu.loginwindow_managed", bundle: .module), symbol: "lock.shield"))
+        }
 
         menu.addItem(.separator())
 
@@ -530,34 +543,31 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             .appendingPathComponent("Library/LaunchAgents/com.alkinum.removent.tray.plist")
     }
 
-    /// Machines that ran a pre-rename beta may still carry the old launch item;
-    /// drop the stale plist and unload its job so it cannot open a removed app.
-    private func retireLegacyTrayLoginItem() {
-        let legacy = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents/com.removent.tray.plist")
-        try? FileManager.default.removeItem(at: legacy)
-        let bootout = Process()
-        bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        bootout.arguments = ["bootout", "gui/\(getuid())/com.removent.tray"]
-        bootout.standardOutput = FileHandle.nullDevice
-        bootout.standardError = FileHandle.nullDevice
-        try? bootout.run()
+    private var ownsTrayLoginItem: Bool {
+        canManageTrayLogin(bundleID: Bundle.main.bundleIdentifier,
+                           dataDirectory: DaemonClient.dataDirectory(),
+                           home: FileManager.default.homeDirectoryForCurrentUser)
+    }
+
+    private static func writeTrayLoginItem(to url: URL, bundle: URL) throws {
+        let plist: [String: Any] = [
+            "Label": "com.alkinum.removent.tray",
+            "ProgramArguments": ["/usr/bin/open", "-g", bundle.path],
+            "RunAtLoad": true,
+            "LimitLoadToSessionType": "Aqua"
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
     }
 
     @objc private func toggleTrayAtLogin() {
+        guard ownsTrayLoginItem else { return }
         do {
             if FileManager.default.fileExists(atPath: trayLoginURL.path) {
                 try FileManager.default.removeItem(at: trayLoginURL)
             } else {
-                let plist: [String: Any] = [
-                    "Label": "com.alkinum.removent.tray",
-                    "ProgramArguments": ["/usr/bin/open", "-g", Bundle.main.bundleURL.path],
-                    "RunAtLoad": true,
-                    "LimitLoadToSessionType": "Aqua"
-                ]
-                let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
-                try FileManager.default.createDirectory(at: trayLoginURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try data.write(to: trayLoginURL, options: .atomic)
+                try Self.writeTrayLoginItem(to: trayLoginURL, bundle: Bundle.main.bundleURL)
             }
         } catch { showServiceError(error.localizedDescription) }
         rebuildMenu()

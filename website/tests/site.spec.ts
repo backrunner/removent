@@ -69,6 +69,8 @@ test('mobile navigation, reading, and localized pages fit narrow screens', async
   await page.setViewportSize({ width: 390, height: 844 });
   await ready(page, '/zh');
   await expect(page.locator('.rv-menu-toggle')).toBeVisible();
+  await expect(page.locator('.sd-scope-label-short')).toBeVisible();
+  await expect(page.locator('.sd-scope-label-full')).toBeHidden();
   await expect(page.locator('.rv-search-control > svg')).toBeVisible();
   await page.locator('.sd-search-trigger').click();
   await expect(page.getByRole('combobox')).toBeVisible();

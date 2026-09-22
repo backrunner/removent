@@ -101,6 +101,10 @@ def run():
         assert cli("fingerprint").strip() == fingerprint
         assert saved == {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in CONFIG.glob("*.toml")}
         print("Native systemd setup, readiness, lifecycle, permissions and identity retention passed")
+    except Exception:
+        subprocess.run(["systemctl", "status", "--no-pager", "removent-relay.service"], check=False)
+        subprocess.run(["journalctl", "--unit", "removent-relay.service", "--lines", "50", "--no-pager"], check=False)
+        raise
     finally:
         if UNIT.exists():
             subprocess.run(["systemctl", "disable", "--now", "removent-relay.service"], check=False)

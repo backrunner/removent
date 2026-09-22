@@ -489,7 +489,7 @@ mod tests {
         let unit = linux::service_unit();
         assert!(unit.contains("DynamicUser=yes"));
         assert!(unit.contains("LoadCredential=server.toml:/etc/removent-relay/server.toml"));
-        assert!(unit.contains("serve %d/server.toml"));
+        assert!(unit.contains("serve ${CREDENTIALS_DIRECTORY}/server.toml"));
         assert!(unit.contains("StateDirectory=removent-relay"));
         assert!(!unit.contains("/bin/bash"));
     }

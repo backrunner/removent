@@ -2,7 +2,7 @@ import { zhShell } from './shell-messages.ts';
 
 export const en = {
   'site.overview': 'Overview', 'site.download': 'Download', 'site.github': 'Source on GitHub',
-  'site.home': 'Removent home', 'site.docsLabel': 'THE FIELD GUIDE', 'site.docsNote': 'A little setup. A closer connection.',
+  'site.home': 'Removent home',
   'site.footer': 'A little distance. No disconnect.', 'site.built': 'Made for Mac. Open by design.',
   'site.license': 'Apache 2.0', 'site.privacy': 'Privacy', 'site.releases': 'Releases',
   'hero.eyebrow': 'REMOTE DESKTOP, MADE FOR MAC',
@@ -53,7 +53,7 @@ export const en = {
 export const zh: Record<keyof typeof en, string> & Record<string, string> = {
   ...zhShell,
   'site.overview': '概览', 'site.download': '下载', 'site.github': '在 GitHub 查看源码',
-  'site.home': 'Removent 首页', 'site.docsLabel': '使用指南', 'site.docsNote': '简单设置，让连接更近。',
+  'site.home': 'Removent 首页',
   'site.footer': '距离远一点，连接近一点。', 'site.built': '为 Mac 而生，以开源相连。',
   'site.license': 'Apache 2.0 许可', 'site.privacy': '隐私', 'site.releases': '版本发布',
   'hero.eyebrow': '为 MAC 打造的远程桌面', 'hero.line1': '另一台 Mac，', 'hero.line2': '就在眼前。',

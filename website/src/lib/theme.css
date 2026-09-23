@@ -154,7 +154,6 @@ a { text-decoration: none; }
 /* The documentation has its own geometry; svedocs retains reading behavior. */
 .rv-docs-shell { max-width: 1320px; margin: auto; padding: 40px var(--rv-gutter) 75px; display: grid; grid-template-columns: 210px minmax(0, 1fr) 175px; gap: 40px; min-height: calc(100vh - 300px); }
 .rv-docs-sidebar { position: sticky; top: 108px; max-height: calc(100vh - 130px); overflow: auto; padding-right: 18px; border-right: 1px solid var(--rv-line); }
-.rv-sidebar-heading { padding: 0 10px 24px; }.rv-sidebar-heading p { font-size: 11px; color: var(--rv-muted); line-height: 1.7; margin: 9px 0 0; }
 .rv-docs-sidebar .sd-sidebar-link { font-size: 12px; padding: 9px 10px; border-radius: 6px; line-height: 1.5; }
 .rv-docs-sidebar .sd-sidebar-link.sd-active { background: var(--rv-tint); color: var(--rv-blue); }.rv-docs-sidebar .sd-sidebar-link::before { display: none; }
 .rv-sidebar-source { margin: 30px 10px 0; padding-top: 18px; border-top: 1px solid var(--rv-line); display: flex; justify-content: space-between; color: var(--rv-muted); font-size: 11px; }

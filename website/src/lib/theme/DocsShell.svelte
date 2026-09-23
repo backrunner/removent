@@ -5,7 +5,6 @@
 </script>
 <div class="rv-docs-shell">
   <aside class="rv-docs-sidebar" aria-label={context.t('nav.documentation')}>
-    <div class="rv-sidebar-heading"><span class="rv-eyebrow">{context.t('site.docsLabel')}</span><p>{context.t('site.docsNote')}</p></div>
     <nav><SidebarTree items={navigationTree} currentPath={page.routePath} /></nav>
     <a class="rv-sidebar-source" href="https://github.com/backrunner/removent">GitHub <span aria-hidden="true">↗</span></a>
   </aside>

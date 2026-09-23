@@ -24,13 +24,22 @@ pnpm preview
 
 The browser tests run against the production build. They cover protocol preview controls, localized navigation and search, theme persistence, 320–768px layouts, document anchors and code copy, metadata and markdown endpoints, downloads, and unknown routes. Screenshots and failure traces are written to ignored `test-results/`.
 
-## Static hosting
+## Deploy to Cloudflare
 
-`pnpm build` writes the complete site to `build/`. Deploy that directory to a static host that supports directory indexes and serves `404.html` with a 404 status for unknown paths. No Worker, database, AI provider, or API credentials are required.
+The production site is **https://removent.pwp.sh**. `pnpm build` writes the complete site to `build/`; Wrangler deploys it as Cloudflare Workers Static Assets using `wrangler.jsonc`. Cloudflare manages the custom domain and HTTPS certificate. Unknown paths serve `404.html` with a 404 status. No runtime Worker code, database, AI provider, or application API credentials are required.
 
-The main GitHub Actions CI builds the site, validates both languages, runs Chromium and WebKit tests, and uploads the static output as the `Removent-website` artifact. The release workflow requires this CI to pass for the exact release commit. Hosting deployment is separate.
+With Wrangler authenticated to the Alkinum account, deploy from this directory:
 
-The default canonical origin is `https://removent.alkinum.com`. This is a configurable publishing target, not a claim that the domain has been deployed. Set the actual origin at build time:
+```sh
+pnpm install --frozen-lockfile
+pnpm run deploy
+```
+
+The deploy command checks types and documentation, builds the site, and runs `wrangler deploy`. To inspect the deployment configuration without publishing, run `pnpm build` followed by `pnpm exec wrangler deploy --dry-run`.
+
+The main GitHub Actions CI builds the site, validates both languages, runs Chromium and WebKit tests, and uploads the static output as the `Removent-website` artifact. The release workflow requires this CI to pass for the exact release commit. Website deployment uses the Wrangler command above and does not run automatically on an app release.
+
+The default canonical origin is `https://removent.pwp.sh`. Override it only when building for a different publishing target, and update the Wrangler custom domain to match:
 
 ```sh
 SITE_URL=https://your-domain.example pnpm build

@@ -5,7 +5,7 @@ export default defineConfig({
   site: {
     name: 'Removent', title: 'Removent',
     description: 'Your other Mac. Right here. Native remote desktop with direct connections and a private relay you control.',
-    url: process.env.SITE_URL || 'https://removent.alkinum.com'
+    url: process.env.SITE_URL || 'https://removent.pwp.sh'
   },
   build: { mode: 'static' },
   theme: {

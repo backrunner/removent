@@ -121,8 +121,8 @@ test('docs anchors remain visible and code copy uses the displayed command', asy
 
 test('static metadata, markdown, sitemap, assets, and download destinations are usable', async ({ page, request }) => {
   await ready(page, '/docs/zh/relay');
-  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://removent.alkinum.com/docs/zh/relay/');
-  await expect(page.locator('link[hreflang="en"]')).toHaveAttribute('href', 'https://removent.alkinum.com/docs/relay/');
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://removent.pwp.sh/docs/zh/relay/');
+  await expect(page.locator('link[hreflang="en"]')).toHaveAttribute('href', 'https://removent.pwp.sh/docs/relay/');
   const og = await page.locator('meta[property="og:image"]').getAttribute('content');
   expect((await request.get(new URL(og!).pathname)).ok()).toBeTruthy();
   for (const route of ['/docs/zh/relay/index.md', '/index.md', '/llms.txt', '/llms-full.txt', '/sitemap.xml', '/robots.txt']) {

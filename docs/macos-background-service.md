@@ -28,7 +28,9 @@ without keeping a desktop window open. It is optional for a configured host.
 
 The desktop starts the tray separately, passing the same data directory. A
 per-directory kernel lock prevents duplicate trays even when desktop and login
-startup race. Status separates the saved sharing switch (`running`, retained
+startup race. Source launches prefer the matching tray build profile. Packaged
+localization loads from the helper's `Contents/Resources`, without depending on
+a SwiftPM build-machine path. Status separates the saved sharing switch (`running`, retained
 for IPC compatibility) from actual RVP listener readiness (`host_ready`) and
 startup failure (`host_error`). Optional relay connection/error fields report
 the daemon-owned tunnel; see [private relay setup](private-relay.md).
@@ -41,6 +43,16 @@ handling. Normal starts bootstrap a transient job from the data directory.
 future login registration without terminating the current service or session.
 **Show Menu Bar App at Login** is a separate, optional launch-once job; quitting
 the tray does not respawn it or stop the server.
+
+The tray watches its daemon connection and asks the shared service manager to
+recover a missing process or launchd job. Failed recovery backs off to at most
+one attempt every 30 seconds and reports the error in the menu. launchd also
+recovers process exits with both UIs closed. **Stop Background Service** records
+an explicit stop before unloading the job; neither watchdog polling, reopening
+the desktop/tray, nor a future login overrides it. **Start Background Service**,
+**Restart Background Service**, or enabling server login startup clears that
+stop. **Disable Service** only disables sharing and retains management IPC; its
+saved sharing preference is also preserved during recovery.
 
 All three entry points use the same Rust service manager. The daemon's data lock
 prevents duplicate instances. Custom/development data directories have separate
@@ -109,7 +121,8 @@ REMOVENT_CLI=/Applications/Removent.app/Contents/MacOS/removent-cli
 "$REMOVENT_CLI" daemon login-off      # Remove login registration; keep the current server
 "$REMOVENT_CLI" daemon disable        # Stop sharing, keep management IPC, persist disabled
 "$REMOVENT_CLI" daemon restart        # Restart process, e.g. after granting Screen Recording
-"$REMOVENT_CLI" daemon stop           # Stop process now; login preference is unchanged
+"$REMOVENT_CLI" daemon stop           # Stay stopped until explicit start; login registration is unchanged
+"$REMOVENT_CLI" daemon ensure         # Watchdog start; respects an explicit stop
 ```
 
 `stop`/`restart` interrupt any active session; the tray disables restart while a
@@ -132,9 +145,21 @@ Deleting the app does not remove device identity or settings.
 cargo test --locked -p removent-core -p removent-daemon -p removent-host --lib --test ipc
 cargo test --locked -p removent-core service::tests::launchd_lifecycle -- --ignored --nocapture
 bash tray/Tests/run_integration_test.sh
+cargo build --locked -p removent-app -p removent-daemon -p removent-cli -p removent-relay
+bash scripts/build_tray.sh
+python3 scripts/test_background_lifecycle.py --live
+python3 scripts/test_relay_singleton.py
 ```
 
 The opt-in launchd test uses a fake Unix-socket server, temporary data/login
 directories and a private job label. It covers idempotent start, login toggles
 without process interruption, crash recovery, restart and shutdown. It does not
 grant privacy permissions or claim to validate real screen capture after reboot.
+
+The background lifecycle test uses a copied tray bundle, real daemon/CLI and a
+private launchd label with sharing disabled. It verifies independent tray startup,
+concurrent singleton launches, crash recovery, missing-job recovery, persistent
+manual stop, and continued service operation after tray exit. The relay test
+checks that QUIC and WebSocket processes sharing an identity cannot run together,
+even through different configurations and ports, and that a crash releases the
+kernel lock. Separate data/identity roots remain isolated for development.

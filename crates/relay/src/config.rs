@@ -110,6 +110,25 @@ pub struct ServerConfig {
     #[serde(default)]
     pub allowed_cidrs: Vec<ipnet::IpNet>,
     pub rooms: Vec<Room>,
+    #[serde(default)]
+    pub updates: UpdateConfig,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UpdateConfig {
+    /// Automatically install signed stable releases and restart the relay.
+    pub enabled: bool,
+    pub check_interval_secs: u64,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            check_interval_secs: 86400,
+        }
+    }
 }
 
 impl ServerConfig {
@@ -136,6 +155,10 @@ impl ServerConfig {
     }
 
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            (3600..=604800).contains(&self.updates.check_interval_secs),
+            "updates.check_interval_secs must be 3600..604800"
+        );
         ensure!(self.allowed_cidrs.len() <= 256, "At most 256 allowed CIDRs");
         ensure!(self.allowed_cidrs.iter().all(|net| !matches!(net, ipnet::IpNet::V6(v6) if v6.addr().to_ipv4_mapped().is_some() && v6.prefix_len() < 96)), "Mapped IPv4 CIDRs require prefix 96 or greater");
         ensure!(
@@ -198,8 +221,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn existing_configs_stay_opted_out_and_update_intervals_are_validated() {
+        let old = format!(
+            r#"
+listen = "127.0.0.1:48700"
+identity_dir = "/tmp/relay-test"
+max_connections = 128
+max_clients_per_room = 4
+max_bytes_per_second = 50000000
+[[rooms]]
+name = "office"
+host_token_sha256 = "{}"
+client_token_sha256 = "{}"
+"#,
+            "11".repeat(32),
+            "22".repeat(32)
+        );
+        let old_config: ServerConfig = toml::from_str(&old).unwrap();
+        old_config.validate().unwrap();
+        assert!(!old_config.updates.enabled);
+        assert_eq!(old_config.updates.check_interval_secs, 86400);
+        let enabled: ServerConfig =
+            toml::from_str(&format!("{old}\n[updates]\nenabled = true")).unwrap();
+        enabled.validate().unwrap();
+        assert!(enabled.updates.enabled);
+        for interval in [0, 3599, 604801, u64::MAX] {
+            let mut invalid = enabled.clone();
+            invalid.updates.check_interval_secs = interval;
+            assert!(invalid.validate().is_err());
+        }
+        assert!(
+            toml::from_str::<ServerConfig>(&format!("{old}\n[updates]\nenabeld = true")).is_err()
+        );
+    }
+
+    #[test]
     fn ipv4_ipv6_and_mapped_peers_have_the_same_network_policy() {
         let mut cfg = ServerConfig {
+            updates: UpdateConfig::default(),
             listen: "127.0.0.1:48700".parse().unwrap(),
             identity_dir: "/tmp/unused".into(),
             max_connections: 128,

@@ -10,7 +10,7 @@ usage: |
     removent-cli ping --relay-profile /path/to/controller.toml [options]
     removent-cli identity
     removent-cli ping <removent://host:port|name|short-fingerprint> [options]
-    removent-cli daemon <status|start|stop|restart|enable|disable|permissions|login-on|login-off|service-status>
+    removent-cli daemon <status|start|ensure|stop|restart|enable|disable|permissions|login-on|login-off|service-status>
 
   Options:
     --pin <code>       Pairing PIN (read from stdin when pairing is required and omitted)
@@ -18,7 +18,7 @@ usage: |
     --timeout <secs>   mDNS discovery timeout (default 10)
     --name <device>    Local display name (default RemoventCLI)
 
-daemon.unknown_action: "Unknown daemon action: %{action} (supported: status|start|stop|restart|enable|disable|permissions|login-on|login-off|service-status)"
+daemon.unknown_action: "Unknown daemon action: %{action} (supported: status|start|ensure|stop|restart|enable|disable|permissions|login-on|login-off|service-status)"
 daemon.connect_failed: "Failed to connect to daemon (is removentd running?)"
 daemon.send_failed: "Failed to send request"
 daemon.wait_timeout: "Timed out waiting for daemon response"

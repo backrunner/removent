@@ -14,8 +14,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private var pendingPin: String?
     private var pollTimer: Timer?
     private var serviceBusy = false
+    private var serviceQueryBusy = false
+    private var serviceGeneration = 0
     private var loginEnabled = false
     private var enableOnConnect = false
+    private var stoppedByUser = false
+    private var recoveryError: String?
+    private var nextRecovery = Date.distantPast
+    private var recoveryDelay: TimeInterval = 2
 
     /// Admission requests deferred while the main app is running: if no
     /// admissionResolved broadcast arrives within 8 seconds, the tray shows
@@ -45,6 +51,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             guard let self else { return }
             let changed = self.connected != isConnected
             self.connected = isConnected
+            if isConnected {
+                self.recoveryDelay = 2
+                self.recoveryError = nil
+                self.client.requestStatus()
+            }
             if isConnected && self.enableOnConnect {
                 self.enableOnConnect = false
                 self.client.setEnabled(true)
@@ -66,10 +77,12 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         // 2s status poll as a fallback
         pollTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             self?.client.requestStatus()
+            self?.watchService()
         }
 
         rebuildMenu()
         updateIcon()
+        trayLog("menu bar UI ready")
     }
 
     // MARK: - Icon
@@ -187,10 +200,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     /// should handle it); sets alertActive for the duration.
     private func showAdmissionAlert(requestId: Int, peerName: String, peerFp16: String) {
         let alert = NSAlert()
-        alert.messageText = String(format: String(localized: "alert.connection_request", bundle: .module, comment: "Admission alert title"), peerName)
-        alert.informativeText = String(format: String(localized: "alert.connection_request_detail", bundle: .module, comment: "Admission alert body"), peerFp16)
-        alert.addButton(withTitle: String(localized: "alert.allow", bundle: .module, comment: "Admission alert allow button"))
-        alert.addButton(withTitle: String(localized: "alert.deny", bundle: .module, comment: "Admission alert deny button"))
+        alert.messageText = String(format: String(localized: "alert.connection_request", bundle: .trayResources, comment: "Admission alert title"), peerName)
+        alert.informativeText = String(format: String(localized: "alert.connection_request_detail", bundle: .trayResources, comment: "Admission alert body"), peerFp16)
+        alert.addButton(withTitle: String(localized: "alert.allow", bundle: .trayResources, comment: "Admission alert allow button"))
+        alert.addButton(withTitle: String(localized: "alert.deny", bundle: .trayResources, comment: "Admission alert deny button"))
         alert.alertStyle = .warning
         alertActive = true
         NSApp.activate(ignoringOtherApps: true)
@@ -207,9 +220,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             return
         }
         let alert = NSAlert()
-        alert.messageText = String(localized: "alert.pairing_request", bundle: .module, comment: "Pairing alert title")
-        alert.informativeText = String(format: String(localized: "alert.pairing_pin_detail", bundle: .module, comment: "Pairing alert body"), pin)
-        alert.addButton(withTitle: String(localized: "alert.ok", bundle: .module, comment: "Alert OK button"))
+        alert.messageText = String(localized: "alert.pairing_request", bundle: .trayResources, comment: "Pairing alert title")
+        alert.informativeText = String(format: String(localized: "alert.pairing_pin_detail", bundle: .trayResources, comment: "Pairing alert body"), pin)
+        alert.addButton(withTitle: String(localized: "alert.ok", bundle: .trayResources, comment: "Alert OK button"))
         alertActive = true
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
@@ -223,7 +236,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = messageText
         alert.informativeText = informativeText
-        alert.addButton(withTitle: String(localized: "alert.ok", bundle: .module, comment: "Alert OK button"))
+        alert.addButton(withTitle: String(localized: "alert.ok", bundle: .trayResources, comment: "Alert OK button"))
         alert.alertStyle = .warning
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
@@ -261,44 +274,53 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         // 1. Status line
         let stateText: String
         let stateSymbol: String
-        if !connected {
-            stateText = String(localized: "status.daemon_offline", bundle: .module, comment: "Menu status: daemon not connected")
+        if !connected && stoppedByUser {
+            stateText = String(localized: "status.process_stopped", bundle: .trayResources)
+            stateSymbol = "pause.circle"
+        } else if !connected && serviceBusy {
+            stateText = String(localized: "status.starting", bundle: .trayResources)
+            stateSymbol = "arrow.clockwise"
+        } else if !connected {
+            stateText = String(localized: "status.daemon_offline", bundle: .trayResources, comment: "Menu status: daemon not connected")
             stateSymbol = "exclamationmark.circle"
         } else if status?.running == true && status?.host_ready == false {
-            stateText = String(localized: "status.starting", bundle: .module)
+            stateText = String(localized: "status.starting", bundle: .trayResources)
             stateSymbol = "exclamationmark.circle"
         } else if status?.running == true {
-            stateText = String(localized: "status.running", bundle: .module, comment: "Menu status: service running")
+            stateText = String(localized: "status.running", bundle: .trayResources, comment: "Menu status: service running")
             stateSymbol = "checkmark.circle.fill"
         } else {
-            stateText = String(localized: "status.stopped", bundle: .module, comment: "Menu status: service stopped")
+            stateText = String(localized: "status.stopped", bundle: .trayResources, comment: "Menu status: service stopped")
             stateSymbol = "pause.circle"
         }
-        menu.addItem(infoItem(String(format: String(localized: "menu.service_status", bundle: .module, comment: "Menu status line"), stateText), symbol: stateSymbol))
+        menu.addItem(infoItem(String(format: String(localized: "menu.service_status", bundle: .trayResources, comment: "Menu status line"), stateText), symbol: stateSymbol))
+        if let error = recoveryError {
+            menu.addItem(infoItem(error, symbol: "exclamationmark.triangle"))
+        }
         if let error = status?.host_error {
             menu.addItem(infoItem(error, symbol: "exclamationmark.triangle"))
         }
         if let relay = status?.relay_connected {
             let key = relay ? "menu.relay_online" : "menu.relay_offline"
-            menu.addItem(infoItem(NSLocalizedString(key, bundle: .module, comment: "Relay connection status"), symbol: relay ? "network" : "exclamationmark.triangle"))
+            menu.addItem(infoItem(NSLocalizedString(key, bundle: .trayResources, comment: "Relay connection status"), symbol: relay ? "network" : "exclamationmark.triangle"))
             if let error = status?.relay_error { menu.addItem(infoItem(error)) }
         }
         if let s = status, !s.fp_short.isEmpty {
-            menu.addItem(infoItem(String(format: String(localized: "menu.device_fingerprint", bundle: .module, comment: "Menu device fingerprint line"), s.fp_short)))
+            menu.addItem(infoItem(String(format: String(localized: "menu.device_fingerprint", bundle: .trayResources, comment: "Menu device fingerprint line"), s.fp_short)))
         }
         // Permission warnings (only relevant while hosting).
         if connected, let s = status, s.running {
             if s.screen_recording_granted == false {
-                menu.addItem(infoItem(String(localized: "menu.permission_screen_recording_missing", bundle: .module, comment: "Menu warning: screen recording permission missing"), symbol: "exclamationmark.triangle"))
+                menu.addItem(infoItem(String(localized: "menu.permission_screen_recording_missing", bundle: .trayResources, comment: "Menu warning: screen recording permission missing"), symbol: "exclamationmark.triangle"))
             }
             if s.accessibility_granted == false {
-                menu.addItem(infoItem(String(localized: "menu.permission_accessibility_missing", bundle: .module, comment: "Menu warning: accessibility permission missing"), symbol: "exclamationmark.triangle"))
+                menu.addItem(infoItem(String(localized: "menu.permission_accessibility_missing", bundle: .trayResources, comment: "Menu warning: accessibility permission missing"), symbol: "exclamationmark.triangle"))
             }
         }
         menu.addItem(.separator())
 
         // 1.5 Open main window
-        let mainItem = NSMenuItem(title: String(localized: "menu.open_main_window", bundle: .module, comment: "Menu item: open main window"), action: #selector(openMainApp), keyEquivalent: "")
+        let mainItem = NSMenuItem(title: String(localized: "menu.open_main_window", bundle: .trayResources, comment: "Menu item: open main window"), action: #selector(openMainApp), keyEquivalent: "")
         mainItem.target = self
         mainItem.image = symbolImage("macwindow")
         menu.addItem(mainItem)
@@ -307,7 +329,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         // 2. Sessions
         let sessions = connected ? (status?.sessions ?? []) : []
         if sessions.isEmpty {
-            menu.addItem(infoItem(String(localized: "menu.no_sessions", bundle: .module, comment: "Menu item: no active sessions")))
+            menu.addItem(infoItem(String(localized: "menu.no_sessions", bundle: .trayResources, comment: "Menu item: no active sessions")))
         } else {
             for session in sessions {
                 let title = "\(session.peer_name) · \(durationString(since: session.since_unix)) · \(session.video_codec)"
@@ -322,7 +344,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 20, weight: .semibold)
             ]
-            item.attributedTitle = NSAttributedString(string: String(format: String(localized: "menu.pairing_pin", bundle: .module, comment: "Menu pairing PIN line"), pin), attributes: attrs)
+            item.attributedTitle = NSAttributedString(string: String(format: String(localized: "menu.pairing_pin", bundle: .trayResources, comment: "Menu pairing PIN line"), pin), attributes: attrs)
             item.isEnabled = false
             menu.addItem(item)
             menu.addItem(.separator())
@@ -330,8 +352,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
         // 4. Enable/disable service
         let toggleTitle = (status?.running == true)
-            ? String(localized: "menu.disable_service", bundle: .module, comment: "Menu item: disable service")
-            : String(localized: "menu.enable_service", bundle: .module, comment: "Menu item: enable service")
+            ? String(localized: "menu.disable_service", bundle: .trayResources, comment: "Menu item: disable service")
+            : String(localized: "menu.enable_service", bundle: .trayResources, comment: "Menu item: enable service")
         let toggleItem = NSMenuItem(title: toggleTitle, action: #selector(toggleService), keyEquivalent: "")
         toggleItem.target = self
         toggleItem.isEnabled = !serviceBusy
@@ -339,44 +361,49 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(toggleItem)
 
         // 5. Launch at login
-        let loginItem = NSMenuItem(title: String(localized: "menu.launch_at_login", bundle: .module, comment: "Menu item: launch at login"), action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        let loginItem = NSMenuItem(title: String(localized: "menu.launch_at_login", bundle: .trayResources, comment: "Menu item: launch at login"), action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         loginItem.target = self
         loginItem.state = loginEnabled ? .on : .off
         loginItem.isEnabled = !serviceBusy && serviceCLI != nil
         loginItem.image = symbolImage("arrow.up.circle")
         menu.addItem(loginItem)
 
-        let restartItem = NSMenuItem(title: String(localized: "menu.restart_service", bundle: .module), action: #selector(restartService), keyEquivalent: "")
+        let restartItem = NSMenuItem(title: String(localized: "menu.restart_service", bundle: .trayResources), action: #selector(restartService), keyEquivalent: "")
         restartItem.target = self
         restartItem.isEnabled = !serviceBusy && (status?.sessions.isEmpty ?? true) && serviceCLI != nil
         menu.addItem(restartItem)
 
-        let permissionsItem = NSMenuItem(title: String(localized: "menu.setup_permissions", bundle: .module), action: #selector(setupPermissions), keyEquivalent: "")
+        let processItem = NSMenuItem(title: NSLocalizedString(connected ? "menu.stop_process" : "menu.start_process", bundle: .trayResources, comment: "Background process control"), action: #selector(toggleProcess), keyEquivalent: "")
+        processItem.target = self
+        processItem.isEnabled = !serviceBusy && (status?.sessions.isEmpty ?? true) && serviceCLI != nil
+        menu.addItem(processItem)
+
+        let permissionsItem = NSMenuItem(title: String(localized: "menu.setup_permissions", bundle: .trayResources), action: #selector(setupPermissions), keyEquivalent: "")
         permissionsItem.target = self
         permissionsItem.isEnabled = connected
         menu.addItem(permissionsItem)
 
-        let trayLogin = NSMenuItem(title: String(localized: "menu.tray_at_login", bundle: .module), action: #selector(toggleTrayAtLogin), keyEquivalent: "")
+        let trayLogin = NSMenuItem(title: String(localized: "menu.tray_at_login", bundle: .trayResources), action: #selector(toggleTrayAtLogin), keyEquivalent: "")
         trayLogin.target = self
         trayLogin.state = ownsTrayLoginItem && FileManager.default.fileExists(atPath: trayLoginURL.path) ? .on : .off
-        trayLogin.isEnabled = ownsTrayLoginItem && serviceCLI != nil
+        trayLogin.isEnabled = ownsTrayLoginItem
         menu.addItem(trayLogin)
 
-        menu.addItem(infoItem(String(localized: "menu.unattended_hint", bundle: .module)))
+        menu.addItem(infoItem(String(localized: "menu.unattended_hint", bundle: .trayResources)))
         if FileManager.default.fileExists(atPath: "/Library/LaunchAgents/com.alkinum.removent.loginwindow.plist") {
-            menu.addItem(infoItem(String(localized: "menu.loginwindow_managed", bundle: .module), symbol: "lock.shield"))
+            menu.addItem(infoItem(String(localized: "menu.loginwindow_managed", bundle: .trayResources), symbol: "lock.shield"))
         }
 
         menu.addItem(.separator())
 
         // 6. Open data directory
-        let openItem = NSMenuItem(title: String(localized: "menu.open_data_directory", bundle: .module, comment: "Menu item: open data directory"), action: #selector(openDataDirectory), keyEquivalent: "")
+        let openItem = NSMenuItem(title: String(localized: "menu.open_data_directory", bundle: .trayResources, comment: "Menu item: open data directory"), action: #selector(openDataDirectory), keyEquivalent: "")
         openItem.target = self
         openItem.image = symbolImage("folder")
         menu.addItem(openItem)
 
         // 7. Quit menu bar app
-        let quitItem = NSMenuItem(title: String(localized: "menu.quit", bundle: .module, comment: "Menu item: quit tray"), action: #selector(quitTray), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: String(localized: "menu.quit", bundle: .trayResources, comment: "Menu item: quit tray"), action: #selector(quitTray), keyEquivalent: "q")
         quitItem.target = self
         quitItem.image = symbolImage("xmark.circle")
         menu.addItem(quitItem)
@@ -400,9 +427,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func durationString(since unix: Int) -> String {
         let secs = max(0, Int(Date().timeIntervalSince1970) - unix)
         let h = secs / 3600, m = (secs % 3600) / 60, s = secs % 60
-        if h > 0 { return String(format: String(localized: "session.duration.hm", bundle: .module, comment: "Session duration: hours and minutes"), h, m) }
-        if m > 0 { return String(format: String(localized: "session.duration.ms", bundle: .module, comment: "Session duration: minutes and seconds"), m, s) }
-        return String(format: String(localized: "session.duration.s", bundle: .module, comment: "Session duration: seconds"), s)
+        if h > 0 { return String(format: String(localized: "session.duration.hm", bundle: .trayResources, comment: "Session duration: hours and minutes"), h, m) }
+        if m > 0 { return String(format: String(localized: "session.duration.ms", bundle: .trayResources, comment: "Session duration: minutes and seconds"), m, s) }
+        return String(format: String(localized: "session.duration.s", bundle: .trayResources, comment: "Session duration: seconds"), s)
     }
 
     // MARK: - Actions
@@ -433,16 +460,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.alkinum.removent") else {
             trayLog("main app not installed (bundle id com.alkinum.removent not found)")
-            showErrorAlert(messageText: String(localized: "alert.main_app_not_found", bundle: .module, comment: "Error alert: main app not installed"),
-                           informativeText: String(localized: "alert.main_app_not_found_detail", bundle: .module, comment: "Error alert body: main app not installed"))
+            showErrorAlert(messageText: String(localized: "alert.main_app_not_found", bundle: .trayResources, comment: "Error alert: main app not installed"),
+                           informativeText: String(localized: "alert.main_app_not_found_detail", bundle: .trayResources, comment: "Error alert body: main app not installed"))
             return
         }
         NSWorkspace.shared.openApplication(at: url, configuration: .init()) { [weak self] _, error in
             guard let error else { return }
             trayLog("failed to open main app: \(error.localizedDescription)")
             DispatchQueue.main.async {
-                self?.showErrorAlert(messageText: String(localized: "alert.main_app_not_found", bundle: .module, comment: "Error alert: main app not installed"),
-                                     informativeText: String(format: String(localized: "alert.open_main_app_failed", bundle: .module, comment: "Error alert body: failed to open main app"), error.localizedDescription))
+                self?.showErrorAlert(messageText: String(localized: "alert.main_app_not_found", bundle: .trayResources, comment: "Error alert: main app not installed"),
+                                     informativeText: String(format: String(localized: "alert.open_main_app_failed", bundle: .trayResources, comment: "Error alert body: failed to open main app"), error.localizedDescription))
             }
         }
     }
@@ -467,28 +494,63 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private var serviceCLI: URL? {
+        if Bundle.main.bundleURL.pathExtension != "app",
+           let path = ProcessInfo.processInfo.environment["REMOVENT_SERVICE_CLI"],
+           FileManager.default.isExecutableFile(atPath: path) {
+            return URL(fileURLWithPath: path)
+        }
         let url = outerBundle.appendingPathComponent("Contents/MacOS/removent-cli")
         return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
     }
 
     private func showServiceError(_ message: String) {
-        showErrorAlert(messageText: String(localized: "alert.service_failed", bundle: .module), informativeText: message)
+        showErrorAlert(messageText: String(localized: "alert.service_failed", bundle: .trayResources), informativeText: message)
     }
 
     private func refreshServiceStatus() {
-        guard !serviceBusy, serviceCLI != nil else { return }
+        guard !serviceBusy, !serviceQueryBusy, serviceCLI != nil else { return }
         runServiceCommand("service-status", reportError: false)
+    }
+
+    private func watchService() {
+        guard !connected, !serviceBusy, serviceCLI != nil,
+              ProcessInfo.processInfo.environment["REMOVENT_DEV_SUPERVISED"] != "1",
+              Date() >= nextRecovery else { return }
+        // The shared manager atomically checks user intent before recovering.
+        // launchd also watches the process while this UI is closed.
+        nextRecovery = Date().addingTimeInterval(recoveryDelay)
+        if stoppedByUser {
+            refreshServiceStatus()
+            return
+        }
+        runServiceCommand("ensure", reportError: false) { [weak self] success in
+            guard let self else { return }
+            self.recoveryDelay = success ? 2 : min(30, self.recoveryDelay * 2)
+            self.nextRecovery = Date().addingTimeInterval(self.recoveryDelay)
+        }
     }
 
     /// Process waits stay off the UI thread. All service mutations go through
     /// the packaged CLI; the tray never spawns a second daemon or guesses paths.
     private func runServiceCommand(_ action: String, reportError: Bool = true, completion: ((Bool) -> Void)? = nil) {
+        let query = action == "service-status"
+        guard !serviceBusy, !query || !serviceQueryBusy else { completion?(false); return }
         guard let cli = serviceCLI else {
-            showServiceError(String(localized: "alert.daemon_not_found_detail", bundle: .module))
+            showServiceError(String(localized: "alert.daemon_not_found_detail", bundle: .trayResources))
             completion?(false)
             return
         }
-        serviceBusy = true
+        // Opening the menu refreshes status. A read must not disable every
+        // action for the entire time that menu is open. Ignore a stale query
+        // response if a user command has since changed service intent.
+        if query {
+            serviceQueryBusy = true
+        } else {
+            serviceBusy = true
+            serviceGeneration += 1
+            rebuildMenu()
+        }
+        let generation = serviceGeneration
         DispatchQueue.global(qos: .userInitiated).async {
             let task = Process()
             let output = Pipe()
@@ -511,12 +573,21 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             let result = success
             let detail = message
             DispatchQueue.main.async {
-                self.serviceBusy = false
+                if query {
+                    self.serviceQueryBusy = false
+                    guard generation == self.serviceGeneration else { return }
+                } else {
+                    self.serviceBusy = false
+                }
                 if result, let data = detail.data(using: .utf8),
                    let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     self.loginEnabled = status["launch_at_login"] as? Bool ?? false
-                } else if !result && reportError {
-                    self.showServiceError(detail)
+                    self.stoppedByUser = status["stopped_by_user"] as? Bool ?? false
+                    self.recoveryError = nil
+                } else if !result {
+                    self.recoveryError = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+                    trayLog("service \(action) failed: \(detail)")
+                    if reportError { self.showServiceError(detail) }
                 }
                 completion?(result)
                 self.rebuildMenu()
@@ -530,6 +601,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     @objc private func restartService() {
         runServiceCommand("restart")
+    }
+
+    @objc private func toggleProcess() {
+        runServiceCommand(connected ? "stop" : "start")
     }
 
     @objc private func setupPermissions() {
@@ -552,7 +627,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private static func writeTrayLoginItem(to url: URL, bundle: URL) throws {
         let plist: [String: Any] = [
             "Label": "com.alkinum.removent.tray",
-            "ProgramArguments": ["/usr/bin/open", "-g", bundle.path],
+            "ProgramArguments": ["/usr/bin/open", "-g", "-n", "--env",
+                                 "REMOVENT_DATA_DIR=\(DaemonClient.dataDirectory().path)", bundle.path],
             "RunAtLoad": true,
             "LimitLoadToSessionType": "Aqua"
         ]

@@ -2,7 +2,7 @@
 
 Relay 使用预编译 Rust 二进制，支持 Linux x86_64 / ARM64，以及 macOS 13+ 的 Apple Silicon / Intel。Linux 后台服务使用 systemd 247+（例如 Ubuntu 22.04+、Debian 12+），macOS 使用当前用户的 launchd LaunchAgent。目标机器不需要 Rust、Docker、Node 或 Python。
 
-> 安装器使用从 v0.1.2 开始的正式 GitHub Release 资产。指定版本若没有对应资产，安装会明确失败，保留已有安装。
+> 安装器默认使用从 v0.1.2 开始的正式 GitHub Release 资产。测试版须显式指定 `--version v0.1.3-beta.1`。指定版本若没有对应资产，安装会明确失败，保留已有安装。
 
 ## Linux 安装
 
@@ -47,7 +47,7 @@ removent-relay disable
 
 - 配置、连接文件、证书和日志位于 `~/Library/Application Support/removent-relay`，私密目录 0700，文件 0600。
 - 登录启动文件为 `~/Library/LaunchAgents/com.alkinum.removent.relay.plist`，与桌面 App 的 daemon 是两个独立服务。
-- 日志位于 `logs/relay.log` 和 `logs/relay.err.log`，停止后再次启动时超过 10 MiB 的日志保留为 `.1`。
+- 主日志位于 `data/logs/removent-relay.log`，写入时达到 8 MiB 自动轮转，保留 `.1`–`.3` 三份备份。`logs/relay.err.log` 保留启动失败等诊断。
 - 退出用户登录会停止 relay；睡眠期间无法转发流量。作为常驻中继时，需保持该用户登录并配置合适的电源设置。跨网络访问还需公网可达地址、路由器 UDP 转发及防火墙允许。
 - `removent-relay uninstall` 移除服务及登录启动项，保留配置、凭据、证书和二进制。
 
@@ -61,7 +61,7 @@ removent-relay export host --output "$HOME/relay-host.toml"
 removent-relay export client --output "$HOME/relay-client.toml" --host-fingerprint VERIFIED_TARGET_MAC_FINGERPRINT
 ```
 
-仅需 Cloudflare 管理 CLI 时，安装器可传 `--no-setup`。高级用法可用 `--bin-dir "$HOME/.local/bin" --service-dir /PRIVATE/PATH/relay` 安装一个独立实例；以后每个原生命令都加 `--service-dir /PRIVATE/PATH/relay`，独立实例不会控制默认服务。替代目录不会改变 `cloudflare` 子命令的部署目录。
+只安装本地 CLI 可传 `--no-setup`。高级用法可用 `--bin-dir "$HOME/.local/bin" --service-dir /PRIVATE/PATH/relay` 安装独立实例；以后每个原生命令都加 `--service-dir /PRIVATE/PATH/relay`，独立实例不会控制默认服务。
 
 macOS relay 的 Intel 支持适用于独立中继程序；桌面 App 的系统要求见其安装文档。
 
@@ -84,6 +84,34 @@ sudo removent-relay fingerprint
 重复安装只替换程序，保留配置、凭据和证书。升级后执行 `sudo removent-relay restart` 使用新二进制，会断开已有会话。指定 `--version vX.Y.Z` 可安装该版本，再显式重启。重复运行 `setup` 不会重新生成凭据；已有配置请直接编辑并执行 `check`、`restart`。
 
 `sudo removent-relay uninstall` 停止并移除系统服务，保留二进制、私密配置和身份，方便恢复。重新运行 `setup` 可恢复服务。
+
+## 自动更新与手动检查
+
+`server.toml` 可配置自动安装签名的稳定版本；旧配置与新安装均默认关闭：
+
+```toml
+[updates]
+enabled = false
+check_interval_secs = 86400
+```
+
+将 `enabled` 改为 `true` 并重启服务后，启动 30 秒检查一次，以后按间隔检查（允许 3600–604800 秒）。发现新版会下载、验证 Ed25519 发布签名与归档/二进制 SHA-256，macOS 额外校验 Developer ID，并用新版检查当前配置。全部通过后重启进程，**现有中继连接会短暂中断**。检查、下载或校验失败时继续运行旧版。
+
+手动检查不会下载二进制或安装，也不受自动更新开关影响：
+
+```sh
+removent-relay check-update
+# 同时读取已安装的服务更新版本：
+sudo removent-relay check-update --config /etc/removent-relay/server.toml
+# macOS：
+removent-relay check-update --config "$HOME/Library/Application Support/removent-relay/server.toml"
+```
+
+默认读取可访问的本地服务配置；未找到可读配置时比较 CLI 自身版本。更新保存在 `identity_dir/updates`，系统安装的 CLI 保留为启动器；服务每次启动都重新校验并加载较新的已安装版本，因此不需要给后台进程系统目录写权限。关闭自动更新会停止后续检查，但继续运行已安装的新版。配置、连接凭据和中继身份保留。若要手动回退，先停止服务、关闭自动更新，并移走 `identity_dir/updates`，再安装指定版本并启动。
+
+发布流程为三个平台生成 `relay-latest-<platform>.json` 签名清单；只有包含这些清单的新发布才支持自动更新。旧版本缺少清单时检查会明确报错，不影响转发。
+
+Relay 主日志位于 `identity_dir/logs/removent-relay.log`：Linux 默认 `/var/lib/removent-relay/logs`，macOS 默认 `~/Library/Application Support/removent-relay/data/logs`。桌面客户端、daemon 和客户端 CLI 分别写入其数据目录下的 `logs/removent.log`、`logs/removentd.log` 和 `logs/removent-cli.log`。每个文件限制为 8 MiB，并保留三份轮转备份（每个组件最多约 32 MiB）；多进程写入使用文件锁，日志文件权限 0600。崩溃报告单独保留最近 10 份。客户端数据目录可通过 `REMOVENT_DATA_DIR` 覆盖。
 
 ## Linux 配置与连接文件
 
@@ -117,18 +145,18 @@ removent-cli ping --relay-profile /PRIVATE/PATH/relay-client.toml
 
 ## Cloudflare Containers
 
-Cloudflare 部署需要创建 Worker / Durable Object / Container 基础设施，仍使用仓库中的部署工具；日常启停使用已安装的原生 CLI。
+Cloudflare 部署需要创建 Worker / Durable Object / Container 基础设施，使用仓库中的部署工具或 Cloudflare 控制台；不需要安装原生 relay CLI。
 
 首次部署在管理电脑安装 Python 3.11+、Node 24+ 和可构建 Linux amd64 的 Docker。账户须开通 Containers。在 `deploy/cloudflare` 中执行 `npm ci`、`npx wrangler login`，然后在仓库根目录运行 `bash scripts/deploy_relay.sh` 并选择 Cloudflare。这一步生成独立的 host / client / admin 凭据，部署完成后保持停止。
 
 ```sh
-removent-relay cloudflare start
-removent-relay cloudflare status
-removent-relay cloudflare stop
-removent-relay cloudflare status --config-dir "$HOME/.config/removent-office-relay"
+bash scripts/deploy_relay.sh start
+bash scripts/deploy_relay.sh status
+bash scripts/deploy_relay.sh stop
+bash scripts/deploy_relay.sh status --config-dir "$HOME/.config/removent-office-relay"
 ```
 
-CLI 默认使用 `$XDG_CONFIG_HOME/removent-relay`（否则 `~/.config/removent-relay`）中上次成功部署的 `deployed-origin` 和 `deployed-admin.token`，未部署的凭据编辑不会破坏管理入口。也可显式传入 `--url https://YOUR_WORKER --credential-file /PRIVATE/PATH/admin.token`；凭据文件必须属于当前用户且为 0600，不接受把 token 放入命令行。
+部署脚本默认使用 `$XDG_CONFIG_HOME/removent-relay`（否则 `~/.config/removent-relay`）中的部署记录和管理凭据，使用 `--config-dir` 指定其他部署目录。容器更新通过重新部署镜像完成，`serve-container` 不运行自动更新器。
 
 部署配置目录为 0700、私密文件 0600；`deployment.json` 管理地址、房间、资源限制、休眠和网段，`credentials.json` 保存各角色凭据。修改后执行 `bash scripts/deploy_relay.sh deploy` 应用配置。不要直接编辑自动生成的 `runtime/*`。更换 backend、部署名或地址需要使用新的配置目录。示例见 [deployment.example.json](../deploy/relay/deployment.example.json)。
 
@@ -140,4 +168,4 @@ CLI 默认使用 `$XDG_CONFIG_HOME/removent-relay`（否则 `~/.config/removent-
 
 正式发布流水线在 Linux x86_64 / ARM64 原生 runner 构建静态 musl 二进制，运行 relay 测试及真实 systemd 安装、就绪、启停和身份保留验收；macOS 将 ARM64 / x86_64 合并为 Universal 二进制，完成 Developer ID 签名、公证和真实 launchd 生命周期验收。三个平台包及各自的 `.sha256` 文件随同一稳定 tag 发布，缺少任一平台就不会进入发布步骤。
 
-本地测试覆盖配置权限、凭据隔离、拒绝覆盖、Cloudflare HTTP 方法和重定向拒绝，以及安装包校验失败时保留旧安装。macOS 使用独立标签、配置和端口实测 launchd 及安装器，不修改已有服务；登录启动、崩溃恢复、错误端口拒绝、重复安装保留停止状态均属于验收。真实 Linux systemd 验收脚本只应在可丢弃 runner 上运行，不能在已有 relay 上执行。Cloudflare 的真实部署和公网性能仍需目标环境验证。
+本地测试覆盖配置权限、凭据隔离、拒绝覆盖、发布签名和下载大小校验、缓存损坏与回退、日志轮转，以及安装包校验失败时保留旧安装。Cloudflare HTTP 方法与重定向校验保留在部署脚本测试中。macOS 使用独立标签、配置和端口实测 launchd 及安装器，不修改已有服务；登录启动、崩溃恢复、错误端口拒绝、重复安装保留停止状态均属于验收。真实 Linux systemd 验收脚本只应在可丢弃 runner 上运行，不能在已有 relay 上执行。Cloudflare 的真实部署和公网性能仍需目标环境验证。

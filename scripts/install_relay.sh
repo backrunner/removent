@@ -76,7 +76,7 @@ if [ -z "$version" ]; then
     latest=$(download --output /dev/null --write-out '%{url_effective}' "$release/latest")
     case "$latest" in "$release"/tag/*) version=${latest##*/} ;; *) fail 'Cannot resolve the latest stable release' ;; esac
 fi
-printf '%s\n' "$version" | awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/ {ok=1} END {exit !ok}' || fail 'Use a stable release tag such as v0.1.0'
+printf '%s\n' "$version" | awk '/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.[1-9][0-9]*)?$/ {ok=1} END {exit !ok}' || fail 'Use a release tag such as v0.1.3 or v0.1.3-beta.1'
 asset="removent-relay-${version}-${platform}.tar.gz"
 work=$(mktemp -d "${TMPDIR:-/tmp}/removent-relay.XXXXXXXX")
 pending=

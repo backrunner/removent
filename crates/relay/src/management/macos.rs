@@ -371,10 +371,9 @@ impl Service {
     }
     pub(super) fn logs(&self, follow: bool, lines: u32) -> Result<()> {
         self.installation()?;
-        let paths = [
-            self.dir.join("logs/relay.log"),
-            self.dir.join("logs/relay.err.log"),
-        ];
+        let paths = [read_config(&self.config())?
+            .identity_dir
+            .join("logs/removent-relay.log")];
         for path in &paths {
             let meta = fs::symlink_metadata(path)?;
             ensure!(

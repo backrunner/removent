@@ -391,9 +391,31 @@ impl ConnectionDialog {
         self.name.read(cx).value().trim().to_string()
     }
 
-    /// Reopen the Details step with a saved connection's fields. `password` is
-    /// whatever the Keychain still holds for the bookmark — `None` leaves the
-    /// field empty for the user to fill.
+    /// Open an advertised endpoint with fresh per-connection credentials.
+    pub fn prefill_discovered(
+        &mut self,
+        protocol: ConnectionProtocol,
+        name: String,
+        addr: std::net::SocketAddr,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.obscured || self.connecting {
+            return;
+        }
+        self.saved_id = None;
+        self.choose(protocol, window, cx);
+        let address = ConnectionAddress::from_socket(addr);
+        self.name.update(cx, |s, cx| s.set_value(name, window, cx));
+        self.host
+            .update(cx, |s, cx| s.set_value(address.host, window, cx));
+        self.port.update(cx, |s, cx| {
+            s.set_value(address.port.to_string(), window, cx)
+        });
+        window.focus(&self.username.focus_handle(cx));
+    }
+
+    /// Reopen a bookmark. `None` leaves its password empty for the user to fill.
     pub fn prefill(
         &mut self,
         saved: &SavedConnection,
@@ -1305,6 +1327,41 @@ mod tests {
             cx.simulate_keystrokes("tab");
             cx.update(|window, cx| assert!(dialog.read(cx).focus.contains_focused(window, cx)));
         }
+    }
+
+    #[gpui::test]
+    fn discovered_compatibility_target_prefills_without_trust_or_credentials(
+        cx: &mut TestAppContext,
+    ) {
+        let (dialog, cx) = setup(cx);
+        cx.update(|window, cx| {
+            dialog.update(cx, |form, cx| {
+                for protocol in [ConnectionProtocol::Vnc, ConnectionProtocol::Rdp] {
+                    form.prefill_discovered(
+                        protocol,
+                        "Office".into(),
+                        "[fe80::1%3]:3391".parse().unwrap(),
+                        window,
+                        cx,
+                    );
+                    assert!(form.step == Step::Details(protocol));
+                    assert_eq!(form.memo_name(cx), "Office");
+                    assert!(form.saved_id().is_none());
+                    assert!(form.username.read(cx).value().is_empty());
+                    assert!(form.password.read(cx).value().is_empty());
+                    if protocol == ConnectionProtocol::Rdp {
+                        assert!(form.request(cx).is_err());
+                        form.username
+                            .update(cx, |s, cx| s.set_value("alice", window, cx));
+                    }
+                    let request = form.request(cx).unwrap();
+                    assert_eq!(request.protocol, protocol);
+                    assert_eq!(request.address.to_string(), "[fe80::1%3]:3391");
+                    assert!(!request.accept_invalid_certificate);
+                    assert!(request.relay.is_none());
+                }
+            });
+        });
     }
 
     #[gpui::test]

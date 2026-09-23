@@ -5,7 +5,9 @@ import { svedocs } from 'svedocs/vite';
 import config from './svedocs.config.ts';
 export default defineConfig({
   plugins: [
-    svedocs({ config, theme: { components: {
+    svedocs({ config, components: {
+      ReleaseDownload: '$lib/ReleaseDownload.svelte'
+    }, theme: { components: {
       Navbar: '$lib/theme/Navbar.svelte',
       DocsShell: '$lib/theme/DocsShell.svelte',
       Footer: '$lib/theme/Footer.svelte'

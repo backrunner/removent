@@ -175,91 +175,82 @@ pub fn parse_cap_string(s: &str) -> Caps {
     }
 }
 
-/// Browser: aggregates mDNS events and pushes a deduplicated device table to subscribers.
+/// DNS-SD service types advertised by compatible remote desktop servers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscoveryProtocol {
+    Removent,
+    Vnc,
+    Rdp,
+}
+
+impl DiscoveryProtocol {
+    pub fn service_types(self) -> &'static [&'static str] {
+        match self {
+            Self::Removent => &[MDNS_SERVICE],
+            Self::Vnc => &["_rfb._tcp.local."],
+            Self::Rdp => &["_rdp._tcp.local.", "_ms-wbt-server._tcp.local."],
+        }
+    }
+}
+
+/// Browser for one protocol. Dropping the last owner stops all its queries.
+#[derive(Clone)]
 pub struct DiscoveryBrowser {
     _daemon: Arc<OwnedDaemon>,
     table_rx: watch::Receiver<Arc<HashMap<String, DeviceEntry>>>,
 }
 
-impl Clone for DiscoveryBrowser {
-    fn clone(&self) -> Self {
-        Self {
-            _daemon: Arc::clone(&self._daemon),
-            table_rx: self.table_rx.clone(),
-        }
-    }
-}
-
 impl DiscoveryBrowser {
+    /// Native-only discovery, also used by the CLI's explicit target lookup.
     pub fn start() -> Result<Self> {
+        Self::start_for(DiscoveryProtocol::Removent)
+    }
+
+    pub fn start_for(protocol: DiscoveryProtocol) -> Result<Self> {
         let daemon =
             OwnedDaemon(ServiceDaemon::new().map_err(|e| NetError::Discovery(e.to_string()))?);
-        Self::with_daemon(daemon)
+        Self::with_daemon(daemon, protocol)
     }
 
-    fn with_daemon(daemon: OwnedDaemon) -> Result<Self> {
+    fn with_daemon(daemon: OwnedDaemon, protocol: DiscoveryProtocol) -> Result<Self> {
         let daemon = Arc::new(daemon);
-        let receiver = daemon
-            .browse(MDNS_SERVICE)
-            .map_err(|e| NetError::Discovery(e.to_string()))?;
-
         let (table_tx, table_rx) = watch::channel(Arc::new(HashMap::new()));
-
-        std::thread::Builder::new()
-            .name("mdns-browser".into())
-            .spawn(move || {
-                let mut table: HashMap<String, DeviceEntry> = HashMap::new();
-                loop {
-                    // mdns-sd refreshes record TTLs and emits ServiceRemoved
-                    // on expiry/goodbye. A shorter local timer would remove
-                    // healthy peers between their normal DNS refreshes.
-                    match receiver.recv_timeout(Duration::from_secs(5)) {
-                        Ok(event) => match event {
+        let table = Arc::new(Mutex::new(HashMap::<String, DeviceEntry>::new()));
+        for service_type in protocol.service_types() {
+            let receiver = daemon
+                .browse(service_type)
+                .map_err(|e| NetError::Discovery(e.to_string()))?;
+            let table = table.clone();
+            let table_tx = table_tx.clone();
+            std::thread::Builder::new()
+                .name(format!("mdns-{protocol:?}"))
+                .spawn(move || {
+                    while let Ok(event) = receiver.recv() {
+                        // mdns-sd owns TTL refresh/expiry and goodbye handling.
+                        let mut table = table.lock().unwrap();
+                        match event {
                             ServiceEvent::ServiceResolved(info) => {
-                                let props = info.get_properties();
-                                let short_fp = props
-                                    .get_property_val_str("fp")
-                                    .unwrap_or_default()
-                                    .to_string();
-                                let name = props
-                                    .get_property_val_str("name")
-                                    .unwrap_or_else(|| info.get_fullname())
-                                    .to_string();
-                                let busy = props.get_property_val_str("busy") == Some("1");
-                                let cap = parse_cap_string(
-                                    props.get_property_val_str("cap").unwrap_or(""),
-                                );
-                                let addr: Option<std::net::SocketAddr> =
-                                    pick_addr(info.get_addresses(), info.get_port());
-                                let entry = DeviceEntry {
-                                    instance: info.get_fullname().to_string(),
-                                    name,
-                                    short_fp,
-                                    addr,
-                                    caps: cap,
-                                    busy,
-                                    seen_at: Instant::now(),
-                                };
-                                table.insert(entry.instance.clone(), entry);
+                                if let Some(entry) = resolved_entry(protocol, &info) {
+                                    table.insert(entry.instance.clone(), entry);
+                                } else {
+                                    table.remove(info.get_fullname());
+                                }
                             }
                             ServiceEvent::ServiceRemoved(_, fullname) => {
                                 table.remove(&fullname);
                             }
                             ServiceEvent::SearchStarted(interfaces) => {
-                                tracing::debug!(%interfaces, "mDNS browse started");
+                                tracing::debug!(?protocol, %interfaces, "mDNS browse started");
                                 continue;
                             }
                             _ => continue,
-                        },
-                        Err(flume::RecvTimeoutError::Timeout) => continue,
-                        Err(flume::RecvTimeoutError::Disconnected) => break,
+                        }
+                        if table_tx.send(Arc::new(table.clone())).is_err() {
+                            break;
+                        }
                     }
-                    if table_tx.send(Arc::new(table.clone())).is_err() {
-                        break;
-                    }
-                }
-            })?;
-
+                })?;
+        }
         Ok(Self {
             _daemon: daemon,
             table_rx,
@@ -269,6 +260,45 @@ impl DiscoveryBrowser {
     pub fn subscribe_table(&self) -> watch::Receiver<Arc<HashMap<String, DeviceEntry>>> {
         self.table_rx.clone()
     }
+}
+
+fn resolved_entry(protocol: DiscoveryProtocol, info: &ServiceInfo) -> Option<DeviceEntry> {
+    let props = info.get_properties();
+    let native = protocol == DiscoveryProtocol::Removent;
+    let short_fp = if native {
+        props.get_property_val_str("fp").unwrap_or_default()
+    } else {
+        ""
+    };
+    // Never treat an arbitrary compatibility TXT record as a pairing identity.
+    if info.get_port() == 0
+        || (native && (short_fp.len() != 16 || !short_fp.bytes().all(|b| b.is_ascii_hexdigit())))
+    {
+        return None;
+    }
+    let instance_name = info
+        .get_fullname()
+        .strip_suffix(info.get_type())
+        .unwrap_or(info.get_fullname())
+        .trim_end_matches('.');
+    let name = if native {
+        props.get_property_val_str("name").unwrap_or(instance_name)
+    } else {
+        instance_name
+    };
+    Some(DeviceEntry {
+        instance: info.get_fullname().to_string(),
+        name: name.to_string(),
+        short_fp: short_fp.to_ascii_lowercase(),
+        addr: pick_addr(info.get_addresses(), info.get_port()),
+        caps: if native {
+            parse_cap_string(props.get_property_val_str("cap").unwrap_or(""))
+        } else {
+            Caps::none()
+        },
+        busy: native && props.get_property_val_str("busy") == Some("1"),
+        seen_at: Instant::now(),
+    })
 }
 
 /// Prefer IPv4; keep the first IPv6 when no v4 exists (v6 is no longer dropped unconditionally).
@@ -290,6 +320,106 @@ fn pick_addr(addrs: &std::collections::HashSet<IpAddr>, port: u16) -> Option<std
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compatibility_records_do_not_require_or_inherit_native_identity() {
+        for protocol in [DiscoveryProtocol::Vnc, DiscoveryProtocol::Rdp] {
+            for service_type in protocol.service_types() {
+                let info = ServiceInfo::new(
+                    service_type,
+                    "Office PC",
+                    "office.local.",
+                    "192.168.1.8",
+                    3391,
+                    &[
+                        ("fp", "spoofed"),
+                        ("busy", "1"),
+                        ("cap", "file"),
+                        ("name", "spoofed"),
+                    ][..],
+                )
+                .unwrap();
+                let entry = resolved_entry(protocol, &info).unwrap();
+                assert_eq!(entry.name, "Office PC");
+                assert_eq!(entry.addr.unwrap().port(), 3391);
+                assert!(entry.short_fp.is_empty());
+                assert!(!entry.busy);
+                assert_eq!(entry.caps, Caps::none());
+            }
+        }
+        let info = ServiceInfo::new(
+            MDNS_SERVICE,
+            "No identity",
+            "office.local.",
+            "127.0.0.1",
+            48688,
+            None,
+        )
+        .unwrap();
+        assert!(resolved_entry(DiscoveryProtocol::Removent, &info).is_none());
+        let spoofed = ServiceInfo::new(
+            MDNS_SERVICE,
+            "Invalid identity",
+            "office.local.",
+            "127.0.0.1",
+            48688,
+            &[("fp", "VNC:127.0.0.1:5900")][..],
+        )
+        .unwrap();
+        assert!(resolved_entry(DiscoveryProtocol::Removent, &spoofed).is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn compatibility_protocols_resolve_and_remove_over_multicast() {
+        let native =
+            DiscoveryBrowser::with_daemon(loopback_daemon(), DiscoveryProtocol::Removent).unwrap();
+        for protocol in [DiscoveryProtocol::Vnc, DiscoveryProtocol::Rdp] {
+            let browser = DiscoveryBrowser::with_daemon(loopback_daemon(), protocol).unwrap();
+            let mut rx = browser.subscribe_table();
+            let advertiser = loopback_daemon();
+            for service_type in protocol.service_types() {
+                let name = format!("Desktop-{:016x}", rand::random::<u64>());
+                let info = ServiceInfo::new(
+                    service_type,
+                    &name,
+                    "compat.local.",
+                    "127.0.0.1",
+                    3391,
+                    None,
+                )
+                .unwrap();
+                let fullname = info.get_fullname().to_string();
+                advertiser.register(info).unwrap();
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    loop {
+                        if let Some(entry) = rx.borrow_and_update().get(&fullname) {
+                            assert_eq!(entry.name, name);
+                            assert_eq!(entry.addr, Some("127.0.0.1:3391".parse().unwrap()));
+                            break;
+                        }
+                        rx.changed().await.unwrap();
+                    }
+                })
+                .await
+                .expect("compatibility service must resolve");
+                assert!(native.subscribe_table().borrow().is_empty());
+                advertiser.unregister(&fullname).unwrap();
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while rx.borrow_and_update().contains_key(&fullname) {
+                        rx.changed().await.unwrap();
+                    }
+                })
+                .await
+                .expect("goodbye must remove compatibility service");
+            }
+            drop(browser);
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while rx.changed().await.is_ok() {}
+            })
+            .await
+            .expect("all protocol workers must stop on drop");
+        }
+    }
 
     #[tokio::test]
     async fn dropping_last_browser_closes_the_table_channel() {
@@ -403,7 +533,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn advertise_and_browse_loopback() {
         let fp = format!("{:016x}", rand::random::<u64>());
-        let browser = DiscoveryBrowser::with_daemon(loopback_daemon()).unwrap();
+        let browser =
+            DiscoveryBrowser::with_daemon(loopback_daemon(), DiscoveryProtocol::Removent).unwrap();
         let mut rx = browser.subscribe_table();
         let adv =
             Advertiser::with_daemon(loopback_daemon(), "TestMac", &fp, 48699, Caps::all()).unwrap();

@@ -53,14 +53,14 @@ session.manually_disconnected: 已手动断开
 notice.daemon_spawn_failed: 无法启动 removentd：%{err}
 notice.daemon_start_timeout: removentd 启动超时，被控服务未能开启
 notice.daemon_binary_missing: 找不到 removentd 可执行文件
-notice.discovery_unavailable: 局域网设备发现不可用：%{err}（可用手动 IP 连接）
+notice.discovery_unavailable: 服务广播发现不可用：%{err}（已开启的端口扫描和手动连接仍可使用）
 
 manual.invalid_addr: 地址格式无效，如 192.168.1.10 或 192.168.1.10:7890
 
 device.paired: 已配对
 device.unpaired: 未配对
 device.searching: "暂无附近设备"
-device.searching_hint: "在另一台 Mac 上开启 Removent，即可发现设备。"
+device.searching_hint: 检查局域网发现设置，并确认远端服务已在当前网络中运行。
 device.no_match: 没有匹配的设备
 device.online: 在线 · 可连接
 device.info: 设备信息
@@ -288,3 +288,11 @@ connection.relay_endpoint: "Relay 地址"
 connection.relay_transport: "Relay 部署方式"
 connection.relay_websocket: "Cloudflare / HTTPS"
 connection.relay_quic: "VPS / QUIC"
+
+settings.discovery: 局域网发现
+settings.discovery_description: 选择在附近设备中自动发现的协议，修改立即生效。
+settings.discovery_hint: 通过 Bonjour/mDNS 和本地 IPv4 网络扫描发现设备（VNC 5900、RDP 3389）。未广播的自定义端口可手动添加；本机共享服务由单独的设置控制。
+device.protocol: 协议
+
+device.discovery_off: 局域网发现已关闭
+device.discovery_off_hint: 在「设置 → 局域网发现」中开启协议，或手动添加连接。

@@ -2,6 +2,9 @@
 "status.daemon_offline" = "Daemon not connected";
 "status.running" = "Running";
 "status.stopped" = "Stopped";
+"status.process_stopped" = "Stopped by you";
+"menu.start_process" = "Start Background Service";
+"menu.stop_process" = "Stop Background Service";
 
 /* Menu items */
 "menu.service_status" = "Removent Service: %@";

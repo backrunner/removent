@@ -209,4 +209,11 @@ jobs:
       - name: Publish verified release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash scripts/publish_release.sh
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          export UPDATE_SIGNING_KEY_FILE="$RUNNER_TEMP/update-signing-key.pem"
+          trap 'rm -f "$UPDATE_SIGNING_KEY_FILE"' EXIT
+          printf '%s\n' "$UPDATE_SIGNING_KEY" > "$UPDATE_SIGNING_KEY_FILE"
+          bash scripts/publish_release.sh

@@ -7,9 +7,9 @@ description: "为 Apple 芯片 Mac 获取 Removent，免费开源，采用 Apach
 
 **macOS 13 Ventura 或更新版本 · Apple 芯片（arm64）**
 
-[在 GitHub 查看下载 ↗](https://github.com/backrunner/removent/releases)
+<ReleaseDownload />
 
-选择最新已发布的 `Removent-<version>-macos-arm64.dmg`。可用安装包与版本说明以 GitHub Releases 为准。Removent 处于早期开发阶段，用于无人值守访问前请阅读版本说明。
+上方按钮会直接获取 GitHub Releases 上最新发布的 `Removent-<version>-macos-arm64.dmg`。可用安装包与版本说明以 GitHub Releases 为准。Removent 处于早期开发阶段，用于无人值守访问前请阅读版本说明。
 
 ## 安装并连接
 

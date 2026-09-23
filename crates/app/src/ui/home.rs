@@ -39,13 +39,16 @@ use tokio::sync::oneshot;
 
 gpui::actions!(home, [HomeEscape, HomeSettings, HomeConnect, HomeSearch]);
 
-// Search, list/empty state, section header, and local device share one gutter.
+// Content aligns with the search field; row highlights extend into the gutter.
+// Row padding accounts for the 1px focus/selection border.
 const SIDEBAR_INSET: f32 = 16.;
+const SIDEBAR_ROW_INSET: f32 = 8.;
 
 #[derive(Clone)]
 struct DeviceRow {
     name: String,
     addr: SocketAddr,
+    protocol: ConnectionProtocol,
 }
 
 /// Sidebar selection: a discovered device, a saved bookmark, or None (this Mac).
@@ -122,11 +125,6 @@ pub struct HomeView {
     bridge_alive: Arc<AtomicBool>,
 }
 
-/// Address display: show only the IP (drop the zone and port).
-fn fmt_addr(addr: &SocketAddr) -> String {
-    addr.ip().to_string()
-}
-
 /// Grouped PIN display: 6 digits → "123 456".
 fn group_pin(pin: &str) -> String {
     if pin.len() == 6 && pin.is_ascii() {
@@ -159,13 +157,25 @@ fn device_glyph(size: f32, colors: &gpui_component::ThemeColor) -> Div {
 /// Small muted group heading inside the sidebar list (Saved / Nearby).
 fn list_group_label(text: String, cx: &App) -> Div {
     div()
-        .px_3()
+        .px(px(SIDEBAR_ROW_INSET))
         .pt_3()
         .pb_1()
         .text_size(px(11.))
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(cx.theme().muted_foreground)
         .child(text)
+}
+
+/// A single line that remeasures when its flex allocation changes. GPUI's
+/// nowrap text can retain its intrinsic measurement and get clipped instead of
+/// ellipsized; a one-line clamp keeps the available width in the layout key.
+fn sidebar_line() -> Div {
+    div()
+        .w_full()
+        .min_w_0()
+        .whitespace_normal()
+        .text_ellipsis()
+        .line_clamp(1)
 }
 
 /// Bookmark glyph keyed by protocol, matching the connection dialog picker.
@@ -391,7 +401,7 @@ impl HomeView {
         cx.notify();
     }
 
-    fn connect_device(&mut self, fp: &str, cx: &mut Context<Self>) {
+    fn connect_device(&mut self, fp: &str, window: &mut Window, cx: &mut Context<Self>) {
         if self.connecting.is_some() {
             self.set_status(t!("status.connecting_other").to_string(), StatusTone::Warn);
             cx.notify();
@@ -400,7 +410,16 @@ impl HomeView {
         let Some(row) = self.devices.get(fp).cloned() else {
             return;
         };
-        self.start_connect(row.name.clone(), row.addr, cx);
+        if row.protocol == ConnectionProtocol::Removent {
+            self.start_connect(row.name.clone(), row.addr, cx);
+        } else if self.connection_dialog.is_none() {
+            self.open_connection_dialog(None, window, cx);
+            if let Some(dialog) = &self.connection_dialog {
+                dialog.update(cx, |form, cx| {
+                    form.prefill_discovered(row.protocol, row.name, row.addr, window, cx)
+                });
+            }
+        }
     }
 
     fn start_connect(&mut self, name: String, addr: SocketAddr, cx: &mut Context<Self>) {
@@ -799,8 +818,23 @@ impl HomeView {
             return;
         }
         match ev {
-            UiEvent::DeviceFound { fp, name, addr } => {
-                self.devices.insert(fp, DeviceRow { name, addr });
+            UiEvent::DeviceFound {
+                fp,
+                name,
+                addr,
+                protocol,
+            } => {
+                // A queued resolve must not reinsert a row after its toggle was turned off.
+                if crate::discovery::enabled(self.engine.settings().discovery, protocol) {
+                    self.devices.insert(
+                        fp,
+                        DeviceRow {
+                            name,
+                            addr,
+                            protocol,
+                        },
+                    );
+                }
             }
             UiEvent::DeviceLost(fp) => {
                 self.devices.remove(&fp);
@@ -1115,44 +1149,52 @@ impl HomeView {
             .border_1()
             .border_color(colors.border.opacity(0.))
             .focus(|style| style.border_color(colors.ring))
+            .w_full()
+            .min_w_0()
+            .flex_shrink_0()
             .flex()
             .items_center()
             .gap_3()
-            .px_3()
+            .px(px(SIDEBAR_ROW_INSET - 1.))
             .py_2()
             .rounded(px(12.))
             .cursor_default()
             // Single-click selects; double-click connects directly.
-            .on_click(cx.listener(move |this, ev: &gpui::ClickEvent, _w, cx| {
+            .on_click(cx.listener(move |this, ev: &gpui::ClickEvent, window, cx| {
                 if ev.click_count() >= 2 {
-                    this.connect_device(&fp_dbl, cx);
+                    this.connect_device(&fp_dbl, window, cx);
                 } else {
                     this.selected = Some(Selection::Device(fp_sel.clone()));
                     this.settings_open = false;
                     cx.notify();
                 }
             }))
-            .child(device_glyph(32., &colors))
+            .child(saved_glyph(row.protocol, 32., &colors))
             .child(
                 div()
                     .flex_1()
-                    .overflow_hidden()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
                     .child(
-                        div()
+                        sidebar_line()
                             .text_size(px(13.))
                             .font_weight(gpui::FontWeight::MEDIUM)
-                            .truncate()
                             .child(row.name.clone()),
                     )
                     .child(
-                        div()
+                        sidebar_line()
                             .text_size(px(11.))
                             .text_color(colors.muted_foreground)
-                            .child(fmt_addr(&row.addr)),
+                            .child(format!("{} · {}", row.protocol.short_label(), row.addr)),
                     ),
             )
             .when(trusted, |el| {
-                el.child(icon_16("shield-check").text_color(colors.muted_foreground))
+                el.child(
+                    icon_16("shield-check")
+                        .flex_shrink_0()
+                        .text_color(colors.muted_foreground),
+                )
             });
         if selected {
             el = el
@@ -1185,10 +1227,13 @@ impl HomeView {
             .border_1()
             .border_color(colors.border.opacity(0.))
             .focus(|style| style.border_color(colors.ring))
+            .w_full()
+            .min_w_0()
+            .flex_shrink_0()
             .flex()
             .items_center()
             .gap_3()
-            .px_3()
+            .px(px(SIDEBAR_ROW_INSET - 1.))
             .py_2()
             .rounded(px(12.))
             .cursor_default()
@@ -1206,19 +1251,19 @@ impl HomeView {
             .child(
                 div()
                     .flex_1()
-                    .overflow_hidden()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
                     .child(
-                        div()
+                        sidebar_line()
                             .text_size(px(13.))
                             .font_weight(gpui::FontWeight::MEDIUM)
-                            .truncate()
                             .child(entry.display_name()),
                     )
                     .child(
-                        div()
+                        sidebar_line()
                             .text_size(px(11.))
                             .text_color(colors.muted_foreground)
-                            .truncate()
                             .child(format!(
                                 "{} · {}",
                                 entry.protocol.short_label(),
@@ -1243,6 +1288,8 @@ impl HomeView {
 
     fn render_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors;
+        let discovery = self.engine.settings().discovery;
+        let discovering = discovery.removent || discovery.vnc || discovery.rdp;
         let query = self.search_input.read(cx).value().trim().to_lowercase();
         let rows: Vec<_> = self
             .devices
@@ -1251,6 +1298,7 @@ impl HomeView {
                 query.is_empty()
                     || row.name.to_lowercase().contains(&query)
                     || row.addr.to_string().contains(&query)
+                    || row.protocol.short_label().to_lowercase().contains(&query)
             })
             .collect();
         let saved_rows: Vec<_> = self
@@ -1268,9 +1316,10 @@ impl HomeView {
             .flex()
             .flex_col()
             .flex_1()
+            .w_full()
+            .min_w_0()
             .min_h_0()
             .gap_1()
-            .px(px(SIDEBAR_INSET))
             .overflow_y_scroll();
         // Bookmarks come first: they are the user's own connect targets, while
         // discovered devices below depend on LAN presence.
@@ -1287,6 +1336,7 @@ impl HomeView {
             list = list.child(
                 div()
                     .p_4()
+                    .mx(px(SIDEBAR_ROW_INSET))
                     .mt_2()
                     .rounded(px(14.))
                     .border_1()
@@ -1306,7 +1356,11 @@ impl HomeView {
                             .text_color(colors.muted_foreground)
                             .child(
                                 t!(if query.is_empty() {
-                                    "device.searching"
+                                    if discovering {
+                                        "device.searching"
+                                    } else {
+                                        "device.discovery_off"
+                                    }
                                 } else {
                                     "device.no_match"
                                 })
@@ -1318,7 +1372,14 @@ impl HomeView {
                             div()
                                 .text_size(px(12.))
                                 .text_color(colors.muted_foreground)
-                                .child(t!("device.searching_hint").to_string()),
+                                .child(
+                                    t!(if discovering {
+                                        "device.searching_hint"
+                                    } else {
+                                        "device.discovery_off_hint"
+                                    })
+                                    .to_string(),
+                                ),
                         )
                     }),
             );
@@ -1366,56 +1427,72 @@ impl HomeView {
                         .cleanable(true),
                 ),
             )
-            .child(list)
             .child(
-                div().px(px(SIDEBAR_INSET)).py_3().child(
-                    div()
-                        .id("local-device")
-                        .tab_index(0)
-                        .border_1()
-                        .border_color(colors.border.opacity(0.))
-                        .focus(|style| style.border_color(colors.ring))
-                        .flex()
-                        .items_center()
-                        .gap_3()
-                        .p_3()
-                        .rounded(px(12.))
-                        .when(self.selected.is_none() && !self.settings_open, |el| {
-                            el.bg(colors.accent.opacity(0.12))
-                                .border_color(colors.accent.opacity(0.2))
-                        })
-                        .hover(|el| el.bg(colors.list_hover))
-                        .cursor_pointer()
-                        .on_click(cx.listener(|this, _, _w, cx| {
-                            this.selected = None;
-                            this.settings_open = false;
-                            cx.notify();
-                        }))
-                        .child(device_glyph(32., &colors))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(
-                                    div()
-                                        .text_size(px(12.))
-                                        .font_weight(gpui::FontWeight::MEDIUM)
-                                        .child(t!("device.this_mac").to_string()),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(11.))
-                                        .text_color(colors.muted_foreground)
-                                        .truncate()
-                                        .child(self.engine.device_name()),
-                                ),
-                        )
-                        .child(dot(if self.host_on {
-                            colors.success
-                        } else {
-                            colors.muted_foreground.opacity(0.5)
-                        })),
-                ),
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .px(px(SIDEBAR_INSET - SIDEBAR_ROW_INSET))
+                    .child(list),
+            )
+            .child(
+                div()
+                    .px(px(SIDEBAR_INSET - SIDEBAR_ROW_INSET))
+                    .py_3()
+                    .child(
+                        div()
+                            .id("local-device")
+                            .tab_index(0)
+                            .border_1()
+                            .border_color(colors.border.opacity(0.))
+                            .focus(|style| style.border_color(colors.ring))
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .w_full()
+                            .min_w_0()
+                            .px(px(SIDEBAR_ROW_INSET - 1.))
+                            .py_3()
+                            .rounded(px(12.))
+                            .when(self.selected.is_none() && !self.settings_open, |el| {
+                                el.bg(colors.accent.opacity(0.12))
+                                    .border_color(colors.accent.opacity(0.2))
+                            })
+                            .hover(|el| el.bg(colors.list_hover))
+                            .cursor_pointer()
+                            .on_click(cx.listener(|this, _, _w, cx| {
+                                this.selected = None;
+                                this.settings_open = false;
+                                cx.notify();
+                            }))
+                            .child(device_glyph(32., &colors))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .flex_col()
+                                    .child(
+                                        sidebar_line()
+                                            .text_size(px(12.))
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .child(t!("device.this_mac").to_string()),
+                                    )
+                                    .child(
+                                        sidebar_line()
+                                            .text_size(px(11.))
+                                            .text_color(colors.muted_foreground)
+                                            .child(self.engine.device_name()),
+                                    ),
+                            )
+                            .child(dot(if self.host_on {
+                                colors.success
+                            } else {
+                                colors.muted_foreground.opacity(0.5)
+                            })),
+                    ),
             )
     }
 
@@ -1644,7 +1721,8 @@ impl HomeView {
         let colors = cx.theme().colors;
         let connecting = self.connecting.is_some();
         let fp_c = fp.to_string();
-        let fp_short = &fp[..8.min(fp.len())];
+        let fp_short: String = fp.chars().take(8).collect();
+        let native = row.protocol == ConnectionProtocol::Removent;
         let trusted = self.trusted.contains(fp);
 
         let meta_row = |label: String, value: String| {
@@ -1684,7 +1762,7 @@ impl HomeView {
                     .flex()
                     .items_center()
                     .gap_4()
-                    .child(device_glyph(40., &colors))
+                    .child(saved_glyph(row.protocol, 40., &colors))
                     .child(
                         div()
                             .flex_1()
@@ -1726,11 +1804,11 @@ impl HomeView {
                         })
                         .when(!connecting, |b| b.primary())
                         .when(connecting, |b| b.outline())
-                        .on_click(cx.listener(move |this, _, _w, cx| {
+                        .on_click(cx.listener(move |this, _, window, cx| {
                             if this.connecting.is_some() {
                                 this.cancel_connection(cx);
                             } else {
-                                this.connect_device(&fp_c, cx);
+                                this.connect_device(&fp_c, window, cx);
                             }
                         })),
                 ),
@@ -1746,42 +1824,46 @@ impl HomeView {
                         form_group(cx)
                             .child(meta_row(
                                 t!("device.address").to_string(),
-                                fmt_addr(&row.addr),
+                                row.addr.to_string(),
                             ))
                             .child(Divider::horizontal())
                             .child(meta_row(
-                                t!("device.fingerprint").to_string(),
-                                fp_short.to_string(),
+                                t!("device.protocol").to_string(),
+                                row.protocol.short_label().to_string(),
                             ))
-                            .child(Divider::horizontal())
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .px_4()
-                                    .py(px(10.))
+                            .when(native, |el| {
+                                el.child(Divider::horizontal())
+                                    .child(meta_row(t!("device.fingerprint").to_string(), fp_short))
+                                    .child(Divider::horizontal())
                                     .child(
                                         div()
-                                            .text_size(px(12.))
-                                            .text_color(colors.muted_foreground)
-                                            .child(t!("device.trust").to_string()),
+                                            .flex()
+                                            .items_center()
+                                            .justify_between()
+                                            .px_4()
+                                            .py(px(10.))
+                                            .child(
+                                                div()
+                                                    .text_size(px(12.))
+                                                    .text_color(colors.muted_foreground)
+                                                    .child(t!("device.trust").to_string()),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_size(px(12.))
+                                                    .text_color(if trusted {
+                                                        colors.success
+                                                    } else {
+                                                        colors.muted_foreground
+                                                    })
+                                                    .child(if trusted {
+                                                        t!("device.paired").to_string()
+                                                    } else {
+                                                        t!("device.unpaired").to_string()
+                                                    }),
+                                            ),
                                     )
-                                    .child(
-                                        div()
-                                            .text_size(px(12.))
-                                            .text_color(if trusted {
-                                                colors.success
-                                            } else {
-                                                colors.muted_foreground
-                                            })
-                                            .child(if trusted {
-                                                t!("device.paired").to_string()
-                                            } else {
-                                                t!("device.unpaired").to_string()
-                                            }),
-                                    ),
-                            ),
+                            }),
                     ),
             )
     }
@@ -1964,6 +2046,7 @@ impl HomeView {
             (1, "sun", "settings.appearance"),
             (2, "shield-check", "settings.security"),
             (3, "wifi", "settings.sharing"),
+            (5, "search", "settings.discovery"),
             (4, "info", "settings.system"),
         ] {
             navigation = navigation.child(
@@ -2324,6 +2407,46 @@ impl HomeView {
                             .text_color(colors.muted_foreground)
                             .child(t!("settings.sharing_scope_hint").to_string()),
                     );
+            }
+            5 => {
+                content = content.child(header(
+                    "search",
+                    "settings.discovery",
+                    "settings.discovery_description",
+                ));
+                let mut group = form_group(cx);
+                for (index, protocol) in ConnectionProtocol::ALL.into_iter().enumerate() {
+                    if index > 0 {
+                        group = group.child(Divider::horizontal());
+                    }
+                    group = group.child(
+                        div().flex().items_center().gap_4().p_5()
+                            .child(div().flex_1().text_size(px(13.)).child(protocol.label()))
+                            .child(div().flex().flex_shrink_0()
+                                .debug_selector(move || format!("discovery-enabled-{index}"))
+                                .child(Switch::new(("discovery-enabled", index))
+                                .checked(crate::discovery::enabled(settings.discovery, protocol))
+                                .on_click(cx.listener(move |this, checked, _, cx| {
+                                    if this.persist_settings(|s| match protocol {
+                                        ConnectionProtocol::Removent => s.discovery.removent = *checked,
+                                        ConnectionProtocol::Vnc => s.discovery.vnc = *checked,
+                                        ConnectionProtocol::Rdp => s.discovery.rdp = *checked,
+                                    }) && !*checked {
+                                        this.devices.retain(|_, row| row.protocol != protocol);
+                                        if matches!(&this.selected, Some(Selection::Device(id)) if !this.devices.contains_key(id)) {
+                                            this.selected = None;
+                                        }
+                                    }
+                                    cx.notify();
+                                }))))
+                    );
+                }
+                content = content.child(group).child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(colors.muted_foreground)
+                        .child(t!("settings.discovery_hint").to_string()),
+                );
             }
             _ => {
                 content = content
@@ -3130,5 +3253,106 @@ impl Render for HomeView {
             )
             .children(self.render_pin_dialog(cx))
             .children(self.render_admission_dialog(cx))
+    }
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::*;
+    use gpui::{AnyView, TestAppContext};
+
+    #[gpui::test]
+    fn discovery_switches_persist_independently_and_remove_disabled_rows(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let directory = tempfile::tempdir().unwrap();
+        let paths = removent_core::DataPaths {
+            root: directory.path().into(),
+        };
+        let (commands, _rx) = tokio::sync::mpsc::channel(1);
+        let engine = Engine::for_viewer_test(paths.clone(), commands);
+        let slot = Rc::new(std::cell::RefCell::new(None));
+        let out = slot.clone();
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let view = cx.new(|cx| HomeView::new(engine, window, cx));
+            view.update(cx, |view, _| {
+                view.settings_open = true;
+                view.settings_section = 5;
+            });
+            *out.borrow_mut() = Some(view.clone());
+            gpui_component::Root::new(AnyView::from(view), window, cx)
+        });
+        let view = slot.borrow_mut().take().unwrap();
+        cx.simulate_resize(gpui::size(px(860.), px(600.)));
+        cx.run_until_parked();
+        for (selector, expected) in [
+            (
+                "discovery-enabled-1",
+                removent_core::DiscoverySettings {
+                    removent: true,
+                    vnc: true,
+                    rdp: false,
+                },
+            ),
+            (
+                "discovery-enabled-2",
+                removent_core::DiscoverySettings {
+                    removent: true,
+                    vnc: true,
+                    rdp: true,
+                },
+            ),
+            (
+                "discovery-enabled-0",
+                removent_core::DiscoverySettings {
+                    removent: false,
+                    vnc: true,
+                    rdp: true,
+                },
+            ),
+        ] {
+            let bounds = cx
+                .debug_bounds(selector)
+                .expect("discovery switch must render");
+            assert!(bounds.bottom() <= px(600.));
+            cx.simulate_mouse_move(bounds.center(), None, Default::default());
+            cx.simulate_click(bounds.center(), Default::default());
+            cx.run_until_parked();
+            assert_eq!(
+                removent_core::Settings::load(&paths).unwrap().discovery,
+                expected
+            );
+        }
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle_event(
+                    UiEvent::DeviceFound {
+                        fp: "VNC:192.168.1.2:5900".into(),
+                        name: "Office".into(),
+                        addr: "192.168.1.2:5900".parse().unwrap(),
+                        protocol: ConnectionProtocol::Vnc,
+                    },
+                    window,
+                    cx,
+                );
+                view.selected = Some(Selection::Device("VNC:192.168.1.2:5900".into()));
+            })
+        });
+        cx.run_until_parked();
+        let bounds = cx.debug_bounds("discovery-enabled-1").unwrap();
+        cx.simulate_mouse_move(bounds.center(), None, Default::default());
+        cx.simulate_click(bounds.center(), Default::default());
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let view = view.read(cx);
+            assert!(view.devices.is_empty());
+            assert!(view.selected.is_none());
+        });
+        let settings = removent_core::Settings::load(&paths).unwrap();
+        assert!(!settings.discovery.vnc);
+        assert!(settings.discovery.rdp);
+        assert!(
+            !settings.vnc_enabled,
+            "discovery must not enable the local VNC server"
+        );
     }
 }

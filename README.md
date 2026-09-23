@@ -47,6 +47,33 @@ Grant them under *System Settings → Privacy & Security*, then toggle the host 
 the menu-bar tray. On the other Mac, find this device in the device list (or connect by IP),
 enter the pairing PIN shown on the host, and you're in.
 
+### LAN discovery
+
+Settings → **LAN discovery** controls automatic discovery separately for Removent,
+VNC and RDP. Removent is enabled by default; VNC and RDP are opt-in. Changes apply
+immediately and persist across restarts. Turning discovery off removes that
+protocol's nearby entries without changing saved connections, active sessions or
+this Mac's sharing service.
+
+Discovery combines Bonjour/mDNS (`_removent._udp`, `_rfb._tcp`, `_rdp._tcp`,
+`_ms-wbt-server._tcp`) with active IPv4 LAN scans for VNC on TCP 5900 and RDP on
+TCP 3389. This includes Windows RDP hosts that do not advertise. Custom ports
+are discovered through broadcasts or can be entered manually; IPv6 discovery
+uses mDNS.
+
+Scans visit directly connected subnets, exclude this machine and point-to-point
+VPN interfaces, and confirm RFB/RDP handshakes without logging in. Each protocol
+uses at most 32 concurrent probes with a 1.2-second deadline. Each round visits
+up to 256 new addresses per subnet, starting near this machine, then waits 30
+seconds. On larger networks, the local /24 is also revisited each round while
+the rest is covered progressively; known servers are checked every round and
+removed when unreachable. Disabling a protocol cancels its
+probes. Broadcast and scanned entries for the same endpoint merge, preferring
+the advertised name.
+
+Nearby entries show their protocol; connecting to a discovered VNC/RDP service
+opens its credential form with the address and port already filled in.
+
 ### Apple Remote Desktop / VNC compatibility
 
 In addition to the native RVP/QUIC protocol, the host can optionally expose a standard RFB/VNC

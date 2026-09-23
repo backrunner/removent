@@ -22,6 +22,7 @@ pub struct ServiceStatus {
     pub launch_at_login: bool,
     pub managed: bool,
     pub reachable: bool,
+    pub stopped_by_user: bool,
 }
 
 impl Service {
@@ -86,13 +87,14 @@ impl Service {
             launch_at_login: self.login_file.is_file(),
             managed: self.launchctl(&["print", &self.target()])?.status.success(),
             reachable: std::os::unix::net::UnixStream::connect(self.paths.daemon_socket()).is_ok(),
+            stopped_by_user: crate::service_intent::is_stopped(&self.paths)?,
         })
     }
 
     fn lock(&self) -> Result<DataDirLock> {
         self.paths.ensure_layout()?;
-        DataDirLock::acquire_at(&self.paths.run_dir().join("service.lock"))
-            .context("Another service operation is in progress; try again shortly")
+        DataDirLock::acquire_blocking(&self.paths.run_dir().join("service.lock"))
+            .context("Could not lock service management")
     }
 
     fn plist(&self) -> Result<String> {
@@ -108,7 +110,18 @@ impl Service {
     /// instance against a live daemon using the same data directory.
     pub fn start(&self) -> Result<()> {
         let _lock = self.lock()?;
+        crate::service_intent::set_stopped(&self.paths, false)?;
         self.start_locked()
+    }
+
+    /// Automatic startup/watchdog: never override an explicit stop. Check the
+    /// intent under the same lock as start/stop so a stale poll cannot restart it.
+    pub fn ensure_running(&self) -> Result<()> {
+        let _lock = self.lock()?;
+        if !crate::service_intent::is_stopped(&self.paths)? {
+            self.start_locked()?;
+        }
+        Ok(())
     }
 
     fn start_locked(&self) -> Result<()> {
@@ -151,6 +164,7 @@ impl Service {
             std::fs::create_dir_all(self.login_file.parent().unwrap())?;
             let previous = std::fs::read(&self.login_file).ok();
             crate::settings::atomic_write(&self.login_file, plist.as_bytes())?;
+            crate::service_intent::set_stopped(&self.paths, false)?;
             if let Err(error) = self.start_locked() {
                 if let Some(previous) = previous {
                     crate::settings::atomic_write(&self.login_file, &previous)?;
@@ -173,12 +187,15 @@ impl Service {
     /// for graceful shutdown, so launchd cannot race the replacement process.
     pub fn stop(&self) -> Result<()> {
         let _lock = self.lock()?;
+        crate::service_intent::set_stopped(&self.paths, true)?;
         self.stop_locked()
     }
 
     pub fn restart(&self) -> Result<()> {
         let _lock = self.lock()?;
+        crate::service_intent::set_stopped(&self.paths, true)?;
         self.stop_locked()?;
+        crate::service_intent::set_stopped(&self.paths, false)?;
         self.start_locked()
     }
 
@@ -333,5 +350,24 @@ while True:
         service.stop().unwrap();
         assert!(!service.status().unwrap().reachable);
         assert!(!service.status().unwrap().managed);
+        assert!(service.status().unwrap().stopped_by_user);
+        // A disconnected tray and a reopened desktop must both respect stop.
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| service.ensure_running().unwrap());
+            }
+        });
+        assert!(!service.status().unwrap().managed);
+        // Concurrent explicit starts serialize and retain a single process.
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| service.start().unwrap());
+            }
+        });
+        assert!(!service.status().unwrap().stopped_by_user);
+        let restarted_pid = pid();
+        service.ensure_running().unwrap();
+        assert_eq!(pid(), restarted_pid);
+        service.stop().unwrap();
     }
 }

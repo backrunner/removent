@@ -38,7 +38,7 @@ if [[ "$build" == 1 ]]; then
         echo "Metal compiler not found. Install full Xcode and its Metal toolchain." >&2
         exit 1
     fi
-    cargo build --locked -p removent-app -p removent-daemon
+    cargo build --locked -p removent-app -p removent-daemon -p removent-cli
     if [[ "$tray" == 1 ]]; then
         swift build -c debug --package-path tray
     fi
@@ -67,6 +67,10 @@ export REMOVENT_DATA_DIR
 export REMOVENT_NO_TRAY=1
 export REMOVENT_NO_UPDATE_CHECK="${REMOVENT_NO_UPDATE_CHECK:-1}"
 export REMOVENT_DEV_APP="$app"
+export REMOVENT_SERVICE_CLI="$target_dir/debug/removent-cli"
+# This explicit foreground test session owns cleanup; ordinary app launches
+# and independently opened trays use the launchd watchdog instead.
+export REMOVENT_DEV_SUPERVISED=1
 export RUST_LOG="${RUST_LOG:-info}"
 pids=()
 cleanup() {

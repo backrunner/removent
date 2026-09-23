@@ -121,11 +121,11 @@ Use the admin token file rather than putting a bearer token in arguments, a URL
 or shell history:
 
 ```sh
-removent-relay cloudflare start --url https://YOUR_WORKER \
+python3 scripts/relay_cloudflare.py start https://YOUR_WORKER \
   --credential-file "$HOME/.config/removent/relay-admin.token"
-removent-relay cloudflare status --url https://YOUR_WORKER \
+python3 scripts/relay_cloudflare.py status https://YOUR_WORKER \
   --credential-file "$HOME/.config/removent/relay-admin.token"
-removent-relay cloudflare stop --url https://YOUR_WORKER \
+python3 scripts/relay_cloudflare.py stop https://YOUR_WORKER \
   --credential-file "$HOME/.config/removent/relay-admin.token"
 ```
 

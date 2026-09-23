@@ -4,12 +4,13 @@ pub mod clipboard;
 pub mod control_writer;
 pub mod discovery;
 pub mod error;
+pub mod lan_scan;
 pub mod pairing;
 pub mod session;
 pub mod tls;
 pub mod transport;
 
-pub use discovery::{Advertiser, DeviceEntry, DiscoveryBrowser};
+pub use discovery::{Advertiser, DeviceEntry, DiscoveryBrowser, DiscoveryProtocol};
 pub use error::{NetError, Result};
 pub use pairing::{
     PIN_TTL, PairingMsg, client_begin, client_confirm_check, client_verify, generate_pin,

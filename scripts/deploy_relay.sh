@@ -86,7 +86,7 @@ else
         python3 "$ROOT/scripts/relay_setup.py" record-deployment "$CONFIG_DIR"
         IFS= read -r ORIGIN < "$CONFIG_DIR/deployed-origin"
         python3 "$ROOT/scripts/relay_cloudflare.py" stop "$ORIGIN" --credential-file "$CONFIG_DIR/deployed-admin.token"
-        printf 'Cloudflare relay deployed and stopped. Start with: removent-relay cloudflare start --config-dir %q\n' "$CONFIG_DIR"
+        printf 'Cloudflare relay deployed and stopped. Start with: bash scripts/deploy_relay.sh start --config-dir %q\n' "$CONFIG_DIR"
     elif [[ "$ACTION" == logs ]]; then
         echo 'Use Cloudflare Container logs in the dashboard.'
     else

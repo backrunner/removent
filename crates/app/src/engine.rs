@@ -35,6 +35,7 @@ pub enum UiEvent {
         fp: String,
         name: String,
         addr: SocketAddr,
+        protocol: ConnectionProtocol,
     },
     DeviceLost(String),
     /// Controlled side: display the pairing PIN.
@@ -284,6 +285,7 @@ pub struct Engine {
     pub(crate) rt: Arc<tokio::runtime::Runtime>,
     paths: DataPaths,
     settings: Arc<Mutex<Settings>>,
+    discovery_settings: tokio::sync::watch::Sender<removent_core::DiscoverySettings>,
     identity: Arc<Mutex<Option<DeviceIdentity>>>,
     pub events_tx: std::sync::mpsc::Sender<UiEvent>,
     /// Event receiver end (shared; can only be taken once, but a clone can still take it).
@@ -312,6 +314,7 @@ impl Clone for Engine {
             rt: self.rt.clone(),
             paths: self.paths.clone(),
             settings: self.settings.clone(),
+            discovery_settings: self.discovery_settings.clone(),
             identity: self.identity.clone(),
             events_tx: self.events_tx.clone(),
             events_rx: self.events_rx.clone(),
@@ -368,10 +371,12 @@ impl Engine {
 
     fn with_state(rt: tokio::runtime::Runtime, paths: DataPaths, settings: Settings) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
+        let (discovery_settings, _) = tokio::sync::watch::channel(settings.discovery);
         Self {
             rt: Arc::new(rt),
             paths,
             settings: Arc::new(Mutex::new(settings)),
+            discovery_settings,
             identity: Arc::new(Mutex::new(None)),
             events_tx: tx,
             events_rx: Arc::new(Mutex::new(Some(rx))),
@@ -407,6 +412,21 @@ impl Engine {
         self.settings.lock().unwrap().clone()
     }
 
+    pub fn start_discovery(&self) {
+        let my_fp = self.fingerprint_short();
+        if my_fp.is_empty() {
+            tracing::warn!("own fingerprint unavailable; LAN discovery cannot filter this host");
+        }
+        for protocol in ConnectionProtocol::ALL {
+            self.rt.spawn(crate::discovery::run(
+                protocol,
+                self.discovery_settings.subscribe(),
+                my_fp.clone(),
+                self.events_tx.clone(),
+            ));
+        }
+    }
+
     /// Update and persist settings; pushes ReloadSettings to the daemon when online.
     /// Returns Err when the save fails so the UI can surface it.
     pub fn update_settings(&self, f: impl FnOnce(&mut Settings)) -> Result<(), String> {
@@ -417,6 +437,13 @@ impl Engine {
                 tracing::error!(err=%e, "settings save failed");
                 e.to_string()
             })?;
+            self.discovery_settings.send_if_modified(|current| {
+                if *current == s.discovery {
+                    return false;
+                }
+                *current = s.discovery;
+                true
+            });
         }
         // Reload on the daemon side (the runner picks up the new settings on next restart).
         if let Some(tx) = self.daemon_req.lock().unwrap().as_ref() {
@@ -628,20 +655,22 @@ impl Engine {
     }
 
     /// Start IPC/hosting from the saved settings without changing the service
-    /// switch. The packaged app uses launchd; source builds retain dev.sh's lifecycle.
+    /// switch. Explicit stop intent survives reopening the desktop.
     pub fn start_background_daemon(&self) {
         let Some(bin) = Self::daemon_binary() else {
             return;
         };
-        if !bin
-            .ancestors()
-            .any(|p| p.extension().is_some_and(|e| e == "app"))
-        {
+        if std::env::var("REMOVENT_DEV_SUPERVISED").as_deref() == Ok("1") {
             return;
         }
         let engine = self.clone();
         self.rt.spawn_blocking(move || {
-            if let Err(e) = engine.spawn_daemon_process() {
+            #[cfg(target_os = "macos")]
+            let result = removent_core::service::Service::new(engine.paths.clone(), bin)
+                .and_then(|service| service.ensure_running());
+            #[cfg(not(target_os = "macos"))]
+            let result = engine.spawn_daemon_process();
+            if let Err(e) = result {
                 let _ = engine.events_tx.send(UiEvent::Notice(
                     t!("notice.daemon_spawn_failed", err = format!("{e:#}")).to_string(),
                 ));
@@ -679,13 +708,12 @@ impl Engine {
         let bin = Self::daemon_binary()
             .ok_or_else(|| anyhow::anyhow!(t!("notice.daemon_binary_missing").to_string()))?;
         #[cfg(target_os = "macos")]
-        if bin
-            .ancestors()
-            .any(|p| p.extension().is_some_and(|e| e == "app"))
-        {
+        if std::env::var("REMOVENT_DEV_SUPERVISED").as_deref() != Ok("1") {
             return removent_core::service::Service::new(self.paths.clone(), bin)?.start();
         }
         let mut child = std::process::Command::new(bin)
+            .arg("--background")
+            .env("REMOVENT_DATA_DIR", &self.paths.root)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -1458,6 +1486,36 @@ async fn run_requested_client(
 #[cfg(test)]
 mod client_lifecycle_tests {
     use super::*;
+
+    #[test]
+    fn discovery_updates_publish_only_after_successful_persistence() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths {
+            root: dir.path().into(),
+        };
+        let engine = Engine::with_state(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
+            paths.clone(),
+            Settings::default(),
+        );
+        let mut changes = engine.discovery_settings.subscribe();
+        engine.update_settings(|s| s.discovery.vnc = true).unwrap();
+        assert!(changes.has_changed().unwrap());
+        assert!(changes.borrow_and_update().vnc);
+        assert!(Settings::load(&paths).unwrap().discovery.vnc);
+        engine
+            .update_settings(|s| s.theme = removent_core::Theme::Dark)
+            .unwrap();
+        assert!(!changes.has_changed().unwrap());
+        std::fs::remove_file(paths.settings_file()).unwrap();
+        std::fs::create_dir(paths.settings_file()).unwrap();
+        assert!(engine.update_settings(|s| s.discovery.vnc = false).is_err());
+        assert!(engine.settings().discovery.vnc);
+        assert!(!changes.has_changed().unwrap());
+    }
 
     fn attempt(
         channels: &Arc<Mutex<ClientChannels>>,

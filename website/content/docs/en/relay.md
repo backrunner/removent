@@ -85,19 +85,25 @@ Replace `VERIFIED_TARGET_MAC_FINGERPRINT` with the full fingerprint from the tar
 
 Host and controller credentials are separate; distribute only the appropriate profile. The desktop stores relay credentials in macOS Keychain. Back up `/etc/removent-relay` and the contents of `/var/lib/removent-relay` on Linux, or the complete macOS relay directory, privately. Never regenerate the relay identity while continuing to use an old pin.
 
+## Updates and local logs
+
+The relay can install signed stable releases automatically. In `server.toml`, add `[updates]` with `enabled = true` and `check_interval_secs = 86400`, then restart the service. Automatic updates default to off. Enabled services check 30 seconds after starting and then at the configured interval; applying an update restarts the relay and briefly interrupts connections. A failed download or verification leaves the running version in place.
+
+Run `removent-relay check-update` for a manual check without installation. The command reads the local service version when its configuration is accessible; use `--config /path/to/server.toml` explicitly for another configuration. Otherwise it compares the CLI version. Updates live under `identity_dir/updates`; the system CLI remains the launcher, so updates need no additional system-directory permissions. Disabling updates preserves the installed version. Releases must include the new signed relay manifests.
+
+The relay writes `identity_dir/logs/removent-relay.log` while running, rotating at 8 MiB with three backups. On macOS this defaults to `~/Library/Application Support/removent-relay/data/logs`; on Linux to `/var/lib/removent-relay/logs`. The desktop client, daemon and client CLI use `logs/removent.log`, `logs/removentd.log` and `logs/removent-cli.log` in their data directory with the same rotation policy.
+
 ## Cloudflare Containers
 
 Cloudflare uses HTTPS / WebSocket on port 443. Initial infrastructure deployment requires a Containers-enabled account, Node 24+, Python 3.11+, and Docker able to build Linux amd64. Follow the [Cloudflare deployment guide](https://github.com/backrunner/removent/blob/main/docs/cloudflare-relay.md) for the Worker and container setup.
 
-Install the same CLI on Linux or macOS. Pass `--no-setup` to the installer if you only need to manage Cloudflare without hosting a local relay. Once deployed, manage Cloudflare directly:
+Cloudflare is managed through the deployment scripts or its dashboard; the native relay CLI manages local services. From the source checkout:
 
 ```sh
-removent-relay cloudflare start
-removent-relay cloudflare status
-removent-relay cloudflare stop
+bash scripts/deploy_relay.sh start
+bash scripts/deploy_relay.sh status
+bash scripts/deploy_relay.sh stop
 ```
-
-The CLI reads the last successful deployment's origin and private admin credential from `~/.config/removent-relay` (or `$XDG_CONFIG_HOME/removent-relay`). Use `--config-dir` for another deployment. Manual deployments can use `--url https://YOUR_WORKER --credential-file /PRIVATE/PATH/admin.token`. Credentials stay in private files, outside command arguments.
 
 A manual stop persists; host retries cannot restart a stopped container. An enabled container can sleep while idle and wake for a controller. View container logs in Cloudflare's dashboard. Infrastructure charges follow your hosting provider's terms.
 

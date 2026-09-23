@@ -53,14 +53,14 @@ session.manually_disconnected: Disconnected manually
 notice.daemon_spawn_failed: "Failed to start removentd: %{err}"
 notice.daemon_start_timeout: removentd start timed out; host service not enabled
 notice.daemon_binary_missing: removentd executable not found
-notice.discovery_unavailable: "LAN device discovery unavailable: %{err} (manual IP connection still works)"
+notice.discovery_unavailable: "Service broadcast discovery unavailable: %{err} (enabled port scans and manual connections remain available)"
 
 manual.invalid_addr: Invalid address format, e.g. 192.168.1.10 or 192.168.1.10:7890
 
 device.paired: Paired
 device.unpaired: Not paired
 device.searching: "No devices nearby"
-device.searching_hint: "Open Removent on another Mac to discover it here."
+device.searching_hint: Check LAN discovery settings and make sure the remote service is running on this network.
 device.no_match: No matching devices
 device.online: Online · connectable
 device.info: Device Info
@@ -288,3 +288,11 @@ connection.relay_endpoint: "Relay address"
 connection.relay_transport: "Relay deployment"
 connection.relay_websocket: "Cloudflare / HTTPS"
 connection.relay_quic: "VPS / QUIC"
+
+settings.discovery: LAN discovery
+settings.discovery_description: Choose which protocols appear in Nearby. Changes apply immediately.
+settings.discovery_hint: Uses Bonjour/mDNS and scans the local IPv4 network for VNC (5900) and RDP (3389). Unadvertised custom ports can be added manually. Sharing this Mac is controlled separately.
+device.protocol: Protocol
+
+device.discovery_off: LAN discovery is off
+device.discovery_off_hint: Enable a protocol in Settings → LAN discovery, or add a connection manually.

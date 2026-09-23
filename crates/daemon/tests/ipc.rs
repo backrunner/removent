@@ -277,6 +277,7 @@ async fn kick_session_unimplemented_and_shutdown() {
         IpcResponse::Ok
     ));
     assert!(d.state.shutdown.is_cancelled());
+    assert!(removent_core::service_intent::is_stopped(&d.paths).unwrap());
 }
 
 #[tokio::test]

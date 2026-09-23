@@ -27,7 +27,8 @@ cp "$BIN" "$APP/Contents/MacOS/RemoventTray"
 if [ -d "$RES_BUNDLE" ]; then
     cp -R "$RES_BUNDLE" "$APP/Contents/Resources/"
 else
-    echo "WARNING: $RES_BUNDLE not found; tray UI strings will fall back to keys" >&2
+    echo "ERROR: $RES_BUNDLE not found; cannot package tray resources" >&2
+    exit 1
 fi
 
 cat > "$APP/Contents/Info.plist" <<PLIST

@@ -85,19 +85,25 @@ sudo removent-relay export client --output /root/relay-client.toml --host-finger
 
 两种角色的凭据独立，只分发对应连接文件。桌面端将中继凭据存入 macOS 钥匙串。Linux 请私密备份 `/etc/removent-relay` 与 `/var/lib/removent-relay` 的实际内容，macOS 备份完整的 relay 用户目录；重新生成中继身份后不可继续沿用旧指纹。
 
+## 更新与本地日志
+
+Relay 可自动安装带发布签名的稳定版本。在 `server.toml` 中添加 `[updates]`，设置 `enabled = true` 与 `check_interval_secs = 86400`，然后重启服务。自动更新默认关闭；开启后启动 30 秒检查一次，之后按配置间隔检查。安装完成会重启 relay，并短暂中断连接。下载或验证失败会继续运行旧版。
+
+运行 `removent-relay check-update` 手动检查，不会安装。配置可读取时，命令比较已安装的服务版本；其他配置可显式指定 `--config /path/to/server.toml`，否则比较 CLI 自身版本。更新保存在 `identity_dir/updates`，系统 CLI 保留为启动器，无需额外的系统目录权限。关闭自动更新会保留已经安装的版本。正式发布须包含新的 relay 签名清单。
+
+Relay 运行时写入 `identity_dir/logs/removent-relay.log`，达到 8 MiB 自动轮转并保留三份备份。macOS 默认为 `~/Library/Application Support/removent-relay/data/logs`，Linux 为 `/var/lib/removent-relay/logs`。桌面客户端、daemon 和客户端 CLI 在其数据目录下分别写入 `logs/removent.log`、`logs/removentd.log` 和 `logs/removent-cli.log`，轮转规则相同。
+
 ## Cloudflare Containers
 
 Cloudflare 使用 443 端口的 HTTPS / WebSocket。首次部署基础设施需要已开通 Containers 的账户、Node 24+、Python 3.11+ 和可构建 Linux amd64 的 Docker。Worker 和容器设置见 [Cloudflare 部署指南](https://github.com/backrunner/removent/blob/main/docs/cloudflare-relay.md)。
 
-Linux 和 macOS 使用同一个 CLI；仅管理 Cloudflare、不在本机托管 relay 时，给安装器传入 `--no-setup`。部署完成后，直接管理 Cloudflare：
+Cloudflare 通过部署脚本或其控制台管理，原生 relay CLI 用于本地服务。在源码目录中运行：
 
 ```sh
-removent-relay cloudflare start
-removent-relay cloudflare status
-removent-relay cloudflare stop
+bash scripts/deploy_relay.sh start
+bash scripts/deploy_relay.sh status
+bash scripts/deploy_relay.sh stop
 ```
-
-CLI 从 `~/.config/removent-relay`（或 `$XDG_CONFIG_HOME/removent-relay`）读取上次成功部署的地址和私密管理凭据，其他部署使用 `--config-dir` 指定目录。手动部署也可以传入 `--url https://YOUR_WORKER --credential-file /PRIVATE/PATH/admin.token`，凭据保存在私密文件中，不放入命令参数。
 
 手动停止状态会持久保存，被控端重试不能启动已停止的容器。已启用的容器可在空闲时休眠，并在控制端访问时唤醒。容器日志在 Cloudflare 控制台查看，基础设施费用由托管提供商决定。
 

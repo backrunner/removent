@@ -21,6 +21,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install relay update signing test dependency
+        run: brew install openssl@3
       - run: cargo test --locked -p removent-relay
       - run: cargo clippy --locked -p removent-relay --all-targets -- -D warnings
       - run: cargo build --locked -p removent-relay

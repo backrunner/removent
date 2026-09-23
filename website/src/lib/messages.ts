@@ -47,7 +47,10 @@ export const en = {
   'guides.install': 'Install Removent', 'guides.install.body': 'Get the app and make it at home.',
   'guides.pair': 'Connect your Macs', 'guides.pair.body': 'Discover, pair, and open a session.',
   'guides.host': 'Keep your Mac available', 'guides.host.body': 'Permissions and background hosting.',
-  'closing.title': 'Your workspace is closer\nthan you think.', 'closing.link': 'Get Removent for Mac'
+  'closing.title': 'Your workspace is closer\nthan you think.', 'closing.link': 'Get Removent for Mac',
+  'download.cta': 'Download for Mac', 'download.ctaVersion': 'Download Removent {version}',
+  'download.notes': 'Release notes', 'download.all': 'All releases',
+  'download.missing': 'The latest release has no Mac build yet.', 'download.error': 'Live version lookup is unavailable.'
 };
 
 export const zh: Record<keyof typeof en, string> & Record<string, string> = {
@@ -96,5 +99,8 @@ export const zh: Record<keyof typeof en, string> & Record<string, string> = {
   'guides.install': '安装 Removent', 'guides.install.body': '获取应用，准备就绪。',
   'guides.pair': '连接你的 Mac', 'guides.pair.body': '发现、配对，开启会话。',
   'guides.host': '让 Mac 随时可用', 'guides.host.body': '配置权限与后台服务。',
-  'closing.title': '你的工作区，\n比想象中更近。', 'closing.link': '获取 Mac 版 Removent'
+  'closing.title': '你的工作区，\n比想象中更近。', 'closing.link': '获取 Mac 版 Removent',
+  'download.cta': '下载 Mac 版', 'download.ctaVersion': '下载 Removent {version}',
+  'download.notes': '版本说明', 'download.all': '全部版本',
+  'download.missing': '最新版本暂未提供 Mac 安装包。', 'download.error': '暂时无法获取最新版本信息。'
 };

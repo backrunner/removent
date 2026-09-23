@@ -131,7 +131,12 @@ test('static metadata, markdown, sitemap, assets, and download destinations are 
     expect((await response.text()).length).toBeGreaterThan(30);
   }
   await ready(page, '/download');
-  await expect(page.getByRole('link', { name: 'Browse downloads on GitHub ↗' })).toHaveAttribute('href', 'https://github.com/backrunner/removent/releases');
+  const release = page.locator('.rv-release');
+  await expect(release).toBeVisible();
+  // Before (or without) the live GitHub lookup the button still lands on Releases.
+  await expect(release.locator('.rv-primary')).toHaveAttribute('href', /^https:\/\/github\.com\/backrunner\/removent\/releases/);
+  await ready(page, '/zh/download');
+  await expect(page.locator('.rv-release')).toBeVisible();
   expect(await page.locator('a[href*="support"]').count()).toBe(0);
 });
 

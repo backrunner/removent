@@ -33,7 +33,7 @@ async fn cmd_daemon(action: &str) -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     if matches!(
         action,
-        "start" | "stop" | "restart" | "login-on" | "login-off" | "service-status"
+        "start" | "ensure" | "stop" | "restart" | "login-on" | "login-off" | "service-status"
     ) {
         let exe = std::env::current_exe()?.with_file_name("removentd");
         let service = removent_core::service::Service::new(paths, exe)?;
@@ -42,6 +42,7 @@ async fn cmd_daemon(action: &str) -> anyhow::Result<()> {
         let status = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
             match action.as_str() {
                 "start" => service.start()?,
+                "ensure" => service.ensure_running()?,
                 "stop" => service.stop()?,
                 "restart" => service.restart()?,
                 "login-on" => service.set_launch_at_login(true)?,
@@ -584,6 +585,8 @@ async fn cmd_ping(args: PingArgs) -> anyhow::Result<()> {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let paths = DataPaths::resolve();
+    removent_core::logging::init_logging(&paths);
+    removent_core::logging::install_panic_hook(&paths);
     let settings = removent_core::Settings::load(&paths).unwrap_or_default();
     rust_i18n::set_locale(removent_core::resolve_locale(settings.language));
 

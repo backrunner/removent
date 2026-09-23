@@ -11,6 +11,8 @@ pub struct Settings {
     pub device_name: String,
     pub language: Language,
     pub theme: Theme,
+    /// Client-side LAN discovery; independent of the local sharing service.
+    pub discovery: DiscoverySettings,
     /// Controlled-side admission mode (FR-06).
     pub admission: AdmissionMode,
     /// Service master switch (toggleable from the menu bar).
@@ -41,6 +43,24 @@ pub struct Settings {
     pub update_endpoint: String,
     #[serde(skip)]
     pub loaded_from: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiscoverySettings {
+    pub removent: bool,
+    pub vnc: bool,
+    pub rdp: bool,
+}
+
+impl Default for DiscoverySettings {
+    fn default() -> Self {
+        Self {
+            removent: true,
+            vnc: false,
+            rdp: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,6 +100,7 @@ impl Default for Settings {
             device_name: default_device_name(),
             language: Language::System,
             theme: Theme::System,
+            discovery: DiscoverySettings::default(),
             admission: AdmissionMode::AlwaysAsk,
             host_enabled: true,
             host_port: removent_proto::DEFAULT_PORT,
@@ -284,6 +305,14 @@ mod tests {
         assert_eq!(s.admission, AdmissionMode::AlwaysAsk);
         assert_eq!(s.host_port, removent_proto::DEFAULT_PORT);
         assert!(!s.vnc_enabled);
+        assert_eq!(
+            s.discovery,
+            DiscoverySettings {
+                removent: true,
+                vnc: false,
+                rdp: false
+            }
+        );
         assert_eq!(s.vnc_port, 5900);
         assert!(s.vnc_username.is_empty());
         assert!(s.vnc_password.is_empty());
@@ -295,10 +324,26 @@ mod tests {
         modified.vnc_enabled = true;
         modified.vnc_username = "alice".into();
         modified.vnc_password = "test-password".into();
+        modified.discovery = DiscoverySettings {
+            removent: false,
+            vnc: true,
+            rdp: true,
+        };
         modified.save(&p).unwrap();
 
         let reloaded = Settings::load(&p).unwrap();
         assert_eq!(reloaded, modified);
+    }
+
+    #[test]
+    fn older_and_partial_discovery_settings_keep_opt_in_defaults() {
+        let old: Settings = toml::from_str("vnc_enabled = true").unwrap();
+        assert_eq!(old.discovery, DiscoverySettings::default());
+        let partial: Settings = toml::from_str("[discovery]\nvnc = true").unwrap();
+        assert!(partial.discovery.removent);
+        assert!(partial.discovery.vnc);
+        assert!(!partial.discovery.rdp);
+        assert!(!partial.vnc_enabled);
     }
 
     #[test]

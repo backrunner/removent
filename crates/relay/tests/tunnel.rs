@@ -100,6 +100,7 @@ impl Fixture {
             ..host_cfg.clone()
         };
         let config = ServerConfig {
+            updates: Default::default(),
             listen: address,
             allowed_cidrs,
             identity_dir: dir.path().join("relay"),

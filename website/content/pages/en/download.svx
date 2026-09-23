@@ -7,9 +7,9 @@ description: "Get Removent for your Apple silicon Mac. Free and open source unde
 
 **macOS 13 Ventura or later · Apple silicon (arm64)**
 
-[Browse downloads on GitHub ↗](https://github.com/backrunner/removent/releases)
+<ReleaseDownload />
 
-Choose the latest published `Removent-<version>-macos-arm64.dmg`. GitHub Releases is the source of truth for available builds and release notes. Removent is in early development; review the release notes before relying on it for unattended access.
+The button above pulls the newest published `Removent-<version>-macos-arm64.dmg` straight from GitHub Releases, which is the source of truth for available builds and release notes. Removent is in early development; review the release notes before relying on it for unattended access.
 
 ## Install and connect
 

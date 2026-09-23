@@ -2,6 +2,9 @@
 "status.daemon_offline" = "未连接 daemon";
 "status.running" = "运行中";
 "status.stopped" = "已停用";
+"status.process_stopped" = "已手动停止";
+"menu.start_process" = "启动后台服务";
+"menu.stop_process" = "停止后台服务";
 
 /* 菜单项 */
 "menu.service_status" = "Removent 服务：%@";

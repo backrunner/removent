@@ -36,7 +36,11 @@ clap = { version = "4", features = ["derive"] }
 libc.workspace = true
 tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots"] }
+semver = "1"
+flate2 = "1"
+tar = "0.4"
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 removent-proto.workspace = true
 tokio-rustls = "0.26"

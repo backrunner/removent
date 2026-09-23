@@ -13,6 +13,7 @@ pub mod peers;
 pub mod removent_uri;
 #[cfg(target_os = "macos")]
 pub mod service;
+pub mod service_intent;
 pub mod settings;
 
 pub use adapt::{AdaptationController, QualityState, Sample};
@@ -26,7 +27,7 @@ pub use i18n::resolve_locale;
 pub use identity::DeviceIdentity;
 pub use paths::DataPaths;
 pub use peers::{PeerRecord, PeersStore};
-pub use settings::{AdmissionMode, Language, QualityPreset, Settings, Theme};
+pub use settings::{AdmissionMode, DiscoverySettings, Language, QualityPreset, Settings, Theme};
 
 /// Application metadata.
 pub const APP_NAME: &str = "Removent";

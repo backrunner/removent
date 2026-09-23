@@ -1,5 +1,5 @@
 //! User-facing CLI. Serving and service management share one installed binary.
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use removent_relay::config::ServerConfig;
 use std::{net::SocketAddr, path::PathBuf};
@@ -102,19 +102,11 @@ enum Command {
         #[arg(long)]
         host_fingerprint: Option<String>,
     },
-    /// Control an already deployed Cloudflare relay over HTTPS.
-    Cloudflare {
-        #[arg(value_enum)]
-        action: RemoteAction,
-        /// HTTPS origin. Omit to use the deployment's saved origin.
+    /// Check signed stable releases without downloading or installing an update.
+    CheckUpdate {
+        /// Read the active service version from this server configuration.
         #[arg(long)]
-        url: Option<String>,
-        /// Private file containing the admin token (not a host/client credential).
-        #[arg(long)]
-        credential_file: Option<PathBuf>,
-        /// Existing Cloudflare deployment directory; defaults to the user config directory.
-        #[arg(long)]
-        config_dir: Option<PathBuf>,
+        config: Option<PathBuf>,
     },
     /// Generate a fresh credential and its SHA-256 hash for manual configuration.
     GenerateToken,
@@ -133,23 +125,7 @@ impl ProfileRole {
         }
     }
 }
-#[derive(Clone, Copy, ValueEnum)]
-pub enum RemoteAction {
-    Start,
-    Stop,
-    Status,
-}
-impl RemoteAction {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Start => "start",
-            Self::Stop => "stop",
-            Self::Status => "status",
-        }
-    }
-}
-
-pub async fn execute() -> Result<Option<(ServerConfig, bool)>> {
+pub async fn execute() -> Result<Option<(ServerConfig, bool, bool)>> {
     use Command::*;
     let cli = Cli::parse();
     let service_dir = cli.service_dir.as_deref();
@@ -163,10 +139,15 @@ pub async fn execute() -> Result<Option<(ServerConfig, bool)>> {
             return Ok(Some((
                 crate::management::read_config(&config_path(config)?)?,
                 false,
+                false,
             )));
         }
         ServeWebsocket { config } => {
-            return Ok(Some((crate::management::read_config(&config)?, true)));
+            return Ok(Some((
+                crate::management::read_config(&config)?,
+                true,
+                false,
+            )));
         }
         ServeContainer => {
             let config: ServerConfig = serde_json::from_str(
@@ -177,7 +158,7 @@ pub async fn execute() -> Result<Option<(ServerConfig, bool)>> {
                 anyhow::anyhow!("Invalid container relay configuration (contents redacted)")
             })?;
             config.validate()?;
-            return Ok(Some((config, true)));
+            return Ok(Some((config, true, true)));
         }
         Setup { network, no_start } => crate::management::setup(network, no_start, service_dir)?,
         Init { dir, network } => {
@@ -218,28 +199,17 @@ pub async fn execute() -> Result<Option<(ServerConfig, bool)>> {
             &output,
             host_fingerprint.as_deref(),
         )?,
-        Cloudflare {
-            action,
-            url,
-            credential_file,
-            config_dir,
-        } => {
-            ensure!(
-                url.is_some() == credential_file.is_some(),
-                "Provide both --url and --credential-file, or neither"
-            );
-            let (url, credential) = match (url, credential_file) {
-                (Some(url), Some(file)) => (url, file),
-                _ => {
-                    let dir = config_dir
-                        .map(Ok)
-                        .unwrap_or_else(crate::management::user_config_dir)?;
-                    let origin =
-                        crate::management::read_private(&dir.join("deployed-origin"), 1024)?;
-                    (origin.trim().to_string(), dir.join("deployed-admin.token"))
-                }
-            };
-            crate::remote::control(action, &url, &credential).await?;
+        CheckUpdate { config } => {
+            let path = config.or_else(|| {
+                config_dir()
+                    .ok()
+                    .map(|dir| dir.join("server.toml"))
+                    .filter(|p| p.exists())
+            });
+            let config = path
+                .map(|path| crate::management::read_config(&path))
+                .transpose()?;
+            crate::updater::check_command(config.as_ref()).await?;
         }
         GenerateToken => {
             let token = hex::encode(rand::random::<[u8; 32]>());
@@ -265,5 +235,7 @@ mod tests {
         assert!(Cli::try_parse_from(["removent-relay", "logs", "--lines", "0"]).is_err());
         assert!(Cli::try_parse_from(["removent-relay", "serve", "/tmp/server.toml"]).is_ok());
         assert!(Cli::try_parse_from(["removent-relay", "serve-container"]).is_ok());
+        assert!(Cli::try_parse_from(["removent-relay", "check-update"]).is_ok());
+        assert!(Cli::try_parse_from(["removent-relay", "cloudflare", "status"]).is_err());
     }
 }

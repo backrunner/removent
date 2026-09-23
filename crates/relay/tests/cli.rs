@@ -54,6 +54,8 @@ async fn generated_profiles_connect_to_the_binary_and_sigterm_preserves_identity
             .arg("serve")
             .arg(dir.join("server.toml"))
             .env_remove("NOTIFY_SOCKET")
+            .env_remove("REMOVENT_RELAY_READY_FILE")
+            .env("RUST_LOG", "info")
             .stdin(Stdio::null())
             .stdout(log.try_clone().unwrap())
             .stderr(log)
@@ -112,6 +114,10 @@ async fn generated_profiles_connect_to_the_binary_and_sigterm_preserves_identity
     .await
     .unwrap();
     assert!(status.success());
+    let local_log = fs::read_to_string(dir.join("data/logs/removent-relay.log")).unwrap();
+    assert!(local_log.contains("Relay listening"));
+    assert!(!local_log.contains(&host_config.token));
+    assert!(!local_log.contains(&client_config.token));
     drop((host_tunnel, viewer_tunnel));
     let output = Command::new(BINARY)
         .args(["fingerprint", "--config"])

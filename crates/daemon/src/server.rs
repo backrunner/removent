@@ -140,6 +140,11 @@ fn handle_request(state: &Arc<DaemonState>, req: IpcRequest) -> IpcResponse {
             message: t!("error.kick_unimplemented", id = session_id).to_string(),
         },
         IpcRequest::Shutdown => {
+            if let Err(error) = removent_core::service_intent::set_stopped(&state.paths, true) {
+                return IpcResponse::Error {
+                    message: error.to_string(),
+                };
+            }
             state.shutdown.cancel();
             IpcResponse::Ok
         }

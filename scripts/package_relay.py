@@ -4,12 +4,12 @@ import argparse
 import hashlib
 import io
 import pathlib
-import re
 import subprocess
 import struct
 import sys
 import tarfile
 import tempfile
+from release_version import release_metadata
 
 PLATFORMS = ("linux-x86_64", "linux-aarch64", "macos-universal")
 SIGNING_REQUIREMENT = ('=anchor apple generic and certificate leaf[subject.OU] = "PB8H83VL3Z" '
@@ -48,8 +48,9 @@ def verify_universal(binary):
 
 
 def asset_name(version, platform):
-    if not re.fullmatch(r"v\d+\.\d+\.\d+", version):
-        raise ValueError("Expected a stable version tag")
+    if not version.startswith("v"):
+        raise ValueError("Expected a version tag starting with v")
+    release_metadata(version[1:])
     return f"removent-relay-{version}-{platform}.tar.gz"
 
 

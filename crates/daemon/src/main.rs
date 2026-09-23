@@ -26,6 +26,11 @@ fn main() -> anyhow::Result<()> {
 
 fn start(paths: DataPaths) -> anyhow::Result<()> {
     paths.ensure_layout().context(t!("error.init_data_dir"))?;
+    if std::env::args().any(|arg| arg == "--background")
+        && removent_core::service_intent::is_stopped(&paths)?
+    {
+        return Ok(());
+    }
     let settings = Settings::load(&paths)?;
     rust_i18n::set_locale(removent_core::resolve_locale(settings.language));
 

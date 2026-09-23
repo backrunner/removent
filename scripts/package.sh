@@ -51,10 +51,13 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>Removent uses your local network to discover nearby Macs and connect to devices you choose.</string>
+    <string>Removent uses your local network to discover remote desktop services and connect to devices you choose.</string>
     <key>NSBonjourServices</key>
     <array>
         <string>_removent._udp</string>
+        <string>_rfb._tcp</string>
+        <string>_rdp._tcp</string>
+        <string>_ms-wbt-server._tcp</string>
     </array>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Removent needs Screen Recording permission to share your screen with peers you approve.</string>
@@ -68,7 +71,7 @@ PLIST
 cat > "$BUNDLE/Contents/Resources/zh-Hans.lproj/InfoPlist.strings" <<'STRINGS'
 "NSScreenCaptureUsageDescription" = "Removent 需要屏幕录制权限以向您批准的对方共享屏幕。";
 "NSAccessibilityUsageDescription" = "Removent 需要辅助功能权限以在本机被控制时注入键鼠输入。";
-"NSLocalNetworkUsageDescription" = "Removent 需要访问本地网络以发现附近的 Mac，并连接您选择的设备。";
+"NSLocalNetworkUsageDescription" = "Removent 需要访问本地网络以发现远程桌面服务，并连接您选择的设备。";
 STRINGS
 
 cp target/release/removent "$BUNDLE/Contents/MacOS/removent"

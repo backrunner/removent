@@ -268,6 +268,7 @@ pub fn initialize(dir: &Path, args: NetworkArgs, state_dir: Option<&Path>) -> Re
         .map(Path::to_path_buf)
         .unwrap_or_else(|| dir.join("data"));
     let config = ServerConfig {
+        updates: Default::default(),
         listen,
         identity_dir,
         max_connections: 128,

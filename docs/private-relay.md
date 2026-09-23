@@ -125,6 +125,14 @@ the service but retains configuration, identity and the binary. See the
 [installation and configuration guide](relay-quick-deploy.md) for unattended
 setup, source allowlists, profile export and Cloudflare management.
 
+Native services also support signed automatic updates, disabled by default. Set
+`[updates] enabled = true` in `server.toml` and restart to enable them. The default
+interval is 24 hours, with an initial check after 30 seconds; installation restarts
+the process and interrupts current tunnels. Use `removent-relay check-update` for
+a manual check without installation. Local logs in `identity_dir/logs` rotate at
+8 MiB with three backups, matching the desktop client's logging policy. See the
+[update and logging settings](relay-quick-deploy.md#自动更新与手动检查).
+
 For development, `cargo build --locked --release -p removent-relay` still builds
 the same CLI. `init --dir /PRIVATE/PATH/relay --address removent://host:48700`
 generates standalone configuration, and `serve /PRIVATE/PATH/relay/server.toml`

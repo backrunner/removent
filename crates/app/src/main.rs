@@ -2,13 +2,13 @@
 
 mod assets;
 mod audio;
+mod discovery;
 mod engine;
 mod permissions;
 mod theme;
 mod ui;
 mod updater;
 
-use crate::engine::UiEvent;
 use anyhow::Result;
 use gpui::{AppContext, KeyBinding};
 use gpui_component::TitleBar;
@@ -50,97 +50,7 @@ fn run(paths: DataPaths) -> Result<()> {
     let tray_paths = paths.clone();
     engine.rt.spawn_blocking(move || autostart_tray(tray_paths));
 
-    // mDNS discovery is resident: device table changes → UiEvent.
-    {
-        let tx = engine.events_tx.clone();
-        // Own fingerprint: the discovery table sees itself (the daemon's advertiser)
-        // and must be filtered out.
-        let my_fp = engine.fingerprint_short();
-        if my_fp.is_empty() {
-            tracing::warn!(
-                "own fingerprint is empty; self-filtering in the device list will not work"
-            );
-        }
-        engine.rt.spawn(async move {
-            let browser = match removent_net::DiscoveryBrowser::start() {
-                Ok(b) => b,
-                Err(e) => {
-                    tracing::error!(err=%e, "discovery start failed");
-                    let _ = tx.send(UiEvent::Notice(
-                        rust_i18n::t!("notice.discovery_unavailable", err = format!("{e}"))
-                            .to_string(),
-                    ));
-                    return;
-                }
-            };
-            let mut rx = browser.subscribe_table();
-            // fp -> last known (name, address); the address is None when discovered but
-            // not yet resolved.
-            let mut prev: std::collections::BTreeMap<
-                String,
-                (String, Option<std::net::SocketAddr>),
-            > = Default::default();
-            loop {
-                if rx.changed().await.is_err() {
-                    break;
-                }
-                let snap = rx.borrow_and_update().clone();
-                // The discovery table is keyed by mDNS instance name; one device may show up
-                // as multiple instances ("name (2)"…) due to instance-name conflicts — dedupe
-                // by short fingerprint and exclude ourselves. Among duplicate instances, prefer
-                // the one that has an address and resolved most recently.
-                let mut by_fp: std::collections::BTreeMap<String, &removent_net::DeviceEntry> =
-                    Default::default();
-                for e in snap.values() {
-                    if e.short_fp.is_empty() || e.short_fp == my_fp {
-                        continue;
-                    }
-                    let better = match by_fp.get(&e.short_fp) {
-                        None => true,
-                        Some(cur) => {
-                            (cur.addr.is_none() && e.addr.is_some())
-                                || (cur.addr.is_some() == e.addr.is_some()
-                                    && e.seen_at > cur.seen_at)
-                        }
-                    };
-                    if better {
-                        by_fp.insert(e.short_fp.clone(), e);
-                    }
-                }
-                let mut next: std::collections::BTreeMap<
-                    String,
-                    (String, Option<std::net::SocketAddr>),
-                > = Default::default();
-                for (fp, e) in by_fp.iter() {
-                    next.insert(fp.clone(), (e.name.clone(), e.addr));
-                    // Re-emit an online event for new devices, devices that had no
-                    // address, address changes (DHCP re-lease), or name changes (the
-                    // peer renamed itself) — the home side upserts, so the row
-                    // refreshes accordingly.
-                    if let Some(addr) = e.addr {
-                        let unchanged = matches!(
-                            prev.get(fp),
-                            Some((prev_name, prev_addr))
-                                if prev_name == &e.name && *prev_addr == Some(addr)
-                        );
-                        if !unchanged {
-                            let _ = tx.send(UiEvent::DeviceFound {
-                                fp: fp.clone(),
-                                name: e.name.clone(),
-                                addr,
-                            });
-                        }
-                    }
-                }
-                for (fp, (_, addr)) in prev.iter() {
-                    if addr.is_some() && !by_fp.contains_key(fp) {
-                        let _ = tx.send(UiEvent::DeviceLost(fp.clone()));
-                    }
-                }
-                prev = next;
-            }
-        });
-    }
+    engine.start_discovery();
 
     let engine_for_window = engine.clone();
     let theme_pref = engine.settings().theme;
@@ -279,23 +189,39 @@ fn autostart_tray(paths: DataPaths) {
         }
     }
 
-    // Dev mode: target/debug → the tray/.build artifacts under the workspace root, spawned directly.
-    if let Some(ws) = exe_dir.parent().and_then(|p| p.parent()) {
-        for bin in [
-            ws.join("tray/.build/release/RemoventTray"),
-            ws.join("tray/.build/debug/RemoventTray"),
-        ] {
+    // Use the source root, not target/../..: CARGO_TARGET_DIR may be elsewhere.
+    // Match the running profile so an old release tray cannot shadow debug UI.
+    if let Some(ws) = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+    {
+        let profiles = if cfg!(debug_assertions) {
+            ["debug", "release"]
+        } else {
+            ["release", "debug"]
+        };
+        for profile in profiles {
+            let bin = ws.join(format!("tray/.build/{profile}/RemoventTray"));
             if !bin.is_file() {
                 continue;
             }
             match std::process::Command::new(&bin)
                 .env("REMOVENT_DATA_DIR", &data_root)
+                .env("REMOVENT_SERVICE_CLI", exe_dir.join("removent-cli"))
+                .env("REMOVENT_DEV_APP", &exe)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()
             {
-                Ok(_) => {
+                Ok(mut child) => {
+                    std::thread::spawn(move || {
+                        if let Ok(status) = child.wait()
+                            && !status.success()
+                        {
+                            tracing::warn!(%status, "RemoventTray exited unexpectedly");
+                        }
+                    });
                     tracing::info!(path=%bin.display(), "RemoventTray spawned (dev)");
                     return;
                 }

@@ -132,6 +132,7 @@ async fn run(
             max_clients_per_room: 4,
             max_bytes_per_second: 50_000_000,
             allowed_cidrs: vec![],
+            updates: Default::default(),
             rooms: vec![Room {
                 name: "wan".into(),
                 host_token_sha256: hex::encode(token_hash(&"11".repeat(32))?),

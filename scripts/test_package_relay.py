@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import hashlib
 import io
+import json
 import pathlib
 import struct
 import subprocess
@@ -10,6 +11,8 @@ import tempfile
 import unittest
 
 from package_relay import PLATFORMS, SIGNING_REQUIREMENT, asset_name, verify, verify_universal
+from gen_latest import OPENSSL, verify_payload
+from gen_relay_updates import generate, signing_payload
 
 
 class ReleaseAssetTests(unittest.TestCase):
@@ -56,6 +59,25 @@ class ReleaseAssetTests(unittest.TestCase):
         (self.directory / asset_name("v0.1.0", "linux-aarch64")).unlink()
         with self.assertRaises(FileNotFoundError):
             verify(self.directory, "v0.1.0")
+
+    def test_relay_manifests_sign_both_hashes_and_every_platform(self):
+        key = self.directory / "test-key.pem"
+        public = self.directory / "test-public.pem"
+        subprocess.run([OPENSSL, "genpkey", "-algorithm", "ED25519", "-out", str(key)], check=True, capture_output=True)
+        subprocess.run([OPENSSL, "pkey", "-in", str(key), "-pubout", "-out", str(public)], check=True, capture_output=True)
+        with self.assertRaisesRegex(ValueError, "compiled into the app"):
+            generate(self.directory, "0.1.0", key)
+        generate(self.directory, "0.1.0", key, check_key=False)
+        for platform in PLATFORMS:
+            manifest = json.loads((self.directory / f"relay-latest-{platform}.json").read_text())
+            self.assertEqual(manifest["platform"], platform)
+            self.assertTrue(verify_payload(signing_payload(manifest), manifest["signature"], str(public)))
+            with tarfile.open(self.directory / asset_name("v0.1.0", platform), "r:gz") as archive:
+                binary = archive.extractfile("removent-relay").read()
+            self.assertEqual(manifest["binary_sha256"], hashlib.sha256(binary).hexdigest())
+            for field in ("version", "platform", "url", "sha256", "binary_sha256"):
+                tampered = dict(manifest, **{field: "tampered"})
+                self.assertFalse(verify_payload(signing_payload(tampered), manifest["signature"], str(public)), field)
 
     def test_universal_macos_requires_both_architectures(self):
         self.write_archive("macos-universal", machine=0x100000C)

@@ -143,7 +143,10 @@ pub fn parse_version(s: &str) -> Option<semver::Version> {
 }
 
 pub fn is_newer(remote: &str, local: &str) -> bool {
-    match (parse_version(remote), parse_version(local)) {
+    // Stable releases may upgrade a beta installation; remote beta releases
+    // remain excluded from the automatic update channel.
+    let local = semver::Version::parse(local.trim().strip_prefix('v').unwrap_or(local.trim())).ok();
+    match (parse_version(remote), local) {
         (Some(r), Some(l)) => r.cmp_precedence(&l).is_gt(),
         _ => false,
     }
@@ -413,6 +416,14 @@ pub fn run_install(
         let _ = events.send(UiEvent::UpdateStatus(s.status.clone()));
         staged
     };
+    let resume_service =
+        match removent_core::service_intent::is_stopped(&removent_core::DataPaths::resolve()) {
+            Ok(stopped) => !stopped,
+            Err(error) => {
+                set_status(&shared, &events, UpdateStatus::Failed(error.to_string()));
+                return;
+            }
+        };
     match swap_bundle(&staged) {
         Ok(bundle) => {
             // Stop the old daemon before relaunching: it ships inside the
@@ -425,7 +436,7 @@ pub fn run_install(
                 std::thread::sleep(std::time::Duration::from_millis(300));
             }
             set_status(&shared, &events, UpdateStatus::Relaunching);
-            if let Err(error) = relaunch(&bundle) {
+            if let Err(error) = relaunch(&bundle, resume_service) {
                 let backup = bundle.with_extension("app.old");
                 let failed = bundle.with_extension("app.failed");
                 let restored = std::fs::rename(&bundle, &failed)
@@ -435,10 +446,12 @@ pub fn run_install(
                     // The replacement daemon may already have started. Put
                     // the restored bundle's server back under the same job.
                     #[cfg(target_os = "macos")]
-                    if let Ok(service) = removent_core::service::Service::new(
-                        removent_core::DataPaths::resolve(),
-                        bundle.join("Contents/MacOS/removentd"),
-                    ) {
+                    if resume_service
+                        && let Ok(service) = removent_core::service::Service::new(
+                            removent_core::DataPaths::resolve(),
+                            bundle.join("Contents/MacOS/removentd"),
+                        )
+                    {
                         let _ = service.restart();
                     }
                     t!("update.err.swap", err = error.to_string()).to_string()
@@ -524,14 +537,16 @@ fn move_into_place(staged: &Path, bundle: &Path) -> std::io::Result<()> {
 
 /// Restart the daemon (it ships inside the bundle; best-effort — it may not be
 /// loaded at all), open the new app and exit only if Launch Services accepts it.
-fn relaunch(bundle: &Path) -> std::io::Result<()> {
+fn relaunch(bundle: &Path, resume_service: bool) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
-    removent_core::service::Service::new(
-        removent_core::DataPaths::resolve(),
-        bundle.join("Contents/MacOS/removentd"),
-    )
-    .and_then(|service| service.restart())
-    .map_err(std::io::Error::other)?;
+    if resume_service {
+        removent_core::service::Service::new(
+            removent_core::DataPaths::resolve(),
+            bundle.join("Contents/MacOS/removentd"),
+        )
+        .and_then(|service| service.restart())
+        .map_err(std::io::Error::other)?;
+    }
     let opened = Command::new("/usr/bin/open")
         .arg("-n")
         .arg(bundle)
@@ -920,6 +935,9 @@ mod tests {
         assert!(!is_newer("garbage", "0.1.0"));
         assert!(!is_newer("9.0.0-preview.1", "0.1.0"));
         assert!(!is_newer("0.1.0+build2", "0.1.0+build1"));
+        assert!(is_newer("0.1.3", "0.1.3-beta.1"));
+        assert!(!is_newer("0.1.2", "0.1.3-beta.1"));
+        assert!(!is_newer("0.1.3-beta.2", "0.1.3-beta.1"));
     }
 
     #[test]

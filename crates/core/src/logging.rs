@@ -24,7 +24,12 @@ const TRUNCATED: &[u8] = b" [truncated]\n";
 /// App and daemon have separate files; multiple instances serialize each append
 /// and rotation through flock, then reopen the active file (never a stale inode).
 pub fn init_logging(paths: &DataPaths) {
-    let component = component_name();
+    init_component_logging(paths, component_name(), true);
+}
+
+/// Select a stable component name, including when running a staged update.
+/// Managed launchd relays disable the duplicate, non-rotating stderr stream.
+pub fn init_component_logging(paths: &DataPaths, component: &'static str, console: bool) {
     let path = paths.logs_dir().join(format!("{component}.log"));
     let file = RollingLog::new(path.clone(), MAX_LOG_BYTES, LOG_BACKUPS);
     let file = match file {
@@ -40,10 +45,12 @@ pub fn init_logging(paths: &DataPaths) {
     let file_enabled = file.is_some();
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,quinn=warn,rustls=warn"));
-    let console = tracing_subscriber::fmt::layer()
-        .fmt_fields(SafeFields)
-        .with_ansi(false)
-        .with_writer(std::io::stderr);
+    let console = console.then(|| {
+        tracing_subscriber::fmt::layer()
+            .fmt_fields(SafeFields)
+            .with_ansi(false)
+            .with_writer(std::io::stderr)
+    });
     let file = file.map(|writer| {
         tracing_subscriber::fmt::layer()
             .fmt_fields(SafeFields)
@@ -80,6 +87,7 @@ fn component_name() -> &'static str {
     {
         Some("removentd") => "removentd",
         Some("removent-cli") => "removent-cli",
+        Some("removent-relay") => "removent-relay",
         _ => "removent",
     }
 }

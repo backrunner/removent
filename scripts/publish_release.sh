@@ -5,21 +5,27 @@ cd "$(dirname "$0")/.."
 source scripts/macos_env.sh
 VERSION=$(python3 scripts/release_meta.py version)
 TAG="v${VERSION}"
+CHANNEL=$(python3 scripts/release_meta.py channel)
 test -z "$(git status --porcelain)" || { echo 'error: commit the release source before publishing' >&2; exit 1; }
 test "$(git rev-parse "$TAG^{commit}")" = "$(git rev-parse HEAD)"
 REMOTE_SHA=$(git ls-remote --tags origin "refs/tags/$TAG^{}" "refs/tags/$TAG" | awk 'END {print $1}')
 test "$REMOTE_SHA" = "$(git rev-parse HEAD)" || { echo 'error: push the matching tag before publishing' >&2; exit 1; }
 python3 scripts/verify_release.py
 python3 scripts/package_relay.py --version "$TAG" --verify
+python3 scripts/gen_relay_updates.py --version "$VERSION" --key "${UPDATE_SIGNING_KEY_FILE:-$HOME/.config/removent/update-signing-key.pem}"
 RELAY_ASSETS=()
 for RELAY_PLATFORM in linux-x86_64 linux-aarch64 macos-universal; do
     RELAY_ASSET="dist/relay/removent-relay-${TAG}-${RELAY_PLATFORM}.tar.gz"
-    RELAY_ASSETS+=("$RELAY_ASSET" "$RELAY_ASSET.sha256")
+    RELAY_ASSETS+=("$RELAY_ASSET" "$RELAY_ASSET.sha256" "dist/relay/relay-latest-${RELAY_PLATFORM}.json")
 done
+RELEASE_FLAGS=(--latest)
+if [[ "$CHANNEL" == beta ]]; then
+    RELEASE_FLAGS=(--prerelease --latest=false)
+fi
 gh release create "$TAG" --repo backrunner/removent \
     "dist/Removent-${VERSION}-macos-arm64.dmg" \
     "dist/Removent-${VERSION}-macos-arm64.zip" \
     dist/latest.json dist/SHA256SUMS \
     "${RELAY_ASSETS[@]}" \
     --verify-tag --title "Removent $TAG" \
-    --notes-file "docs/releases/${TAG}.md" --latest
+    --notes-file "docs/releases/${TAG}.md" "${RELEASE_FLAGS[@]}"

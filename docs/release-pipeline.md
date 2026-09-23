@@ -45,11 +45,11 @@ bash scripts/release.sh
 bash scripts/publish_release.sh
 ```
 
-发布脚本只接受 `MAJOR.MINOR.PATCH`，发布为正式版并设置 `--latest`。每个正式版本的 ZIP、DMG、清单都使用不可变版本 tag，不覆盖已发布资产。旧开发 beta 的发布与标签按用户要求清理，不提供迁移或兼容通道。
+发布脚本接受 `MAJOR.MINOR.PATCH` 正式版和 `MAJOR.MINOR.PATCH-beta.N` 测试版。正式版设置 `--latest`；beta 设置 `--prerelease --latest=false`，不改变现有正式版本或自动更新源。两者均完整执行签名、公证、跨平台 relay 打包和发布验收，使用不可变版本 tag，不覆盖已发布资产。Apple 营销版本保持数字格式，完整 beta SemVer 保存在 `RemoventReleaseVersion`。例如下一测试版为 `v0.1.3-beta.1`，变更说明位于 `docs/releases/v0.1.3-beta.1.md`。
 
 ## 私有 relay 发布资产
 
-同一个稳定 tag 还必须包含 `removent-relay-vX.Y.Z-{linux-x86_64,linux-aarch64,macos-universal}.tar.gz`，每个包有独立的 `.sha256` 文件。Linux 使用原生 x86_64 / ARM64 runner 构建静态 musl 二进制，检查不依赖动态 ELF 解释器，运行 relay 测试与真实 systemd 生命周期验收。macOS relay 编译 ARM64 与 x86_64 两个 target，合并 Universal 二进制，再由 `scripts/release.sh` 完成 Developer ID 签名、真实 launchd 验收和公证后打包。构建机器需通过 rustup 安装 `aarch64-apple-darwin` 与 `x86_64-apple-darwin` 标准库；本机发布仍在 Apple Silicon 上运行。
+同一个正式或 beta tag 还必须包含对应完整版本号的 `removent-relay-vX.Y.Z-{linux-x86_64,linux-aarch64,macos-universal}.tar.gz`，每个包有独立的 `.sha256` 文件。Linux 使用原生 x86_64 / ARM64 runner 构建静态 musl 二进制，检查不依赖动态 ELF 解释器，运行 relay 测试与真实 systemd 生命周期验收。macOS relay 编译 ARM64 与 x86_64 两个 target，合并 Universal 二进制，再由 `scripts/release.sh` 完成 Developer ID 签名、真实 launchd 验收和公证后打包。构建机器需通过 rustup 安装 `aarch64-apple-darwin` 与 `x86_64-apple-darwin` 标准库；本机发布仍在 Apple Silicon 上运行。
 
 `scripts/package_relay.py` 校验版本、文件内容、架构与校验和。发布工作流收齐全部平台资产至 `dist/relay` 后，`scripts/publish_release.sh` 才会将它们与 App 一起发布；缺失资产会失败。本机发布时必须先取回相同 tag 的两个 Linux 包及校验文件并放入 `dist/relay`，不能用 macOS 产物替代。可执行 `python3 scripts/package_relay.py --version v0.1.2 --verify` 预先检查。
 
@@ -74,7 +74,7 @@ CI 使用 `macos-15` arm64 runner、锁定的 Cargo.lock、串行测试、失败
 ## 自动更新
 
 - 启动 30 秒后检查，之后每 24 小时检查；可关闭，可手动检查。
-- 仅使用 GitHub latest 正式渠道的已签名清单，拒绝预发布版本；没有 beta feed 或旧版本迁移分支。首次正式发布之前，官方 latest 地址返回 404。
+- 仅使用 GitHub latest 正式渠道的已签名清单，拒绝预发布下载；beta 本机版本可更新到版本号更高的正式版，但不会自动安装其他 beta。没有独立 beta feed。首次正式发布之前，官方 latest 地址返回 404。
 - 下载前校验 Ed25519，下载后核对 SHA-256，再验证 Apple Developer ID 证书、Team ID、bundle ID 和包内完整版本。
 - 只使用 HTTPS（包括重定向），清单 2 MiB 上限、更新 ZIP 1 GiB 上限，连接和低速超时；失败支持再次下载及断点续传。
 - 获取发布列表或清单时，临时网络／服务器错误最多重试两次，每个地址共用 30 秒超时预算；每次响应独立读取，避免重试时拼接损坏的清单。错误提示区分 HTTP 状态、DNS、连接、超时和 TLS 失败，日志记录阶段与状态码，不记录完整更新地址。
@@ -95,3 +95,9 @@ Finder 布局通过 `.DS_Store` 生成，不依赖 Apple Events 或 UI 自动化
 # CairoSVG 需要 cairo；macOS 可使用 brew install cairo。
 DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib python3 scripts/branding.py
 ```
+
+## Relay 自动更新清单
+
+发布前，`publish_release.sh` 校验三份 relay 归档并运行 `gen_relay_updates.py`，使用同一个 Ed25519 发布密钥为 `relay-latest-linux-x86_64.json`、`relay-latest-linux-aarch64.json`、`relay-latest-macos-universal.json` 签名，再随版本发布。签名覆盖 `removent-relay-v1` 域标识、版本、平台、固定版本下载地址、归档 SHA-256 与解压后二进制 SHA-256（换行分隔，无末尾换行）。客户端与 relay 的编译公钥必须一致；缺少任一平台或签名密钥不匹配会阻止发布。
+
+Relay 更新器只加载签名有效的稳定版本，下载失败或候选版本不能解析当前配置时保持当前服务。首次含此功能的版本须通过现有安装器安装；没有这些清单的旧发布不能作为自动更新来源。

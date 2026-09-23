@@ -35,7 +35,7 @@ assert '--proto' in args and args[args.index('--proto') + 1] == '=https'
 if url == base + '/latest':
     print(base + '/tag/v0.1.0', end='')
 else:
-    assert url.startswith(base + '/download/v0.1.0/')
+    assert url.startswith(base + '/download/' + os.environ.get('RELAY_TEST_VERSION', 'v0.1.0') + '/')
     name = url.rsplit('/', 1)[1]
     source = root / name
     if not source.is_file(): sys.exit(22)
@@ -99,6 +99,15 @@ else:
             self.assertNotIn("sudo removent-relay restart", result.stdout)
         self.executable("sw_vers", '#!/bin/sh\necho 12.7\n')
         self.assertNotEqual(self.run_installer().returncode, 0)
+
+    def test_explicit_beta_install_preserves_the_full_version(self):
+        self.env['RELAY_TEST_VERSION'] = 'v0.1.3-beta.1'
+        self.asset = 'removent-relay-v0.1.3-beta.1-linux-x86_64.tar.gz'
+        self.archive(version='0.1.3-beta.1')
+        result = self.run_installer('--version', 'v0.1.3-beta.1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(subprocess.check_output([str(self.bin / 'removent-relay'), '--version'], text=True),
+                         'removent-relay 0.1.3-beta.1\n')
 
     def test_bad_checksum_preserves_existing_installation(self):
         target = self.existing()

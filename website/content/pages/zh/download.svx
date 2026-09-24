@@ -9,7 +9,13 @@ description: "为 Apple 芯片 Mac 获取 Removent，免费开源，采用 Apach
 
 <ReleaseDownload />
 
-上方按钮会直接获取 GitHub Releases 上最新发布的 `Removent-<version>-macos-arm64.dmg`。可用安装包与版本说明以 GitHub Releases 为准。Removent 处于早期开发阶段，用于无人值守访问前请阅读版本说明。
+上方按钮会直接获取 GitHub Releases 上最新正式版的 `Removent-<version>-macos-arm64.dmg`。可用安装包与版本说明以 GitHub Releases 为准。Removent 处于早期开发阶段，用于无人值守访问前请阅读版本说明。
+
+## Beta 测试版
+
+[下载 v0.1.3-beta.1 并查看版本说明](https://github.com/backrunner/removent/releases/tag/v0.1.3-beta.1)。本次包含协议发现开关、relay 自动更新和手动检查、本地轮转日志，以及后台服务和列表布局修复。独立 relay 的安装方式见[中继文档](/docs/relay)。
+
+Beta 需要手动下载安装，不会进入正式自动更新渠道；之后可以更新到更高版本的正式版。
 
 ## 安装并连接
 

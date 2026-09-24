@@ -36,65 +36,75 @@ Set it to `"0"` for explicit start/stop only. Host presence and heartbeat traffi
 do not prevent sleep. Stopping compute does not remove the Worker/Durable Object
 or make their request/storage/network charges disappear.
 
-## Deploy
+## Deploy and upgrade
 
-Prerequisites: a Cloudflare account with Containers enabled, Docker capable of
-building `linux/amd64`, Node 24 and Wrangler authentication. No VPS, Spectrum or
-public UDP listener is required for this mode.
+Use a source checkout on the management computer with Python 3.11+, Node 24+,
+Docker capable of building `linux/amd64`, and a Cloudflare account with Containers
+enabled. The native `removent-relay` CLI is not required for Cloudflare management.
 
-1. Install the prebuilt CLI using the [installer](relay-quick-deploy.md), then run `removent-relay generate-token` three times.
-   Keep the **raw host**, **raw client** and **raw admin** tokens separate. Each
-   is 256 random bits. Transfer raw tokens only to their respective users/Macs;
-   store the admin token as one line in a private file outside this repository
-   (mode 0600), for example `~/.config/removent/relay-admin.token`.
-2. In [wrangler.jsonc](../deploy/cloudflare/wrangler.jsonc), set the Worker name,
-   `RELAY_ROOM` and idle timeout. The default `standard-2` instance supplies one
-   vCPU; `max_instances = 1` prevents room peers being split across independent
-   instances. Resize after measuring the intended workload.
-   This preset provisions **6 GiB**, regardless of the Rust process's much smaller
-   RSS. Cloudflare bills memory/disk by provisioned size while the container is
-   running, and CPU by active use. `basic` (1/4 vCPU, 1 GiB) is a lower-cost
-   candidate for small deployments, but validate throughput/latency on that actual
-   allocation before reducing the preset. See [performance measurements](relay-performance-2026-09-20.md)
-   and Cloudflare's [limits](https://developers.cloudflare.com/containers/platform/limits/)
-   and [pricing](https://developers.cloudflare.com/containers/platform/pricing/).
-3. Put the three **hashes**, not raw tokens, in a private JSON secrets file:
-
-   ```json
-   {
-     "RELAY_HOST_TOKEN_SHA256": "HOST_SHA256_FROM_GENERATOR",
-     "RELAY_CLIENT_TOKEN_SHA256": "CLIENT_SHA256_FROM_GENERATOR",
-     "RELAY_ADMIN_TOKEN_SHA256": "ADMIN_SHA256_FROM_GENERATOR"
-   }
-   ```
-
-4. From `deploy/cloudflare`, run:
+1. Authenticate Wrangler from `deploy/cloudflare`:
 
    ```sh
    npm ci
-   npm run check
-   npm test
-   npm run deploy -- --secrets-file /PRIVATE/PATH/relay-secrets.json
+   npx wrangler login
    ```
 
-   Wrangler builds the Rust image with the repository root as its build context,
-   deploys the Worker/Container binding, and stores the hashes as Worker secrets.
-   On first deployment Cloudflare may take several minutes to provision the
-   image. The service is initially disabled.
+2. From the repository root, run the setup wizard and choose Cloudflare:
 
-5. Copy [tunnel.example.toml](../deploy/cloudflare/tunnel.example.toml) to the
-   daemon's `relay-host.toml` and the controller's `relays/office.toml`, using
-   the correct role token in each. Replace the URL with your Worker domain and
-   `chmod 600` both real profiles. Restart the daemon. The controller can instead
-   use **Add connection → Removent → Connect through relay**, select/enter the
-   `removent://` address and room, and provide the target host certificate fingerprint. Its
-   credential is stored in Keychain. CLI profiles require `host_fingerprint`.
+   ```sh
+   bash scripts/deploy_relay.sh configure
+   ```
 
-The daemon's ordinary retry loop can remain running while the container is
-stopped or sleeping. It will re-register within its 30-second maximum retry
-interval after startup. A controller's WSS connect has a bounded 90-second total
-startup deadline, including cold start and host registration. Wrong credentials,
-unavailable hosts or provisioning failure still produce a failed connection.
+   Configuration defaults to `$XDG_CONFIG_HOME/removent-relay`, or
+   `~/.config/removent-relay`. Use `--config-dir /PRIVATE/PATH/relay` on every
+   command for a separate deployment. The wizard creates independent host,
+   client, and admin credentials in private files without printing raw tokens.
+   `deployment.json` holds the address, room, resource limits, idle timeout, and
+   source allowlists; `credentials.json` holds credentials. Directories use 0700
+   and private files 0600. Do not edit generated `runtime/*` files.
+
+3. Build and deploy, then explicitly start the relay:
+
+   ```sh
+   bash scripts/deploy_relay.sh deploy
+   bash scripts/deploy_relay.sh start
+   bash scripts/deploy_relay.sh status
+   ```
+
+   Deployment builds the Rust container, deploys the Worker and Container binding,
+   stores role hashes as Worker secrets, and leaves admission **stopped**. Initial
+   image provisioning may take several minutes. The script closes existing
+   admission with the previous admin credential before an upgrade or credential
+   change. Review the generated host/client profiles after changing configuration.
+
+4. Securely transfer `relay-host.toml` from the private configuration directory
+   to the host Mac's daemon data directory and restart the daemon. Use the
+   generated `relay-client.toml` for the controller, adding the verified target
+   host certificate fingerprint. Keep profiles mode 0600. The desktop can instead
+   use **Add connection → Removent → Connect through relay → Cloudflare / HTTPS**;
+   its credential is stored in Keychain.
+
+To upgrade, check out the desired source release, retain the same private
+configuration directory, and run `deploy` followed by `start` again. Containers
+update through image deployment; `serve-container` does not run the native relay
+automatic updater. Container disks are ephemeral, so use Cloudflare's dashboard
+for log retention and inspection. Use the deployment script or management API
+below for a persistent stop; infrastructure controls alone do not set the relay's
+Durable Object admission state.
+
+The default `standard-2` allocation supplies one vCPU and **6 GiB** provisioned
+memory. `max_instances = 1` keeps room peers on the same instance. Cloudflare
+bills memory/disk by provisioned size while running and CPU by active use. The
+`basic` allocation is a lower-cost candidate, but measure its throughput and
+latency before changing the preset. See [performance measurements](relay-performance-2026-09-20.md),
+[limits](https://developers.cloudflare.com/containers/platform/limits/), and
+[pricing](https://developers.cloudflare.com/containers/platform/pricing/).
+
+The daemon's retry loop can remain running while the container is stopped or
+sleeping. It re-registers within its 30-second maximum retry interval after
+startup. A controller's WSS connection has a bounded 90-second total startup
+deadline, including cold start and host registration. Wrong credentials,
+unavailable hosts, or provisioning failures still produce a failed connection.
 
 ## Credential-free device registration
 

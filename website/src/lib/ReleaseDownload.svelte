@@ -18,19 +18,29 @@
   let version = '';
   let notesUrl = RELEASES_URL;
 
-  onMount(async () => {
-    try {
-      const response = await fetch(API_URL, { headers: { Accept: 'application/vnd.github+json' } });
-      if (!response.ok) throw new Error(`GitHub releases returned ${response.status}`);
-      const data = await response.json();
-      const assets: ReleaseAsset[] = Array.isArray(data.assets) ? data.assets : [];
-      dmg = assets.find((asset) => DMG_PATTERN.test(asset.name));
-      version = String(data.tag_name ?? '').replace(/^v/, '');
-      if (typeof data.html_url === 'string' && data.html_url) notesUrl = data.html_url;
-      state = dmg ? 'ready' : 'missing';
-    } catch {
-      state = 'error';
+  onMount(() => {
+    const controller = new AbortController();
+    let disposed = false;
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    async function loadRelease() {
+      try {
+        const response = await fetch(API_URL, { headers: { Accept: 'application/vnd.github+json' }, signal: controller.signal });
+        if (!response.ok) throw new Error(`GitHub releases returned ${response.status}`);
+        const data = await response.json();
+        if (disposed) return;
+        const assets: ReleaseAsset[] = Array.isArray(data.assets) ? data.assets : [];
+        dmg = assets.find((asset) => DMG_PATTERN.test(asset.name));
+        version = String(data.tag_name ?? '').replace(/^v/, '');
+        if (typeof data.html_url === 'string' && data.html_url) notesUrl = data.html_url;
+        state = dmg ? 'ready' : 'missing';
+      } catch {
+        if (!disposed) state = 'error';
+      } finally {
+        clearTimeout(timeout);
+      }
     }
+    void loadRelease();
+    return () => { disposed = true; clearTimeout(timeout); controller.abort(); };
   });
 
   function formatSize(bytes: number): string {
@@ -40,6 +50,8 @@
 </script>
 
 <div class="rv-release">
+  <div class="rv-release-heading"><img src="/app-icon.png" width="62" height="62" alt="" /><div><span class="rv-release-label">{t('download.stable')}</span><strong>{t('download.platform')}</strong><small>{t('hero.requirements')}</small></div></div>
+  <div class="rv-release-content" aria-live="polite">
   {#if state === 'ready' && dmg}
     <a class="rv-button rv-primary" href={dmg.browser_download_url}>
       <Icon name="down" size={18} />{t('download.ctaVersion', { version })}
@@ -57,13 +69,6 @@
       <p class="rv-release-meta">{t('download.error')} <a href={RELEASES_URL}>{t('download.all')}</a></p>
     {/if}
   {/if}
+  </div>
+  <div class="rv-release-trust"><Icon name="shield" size={15} />{t('download.verified')}</div>
 </div>
-
-<style>
-  .rv-release { margin: 24px 0 8px; }
-  .rv-release .rv-button { text-decoration: none; }
-  .rv-release-meta { margin: 14px 0 0; font-size: 12px; color: var(--rv-muted); }
-  .rv-release-meta code { font-family: var(--font-mono); font-size: 11px; }
-  .rv-release-meta a { color: var(--rv-blue); font-weight: 540; }
-  .rv-release-meta a:hover { text-decoration: underline; text-underline-offset: 4px; }
-</style>

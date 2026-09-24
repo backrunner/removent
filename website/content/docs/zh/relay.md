@@ -1,6 +1,6 @@
 ---
 title: "私有中继"
-description: "一键安装预编译的私有中继，使用原生命令行管理。"
+description: "在 Linux、macOS 或 Cloudflare 上部署私有中继，配置更新与本地日志。"
 order: 7
 ---
 
@@ -25,6 +25,16 @@ curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/in
 sh install_relay.sh --version v0.1.2 --no-setup
 sudo removent-relay setup --address removent://relay.example.com:48700
 ```
+
+## 试用 beta
+
+自动更新、`check-update` 和 relay 本地日志轮转从 **v0.1.3-beta.1** 开始提供。安装器默认选择正式版，试用这些功能时需要显式选择 beta：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/backrunner/removent/v0.1.3-beta.1/scripts/install_relay.sh | sh -s -- --version v0.1.3-beta.1
+```
+
+[查看 beta 版本说明和下载](https://github.com/backrunner/removent/releases/tag/v0.1.3-beta.1)。已有服务安装后需要重启。后续 beta 也须手动安装；自动更新只跟随正式版，包括从 beta 升级到更高版本的正式版。
 
 ## 在 Mac 上托管中继
 
@@ -87,25 +97,65 @@ sudo removent-relay export client --output /root/relay-client.toml --host-finger
 
 ## 更新与本地日志
 
-Relay 可自动安装带发布签名的稳定版本。在 `server.toml` 中添加 `[updates]`，设置 `enabled = true` 与 `check_interval_secs = 86400`，然后重启服务。自动更新默认关闭；开启后启动 30 秒检查一次，之后按配置间隔检查。安装完成会重启 relay，并短暂中断连接。下载或验证失败会继续运行旧版。
+### 开启或关闭自动更新
 
-运行 `removent-relay check-update` 手动检查，不会安装。配置可读取时，命令比较已安装的服务版本；其他配置可显式指定 `--config /path/to/server.toml`，否则比较 CLI 自身版本。更新保存在 `identity_dir/updates`，系统 CLI 保留为启动器，无需额外的系统目录权限。关闭自动更新会保留已经安装的版本。正式发布须包含新的 relay 签名清单。
+Relay 可自动安装带发布签名的正式版本，默认关闭。编辑 Linux 的 `/etc/removent-relay/server.toml` 或 macOS 的 `~/Library/Application Support/removent-relay/server.toml`：
 
-Relay 运行时写入 `identity_dir/logs/removent-relay.log`，达到 8 MiB 自动轮转并保留三份备份。macOS 默认为 `~/Library/Application Support/removent-relay/data/logs`，Linux 为 `/var/lib/removent-relay/logs`。桌面客户端、daemon 和客户端 CLI 在其数据目录下分别写入 `logs/removent.log`、`logs/removentd.log` 和 `logs/removent-cli.log`，轮转规则相同。
+```toml
+[updates]
+enabled = true
+check_interval_secs = 86400
+```
+
+执行 `sudo removent-relay restart`（Linux）或 `removent-relay restart`（macOS）应用配置。开启后在启动 30 秒时检查，之后按配置间隔检查；间隔允许 3600–604800 秒。关闭时把 `enabled` 改为 `false`，再重启。
+
+下载会校验 Ed25519 发布签名及归档和二进制的 SHA-256，macOS 还会校验 Developer ID。验证通过后使用新版检查现有配置，再重启 relay，短暂中断连接。检查、下载或验证失败时继续运行旧版。
+
+### 手动检查与版本选择
+
+手动检查不受自动更新开关影响，不下载二进制，也不安装：
+
+```sh
+# macOS 默认服务
+removent-relay check-update
+# Linux：读取私密配置和服务已安装的版本
+sudo removent-relay check-update --config /etc/removent-relay/server.toml
+# 其他实例
+removent-relay check-update --config /path/to/server.toml
+```
+
+默认读取可访问的服务配置；没有可读配置时比较 CLI 自身版本。正式更新源必须提供 `relay-latest-<platform>.json` 签名清单。v0.1.2 没有这些清单；在更新源提供清单前，检查会报告获取失败，不影响现有转发。
+
+更新保存在 `identity_dir/updates`，系统 CLI 保留为启动器，无需给后台进程系统目录写权限。关闭自动更新保留已经安装的新版、配置、凭据和身份。需要回退时，先停止服务并关闭自动更新，备份后移走 `identity_dir/updates`，安装指定版本，再启动服务。
+
+### 日志位置与保留
+
+Relay 主日志是 `identity_dir/logs/removent-relay.log`，默认位置如下：
+
+| 组件 | 日志文件 |
+| --- | --- |
+| Linux relay | `/var/lib/removent-relay/logs/removent-relay.log` |
+| macOS relay | `~/Library/Application Support/removent-relay/data/logs/removent-relay.log` |
+| 桌面客户端、daemon、客户端 CLI | 数据目录下的 `logs/removent.log`、`logs/removentd.log`、`logs/removent-cli.log` |
+
+每个文件最多 8 MiB，保留 `.log.1`–`.log.3` 三份备份，每个组件合计约 32 MiB；日志文件权限为 0600。崩溃报告另行保留最近 10 份。桌面数据目录可从托盘的**打开数据目录**进入，也可用 `REMOVENT_DATA_DIR` 覆盖。
+
+`removent-relay logs --follow` 在 macOS 跟踪本地 relay 日志；Linux 的同名命令查看 systemd journal，本地轮转文件同时保留。Linux 可用 `sudo tail -F /var/lib/removent-relay/logs/removent-relay.log` 跟踪文件。
 
 ## Cloudflare Containers
 
 Cloudflare 使用 443 端口的 HTTPS / WebSocket。首次部署基础设施需要已开通 Containers 的账户、Node 24+、Python 3.11+ 和可构建 Linux amd64 的 Docker。Worker 和容器设置见 [Cloudflare 部署指南](https://github.com/backrunner/removent/blob/main/docs/cloudflare-relay.md)。
 
-Cloudflare 通过部署脚本或其控制台管理，原生 relay CLI 用于本地服务。在源码目录中运行：
+Cloudflare 部署、启停和升级使用仓库脚本及管理 API，基础设施和日志可在 Cloudflare 控制台查看；不需要安装原生 relay CLI。在源码目录中运行：
 
 ```sh
 bash scripts/deploy_relay.sh start
 bash scripts/deploy_relay.sh status
 bash scripts/deploy_relay.sh stop
+bash scripts/deploy_relay.sh deploy
 ```
 
-手动停止状态会持久保存，被控端重试不能启动已停止的容器。已启用的容器可在空闲时休眠，并在控制端访问时唤醒。容器日志在 Cloudflare 控制台查看，基础设施费用由托管提供商决定。
+`deploy` 重新构建和部署容器，完成后保持停止，需要显式 `start`。容器不运行 relay 自动更新器；磁盘为临时存储，日志保留交给 Cloudflare。脚本或管理 API 的手动停止状态会持久保存，被控端重试不能启动已停止的容器。已启用的容器可在空闲时休眠，并在控制端访问时唤醒。容器日志在 Cloudflare 控制台查看，基础设施费用由托管提供商决定。
 
 ## 配置参考
 

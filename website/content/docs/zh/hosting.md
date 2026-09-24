@@ -34,6 +34,8 @@ REMOVENT_CLI=/Applications/Removent.app/Contents/MacOS/removent-cli
 
 `daemon login-off` 移除之后的登录注册，不停止当前服务。`daemon disable` 持久关闭共享，保留管理入口。`daemon stop` 立即停止进程，不改变登录偏好。
 
+从 v0.1.3-beta.1 开始，明确停止的状态也会保存：重新打开桌面、托盘或重新登录不会自动恢复该服务，需执行 `daemon start`。意外退出仍由 launchd 恢复；托盘会恢复意外缺失的服务作业。`daemon service-status` 的 `stopped_by_user` 可区分主动停止与故障。
+
 重启或停止 daemon 会中断活动会话。
 
 ## 可用性边界
@@ -45,5 +47,7 @@ REMOVENT_CLI=/Applications/Removent.app/Contents/MacOS/removent-cli
 ## 数据与移除
 
 安装版数据位于 `~/Library/Application Support/removent/userdata`，其中包含 `logs/` 日志目录。`REMOVENT_DATA_DIR` 可覆盖数据位置。
+
+桌面客户端、daemon 和客户端 CLI 分别写入 `removent.log`、`removentd.log`、`removent-cli.log`。每个文件最多 8 MiB，保留 `.log.1`–`.log.3` 三份备份；日志权限为 0600。崩溃报告在 `logs/panics/` 中单独保留最近 10 份。独立 relay 的日志位置见[中继文档](/docs/relay)。
 
 移除后台运行前，关闭菜单栏登录项，运行 `daemon login-off`，再运行 `daemon stop`。删除应用不会删除设备身份或设置。

@@ -105,7 +105,7 @@ test('docs anchors remain visible and code copy uses the displayed command', asy
   if (browserName === 'chromium') await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await ready(page, '/docs/hosting');
-  await page.locator('.sd-toc').getByRole('link', { name: 'Manage from the CLI', exact: true }).click();
+  await page.locator('.rv-docs-toc .sd-toc').getByRole('link', { name: 'Manage from the CLI', exact: true }).click();
   await expect(page).toHaveURL(/#manage-from-the-cli$/);
   await expect.poll(async () => page.locator('#manage-from-the-cli').evaluate(el => Math.round(el.getBoundingClientRect().top))).toBeGreaterThanOrEqual(76);
   const code = page.locator('.sd-code').first();
@@ -117,6 +117,38 @@ test('docs anchors remain visible and code copy uses the displayed command', asy
     expect(copied).toContain('REMOVENT_CLI=');
   }
   await page.screenshot({ path: testInfo.outputPath('desktop-docs.png'), fullPage: true });
+});
+
+test('grouped documentation and mobile contents keep bilingual guides reachable', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await ready(page, '/docs');
+  await expect(page.locator('.rv-docs-sidebar .rv-nav-group')).toHaveCount(4);
+  await expect(page.locator('.rv-doc-shortcuts a')).toHaveCount(3);
+  await page.locator('.rv-doc-shortcuts a[href="/docs/relay"]').click();
+  await expect(page.locator('.rv-docs-sidebar a[aria-current="page"]')).toHaveText('Private relay');
+  await expect(page.locator('.rv-prose, .sd-prose').first()).toContainText('check_interval_secs = 86400');
+  await expect(page.locator('.rv-sidebar-release')).toHaveAttribute('href', /v0\.1\.3-beta\.1$/);
+  await page.screenshot({ path: testInfo.outputPath('relay-light.png'), fullPage: false });
+  await page.locator('.sd-theme-toggle').click();
+  await page.screenshot({ path: testInfo.outputPath('relay-dark.png'), fullPage: false });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await ready(page, '/docs/zh/relay');
+  await page.locator('.rv-mobile-toc summary').click();
+  await page.locator('.rv-mobile-toc').getByRole('link', { name: '日志位置与保留', exact: true }).click();
+  await expect.poll(async () => page.getByRole('heading', { name: '日志位置与保留', exact: false }).evaluate(el => Math.round(el.getBoundingClientRect().top))).toBeGreaterThanOrEqual(76);
+  await expect(page.locator('.rv-mobile-toc')).not.toHaveAttribute('open');
+  await ready(page, '/docs/zh');
+  await expect(page.locator('.rv-doc-shortcuts a[href="/docs/zh/relay"]')).toBeVisible();
+});
+
+test('download stays usable when the release lookup fails', async ({ page }, testInfo) => {
+  await page.route('https://api.github.com/repos/backrunner/removent/releases/latest', route => route.fulfill({ status: 503, body: 'Unavailable' }));
+  await ready(page, '/download');
+  await expect(page.locator('.rv-release-meta')).toContainText('Live version lookup is unavailable.');
+  await expect(page.locator('.rv-release .rv-primary')).toHaveAttribute('href', 'https://github.com/backrunner/removent/releases');
+  await expect(page.getByRole('link', { name: /v0.1.3-beta.1/ })).toHaveAttribute('href', /v0\.1\.3-beta\.1$/);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: testInfo.outputPath('download-mobile.png'), fullPage: true });
 });
 
 test('static metadata, markdown, sitemap, assets, and download destinations are usable', async ({ page, request }) => {

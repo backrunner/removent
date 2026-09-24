@@ -22,7 +22,7 @@ pnpm test
 pnpm preview
 ```
 
-The browser tests run against the production build. They cover protocol preview controls, localized navigation and search, theme persistence, 320–768px layouts, document anchors and code copy, metadata and markdown endpoints, downloads, and unknown routes. Screenshots and failure traces are written to ignored `test-results/`.
+The browser tests run against the production build. They cover protocol preview controls, localized navigation and search, theme persistence, 320–768px layouts, grouped documentation navigation, mobile page contents, document anchors and code copy, metadata and markdown endpoints, download fallbacks, and unknown routes. Screenshots and failure traces are written to ignored `test-results/`.
 
 ## Deploy to Cloudflare
 
@@ -47,14 +47,16 @@ SITE_URL=https://your-domain.example pnpm build
 
 Use the same origin when generating and serving the site. Both `/` and `/zh` are prerendered, documentation lives at `/docs` and `/docs/zh`, and standalone pages include `/download`, `/privacy`, and their Chinese equivalents. The build also includes Open Graph images, sitemap, robots.txt, markdown twins, and the `llms.txt` interface. There are no runtime search endpoints: the search index loads in the browser on demand.
 
-Download links intentionally point to the repository's Releases page so unpublished versions and changing asset filenames are never advertised as downloadable files.
+The main download button resolves the latest stable DMG through GitHub's release API, with a Releases-page fallback when lookup fails. Beta announcements in the homepage, docs sidebar, and download pages use separate, explicit release-notes links. Keep all three surfaces in sync when publishing the next beta. Publish the referenced beta before deploying its download-page announcement; prereleases must not replace the stable button or automatic-update feed.
 
 ## Theme and content
 
 - `svedocs.config.ts`: site settings, origin, search, locales, metadata, and theme tokens.
 - `vite.config.ts`: registered Navbar, DocsShell, and Footer replacements.
-- `src/lib/theme.css`: Quiet Control colors, typography, responsive geometry, and custom reading styles.
-- `src/lib/Landing.svelte`: product landing sections, real app screenshots, and relay diagram.
+- `src/lib/theme.css`: slate, blue, and teal theme tokens, typography, responsive geometry, and reading surfaces.
+- `src/lib/theme/DocsShell.svelte` and `DocsNavigation.svelte`: grouped guide navigation, overview shortcuts, reading panel, mobile contents, and source links.
+- `src/lib/Landing.svelte`: asymmetric product hero, protocol preview, real app screenshots, and relay diagram.
+- `src/lib/ReleaseDownload.svelte`: stable-release download card with a bounded GitHub lookup and fallback.
 - `src/lib/ConnectionPreview.svelte`: keyboard-accessible protocol illustration; it does not open real sessions.
 - `src/lib/messages.ts` and `shell-messages.ts`: localized interface copy.
 - `content/docs/{en,zh}`: 11 guides per language, adapted from the current repository documentation.

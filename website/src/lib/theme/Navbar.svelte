@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { SearchDialog, ScopeSwitcher, ThemeToggle, SidebarTree } from 'svedocs/theme';
+  import { SearchDialog, ScopeSwitcher, ThemeToggle } from 'svedocs/theme';
   import { resolveLocalizedHref } from 'svedocs/theme/headless';
   import type { SvedocsNavbarProps } from 'svedocs/theme/types';
   import Icon from '../Icon.svelte';
+  import DocsNavigation from './DocsNavigation.svelte';
   let { context, mobileTree = [], mobileCurrentPath = '', mobileMenuId = 'rv-menu', mobileMenuOpen = false, onToggleMobileMenu = () => {}, onCloseMobileMenu = () => {} }: SvedocsNavbarProps = $props();
 </script>
 <header class="rv-header">
@@ -28,7 +29,7 @@
       <nav aria-label={context.t('nav.primary')}>
         {#each context.config.theme.nav as link}<a href={resolveLocalizedHref(link.href, context)} onclick={onCloseMobileMenu}>{link.labelKey ? context.t(link.labelKey) : link.label}</a>{/each}
       </nav>
-      {#if mobileTree.length}<nav class="rv-mobile-docs" aria-label={context.t('nav.documentation')}><SidebarTree items={mobileTree} currentPath={mobileCurrentPath} /></nav>{/if}
+      {#if mobileTree.length}<nav class="rv-mobile-docs" aria-label={context.t('nav.documentation')}><DocsNavigation items={mobileTree} currentPath={mobileCurrentPath} {context} /></nav>{/if}
     </div>
   {/if}
 </header>

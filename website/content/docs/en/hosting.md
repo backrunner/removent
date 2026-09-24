@@ -34,6 +34,8 @@ REMOVENT_CLI=/Applications/Removent.app/Contents/MacOS/removent-cli
 
 `daemon login-off` removes future login registration without stopping the current service. `daemon disable` persists disabled sharing while retaining management access. `daemon stop` stops the process now but leaves the login preference unchanged.
 
+Starting with v0.1.3-beta.1, an explicit stop also persists across reopening the desktop or tray and logging in again. Use `daemon start` to resume. launchd still recovers unexpected exits, and the tray restores an unexpectedly missing service job. The `stopped_by_user` field in `daemon service-status` distinguishes a deliberate stop from a failure.
+
 Restarting or stopping the daemon interrupts active sessions.
 
 ## Availability boundaries
@@ -45,5 +47,7 @@ A background login registration cannot grant privacy access, unlock the Mac, or 
 ## Data and removal
 
 The packaged app stores data in `~/Library/Application Support/removent/userdata`, including a `logs/` directory. `REMOVENT_DATA_DIR` overrides the data location.
+
+The desktop client, daemon, and client CLI write `removent.log`, `removentd.log`, and `removent-cli.log` respectively. Each file is limited to 8 MiB with three backups, `.log.1`–`.log.3`, and mode 0600. The ten most recent crash reports are retained separately in `logs/panics/`. See [the relay guide](/docs/relay) for standalone relay log locations.
 
 Before removing background operation, disable the tray login item, run `daemon login-off`, then `daemon stop`. Removing the app does not remove device identity or settings.

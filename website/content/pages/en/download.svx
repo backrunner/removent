@@ -9,7 +9,13 @@ description: "Get Removent for your Apple silicon Mac. Free and open source unde
 
 <ReleaseDownload />
 
-The button above pulls the newest published `Removent-<version>-macos-arm64.dmg` straight from GitHub Releases, which is the source of truth for available builds and release notes. Removent is in early development; review the release notes before relying on it for unattended access.
+The button above pulls the latest stable `Removent-<version>-macos-arm64.dmg` straight from GitHub Releases, which is the source of truth for available builds and release notes. Removent is in early development; review the release notes before relying on it for unattended access.
+
+## Beta release
+
+[Download v0.1.3-beta.1 and read the release notes](https://github.com/backrunner/removent/releases/tag/v0.1.3-beta.1). This beta includes protocol discovery controls, automatic relay updates and manual checks, rotating local logs, and background-service and device-list fixes. See [the relay guide](/docs/relay) to install the standalone relay.
+
+Betas require manual installation and do not enter the stable automatic-update feed. A beta can later update to a newer stable release.
 
 ## Install and connect
 

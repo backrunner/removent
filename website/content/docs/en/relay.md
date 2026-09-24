@@ -1,6 +1,6 @@
 ---
 title: "Private relay"
-description: "Install a private relay from a prebuilt binary and manage it with its native CLI."
+description: "Deploy a private relay on Linux, macOS, or Cloudflare, with updates and local logs."
 order: 7
 ---
 
@@ -25,6 +25,16 @@ curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/in
 sh install_relay.sh --version v0.1.2 --no-setup
 sudo removent-relay setup --address removent://relay.example.com:48700
 ```
+
+## Try the beta
+
+Automatic updates, `check-update`, and rotating local relay logs are available starting with **v0.1.3-beta.1**. The installer defaults to stable releases. To try these features, select the beta explicitly:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/backrunner/removent/v0.1.3-beta.1/scripts/install_relay.sh | sh -s -- --version v0.1.3-beta.1
+```
+
+[Read the beta release notes and download](https://github.com/backrunner/removent/releases/tag/v0.1.3-beta.1). Restart an existing service after installation. Later betas also require manual installation. Automatic updates follow stable releases, including upgrading a beta to a newer stable version.
 
 ## Host a relay on a Mac
 
@@ -87,25 +97,65 @@ Host and controller credentials are separate; distribute only the appropriate pr
 
 ## Updates and local logs
 
-The relay can install signed stable releases automatically. In `server.toml`, add `[updates]` with `enabled = true` and `check_interval_secs = 86400`, then restart the service. Automatic updates default to off. Enabled services check 30 seconds after starting and then at the configured interval; applying an update restarts the relay and briefly interrupts connections. A failed download or verification leaves the running version in place.
+### Enable or disable automatic updates
 
-Run `removent-relay check-update` for a manual check without installation. The command reads the local service version when its configuration is accessible; use `--config /path/to/server.toml` explicitly for another configuration. Otherwise it compares the CLI version. Updates live under `identity_dir/updates`; the system CLI remains the launcher, so updates need no additional system-directory permissions. Disabling updates preserves the installed version. Releases must include the new signed relay manifests.
+The relay can install signed stable releases automatically. This defaults to off. Edit `/etc/removent-relay/server.toml` on Linux or `~/Library/Application Support/removent-relay/server.toml` on macOS:
 
-The relay writes `identity_dir/logs/removent-relay.log` while running, rotating at 8 MiB with three backups. On macOS this defaults to `~/Library/Application Support/removent-relay/data/logs`; on Linux to `/var/lib/removent-relay/logs`. The desktop client, daemon and client CLI use `logs/removent.log`, `logs/removentd.log` and `logs/removent-cli.log` in their data directory with the same rotation policy.
+```toml
+[updates]
+enabled = true
+check_interval_secs = 86400
+```
+
+Apply the change with `sudo removent-relay restart` on Linux or `removent-relay restart` on macOS. Enabled services check 30 seconds after starting, then at the configured interval, which must be 3600–604800 seconds. To disable automatic updates, set `enabled = false` and restart.
+
+Downloads are checked against an Ed25519 release signature and SHA-256 hashes of both archive and binary. macOS also verifies Developer ID. The verified binary checks the existing configuration before restarting the relay, briefly interrupting connections. A failed check, download, or verification leaves the running version in place.
+
+### Manual checks and version selection
+
+Manual checks work independently of the automatic-update setting. They do not download or install a binary:
+
+```sh
+# Default macOS service
+removent-relay check-update
+# Linux: read private configuration and the installed service version
+sudo removent-relay check-update --config /etc/removent-relay/server.toml
+# Another instance
+removent-relay check-update --config /path/to/server.toml
+```
+
+The command reads accessible local service configuration by default; without it, the command compares the CLI's own version. The stable feed must provide signed `relay-latest-<platform>.json` manifests. v0.1.2 has no such manifests. Until the feed includes them, a check reports a fetch error without affecting forwarding.
+
+Updates live under `identity_dir/updates`; the system CLI remains the launcher, so the background process needs no system-directory write permission. Disabling updates preserves the installed version, configuration, credentials, and identity. To downgrade, stop the service, disable automatic updates, back up and move aside `identity_dir/updates`, install the selected version, then start the service.
+
+### Log locations and retention
+
+The relay's main log is `identity_dir/logs/removent-relay.log`. Default locations:
+
+| Component | Log file |
+| --- | --- |
+| Linux relay | `/var/lib/removent-relay/logs/removent-relay.log` |
+| macOS relay | `~/Library/Application Support/removent-relay/data/logs/removent-relay.log` |
+| Desktop client, daemon, client CLI | `logs/removent.log`, `logs/removentd.log`, and `logs/removent-cli.log` in the data directory |
+
+Each file is limited to 8 MiB and retains three backups, `.log.1`–`.log.3`, for approximately 32 MiB per component. Log files use mode 0600. The ten most recent crash reports are retained separately. Find the desktop data directory using the tray's **Open Data Directory**, or override it with `REMOVENT_DATA_DIR`.
+
+On macOS, `removent-relay logs --follow` follows the local relay log. On Linux, that command reads the systemd journal; rotating local files are also retained. Use `sudo tail -F /var/lib/removent-relay/logs/removent-relay.log` to follow the Linux file.
 
 ## Cloudflare Containers
 
 Cloudflare uses HTTPS / WebSocket on port 443. Initial infrastructure deployment requires a Containers-enabled account, Node 24+, Python 3.11+, and Docker able to build Linux amd64. Follow the [Cloudflare deployment guide](https://github.com/backrunner/removent/blob/main/docs/cloudflare-relay.md) for the Worker and container setup.
 
-Cloudflare is managed through the deployment scripts or its dashboard; the native relay CLI manages local services. From the source checkout:
+Cloudflare deployment, lifecycle, and upgrades use the repository scripts and management API. Its dashboard provides infrastructure and logs; installing the native relay CLI is unnecessary. From the source checkout:
 
 ```sh
 bash scripts/deploy_relay.sh start
 bash scripts/deploy_relay.sh status
 bash scripts/deploy_relay.sh stop
+bash scripts/deploy_relay.sh deploy
 ```
 
-A manual stop persists; host retries cannot restart a stopped container. An enabled container can sleep while idle and wake for a controller. View container logs in Cloudflare's dashboard. Infrastructure charges follow your hosting provider's terms.
+`deploy` rebuilds and deploys the container, leaving it stopped until an explicit `start`. Containers do not run the relay updater. Their disks are ephemeral; Cloudflare manages log retention. A stop through the script or management API persists; host retries cannot restart a stopped container. An enabled container can sleep while idle and wake for a controller. View container logs in Cloudflare's dashboard. Infrastructure charges follow your hosting provider's terms.
 
 ## Configuration reference
 

@@ -87,6 +87,8 @@ sudo removent-relay fingerprint
 
 ## 自动更新与手动检查
 
+以下 relay 自动更新、手动检查和本地日志轮转功能从 `v0.1.3-beta.1` 开始提供。安装器默认选择正式版；试用时运行固定 beta 标签下的安装器，并传入 `--version v0.1.3-beta.1`。后续 beta 仍需手动安装，自动更新只跟随正式版。
+
 `server.toml` 可配置自动安装签名的稳定版本；旧配置与新安装均默认关闭：
 
 ```toml
@@ -109,7 +111,7 @@ removent-relay check-update --config "$HOME/Library/Application Support/removent
 
 默认读取可访问的本地服务配置；未找到可读配置时比较 CLI 自身版本。更新保存在 `identity_dir/updates`，系统安装的 CLI 保留为启动器；服务每次启动都重新校验并加载较新的已安装版本，因此不需要给后台进程系统目录写权限。关闭自动更新会停止后续检查，但继续运行已安装的新版。配置、连接凭据和中继身份保留。若要手动回退，先停止服务、关闭自动更新，并移走 `identity_dir/updates`，再安装指定版本并启动。
 
-发布流程为三个平台生成 `relay-latest-<platform>.json` 签名清单；只有包含这些清单的新发布才支持自动更新。旧版本缺少清单时检查会明确报错，不影响转发。
+发布流程为三个平台生成 `relay-latest-<platform>.json` 签名清单；只有包含这些清单的正式发布才进入自动更新源。v0.1.2 缺少清单，在正式更新源提供清单前检查会报告获取失败，不影响转发。
 
 Relay 主日志位于 `identity_dir/logs/removent-relay.log`：Linux 默认 `/var/lib/removent-relay/logs`，macOS 默认 `~/Library/Application Support/removent-relay/data/logs`。桌面客户端、daemon 和客户端 CLI 分别写入其数据目录下的 `logs/removent.log`、`logs/removentd.log` 和 `logs/removent-cli.log`。每个文件限制为 8 MiB，并保留三份轮转备份（每个组件最多约 32 MiB）；多进程写入使用文件锁，日志文件权限 0600。崩溃报告单独保留最近 10 份。客户端数据目录可通过 `REMOVENT_DATA_DIR` 覆盖。
 
@@ -166,6 +168,6 @@ bash scripts/deploy_relay.sh status --config-dir "$HOME/.config/removent-office-
 
 ## 发布与验证
 
-正式发布流水线在 Linux x86_64 / ARM64 原生 runner 构建静态 musl 二进制，运行 relay 测试及真实 systemd 安装、就绪、启停和身份保留验收；macOS 将 ARM64 / x86_64 合并为 Universal 二进制，完成 Developer ID 签名、公证和真实 launchd 生命周期验收。三个平台包及各自的 `.sha256` 文件随同一稳定 tag 发布，缺少任一平台就不会进入发布步骤。
+发布流水线在 Linux x86_64 / ARM64 原生 runner 构建静态 musl 二进制，运行 relay 测试及真实 systemd 安装、就绪、启停和身份保留验收；macOS 将 ARM64 / x86_64 合并为 Universal 二进制，完成 Developer ID 签名、公证和真实 launchd 生命周期验收。三个平台包及各自的 `.sha256` 文件随同一版本 tag 发布，缺少任一平台就不会进入发布步骤。Beta 标记为 GitHub prerelease，不替换最新正式版。
 
 本地测试覆盖配置权限、凭据隔离、拒绝覆盖、发布签名和下载大小校验、缓存损坏与回退、日志轮转，以及安装包校验失败时保留旧安装。Cloudflare HTTP 方法与重定向校验保留在部署脚本测试中。macOS 使用独立标签、配置和端口实测 launchd 及安装器，不修改已有服务；登录启动、崩溃恢复、错误端口拒绝、重复安装保留停止状态均属于验收。真实 Linux systemd 验收脚本只应在可丢弃 runner 上运行，不能在已有 relay 上执行。Cloudflare 的真实部署和公网性能仍需目标环境验证。

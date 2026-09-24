@@ -19,6 +19,7 @@
 <div class="rv-landing">
   <section class="rv-hero" aria-labelledby="hero-title">
     <div class="rv-hero-copy">
+      <a class="rv-announcement" href="https://github.com/backrunner/removent/releases/tag/v0.1.3-beta.1"><span>0.1.3 BETA</span>{t('hero.release')}<Icon name="arrow" size={14} /></a>
       <p class="rv-eyebrow"><span class="rv-blue-line" aria-hidden="true"></span>{t('hero.eyebrow')}</p>
       <h1 id="hero-title">{t('hero.line1')}<br /><span>{t('hero.line2')}</span></h1>
       <p class="rv-hero-description">{t('hero.description')}</p>
@@ -33,7 +34,7 @@
   <section class="rv-section rv-features" aria-labelledby="features-title">
     <div class="rv-section-heading"><div><p class="rv-eyebrow">{t('features.eyebrow')}</p><h2 id="features-title">{t('features.title')}</h2></div><p>{t('features.body')}</p></div>
     <div class="rv-feature-grid">
-      {#each features as feature}<article><div class="rv-feature-icon"><Icon name={feature.icon} size={25} /></div><h3>{t('features.' + feature.id + '.title')}</h3><p>{t('features.' + feature.id + '.body')}</p><a class="rv-text-link" href={resolveLocalizedHref(feature.path, context)}>{t('features.' + feature.id + '.link')}<Icon name="arrow" size={16} /></a></article>{/each}
+      {#each features as feature, index}<article><div class="rv-feature-top"><div class="rv-feature-icon"><Icon name={feature.icon} size={25} /></div><span>0{index + 1}</span></div><h3>{t('features.' + feature.id + '.title')}</h3><p>{t('features.' + feature.id + '.body')}</p><a class="rv-text-link" href={resolveLocalizedHref(feature.path, context)}>{t('features.' + feature.id + '.link')}<Icon name="arrow" size={16} /></a></article>{/each}
     </div>
   </section>
   <section class="rv-native rv-section" aria-labelledby="native-title">

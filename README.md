@@ -17,7 +17,7 @@ are working; expect rough edges).
 
 ## Requirements
 
-- macOS 13.0 or later, Apple Silicon (arm64)
+- macOS 26.0 or later, Apple Silicon (arm64)
 - For native Removent connections, a reachable host on the LAN or a configured private relay
 - For compatibility connections, a reachable VNC or RDP server
 
@@ -94,7 +94,7 @@ The viewer negotiates RFB 3.3/3.7/3.8 and supports Raw, CopyRect, Hextile, and d
 Authentication currently supports None (1), VNC password (2), and Apple ARD (30).
 Apple type 35, VeNCrypt/TLS, RealVNC proprietary authentication, and UltraVNC MS-Logon
 are not implemented; servers must offer a supported method. See the
-[compatibility review](docs/review-2026-09-16.md) for verification and limits.
+[compatibility review](docs/validation/review-2026-09-16.md) for verification and limits.
 
 VNC sends input independently of framebuffer processing. Consecutive pointer moves retain the
 latest position, while keys, clicks, and scrolls stay ordered through temporary stalls. Performance
@@ -125,7 +125,7 @@ reconnections. Hosting requires a logged-in graphical session; FileVault preboot
 unlock and the initial login window are outside the current host's support.
 
 The bundle includes `Contents/MacOS/removent-cli` with `daemon start`,
-`daemon login-on` and `daemon status`. See the [macOS background service guide](docs/macos-background-service.md)
+`daemon login-on` and `daemon status`. See the [macOS background service guide](docs/guides/macos-background-service.md)
 for installation, server-only commands, permissions and verification.
 
 ## Private relay and macOS unlock
@@ -141,33 +141,43 @@ with `removent-relay start / stop / restart / status / logs`. Linux uses systemd
 247+ (sudo for changes); macOS uses a user LaunchAgent (no sudo, starts at login
 and stops at logout). Neither needs Rust or Docker on the relay machine. Requires
 a stable release containing relay assets. See [installation, upgrades and Cloudflare
-management](docs/relay-quick-deploy.md).
+management](docs/guides/relay-quick-deploy.md).
 
-[Deploy the Rust relay](docs/private-relay.md) on a VPS, configure separate host/controller
+[Deploy the Rust relay](docs/guides/private-relay.md) on a VPS, configure separate host/controller
 credentials (or registered device keys), then select the relay in **Add connection**
 and enter `removent://host:port` and the target host fingerprint. Select
 Cloudflare / HTTPS or VPS / QUIC separately. The current protocol is v1. Credentials stay in Keychain. The
 daemon maintains the host tunnel independently of the desktop and tray.
 
-[Cloudflare Containers](docs/cloudflare-relay.md) use the Rust WSS relay with
+[Cloudflare Containers](docs/guides/cloudflare-relay.md) use the Rust WSS relay with
 authenticated start/stop/status commands and controller-aware idle sleep. Manual
 stop persists; background daemon retries cannot restart the container.
 
 Native sessions adapt bitrate and frame rate from sender pressure and automatic
 receiver feedback, preserving capture dimensions and a minimum per-frame detail
 budget. Constrained links favor readable text over motion smoothness. See the
-[quality measurements and limits](docs/readable-quality-2026-09-20.md).
+[quality measurements and limits](docs/validation/readable-quality-2026-09-20.md).
 
-[macOS unlock investigation](docs/macos-unlock.md) distinguishes a locked user
+[macOS unlock investigation](docs/guides/macos-unlock.md) distinguishes a locked user
 session, the login window and FileVault. Apple silicon with macOS 26+ has an
 Apple-supported SSH FileVault unlock path after restart; it is separate from RVP
 and is not implemented by the relay. Locked-Mac acceptance is still required.
 
 ## Website
 
-The official website source lives in [`website/`](website/README.md), built with svedocs.
+The official website source lives in [`apps/website/`](apps/website/README.md), built with svedocs.
 It includes a custom landing page, English and Chinese documentation, and local search.
 See the website README for development, validation, and static hosting instructions.
+
+## Mobile controller
+
+An iPhone/iPad controller is included under [`apps/mobile/`](apps/mobile/README.md). It
+uses the same Rust client engine as the desktop app and connects to the existing
+Mac host; the phone never acts as a controlled host. Native Removent, VNC/Apple
+Remote Desktop, and RDP connection forms, touch/keyboard input, saved Keychain
+credentials, Bonjour discovery, text clipboard, optional remote audio, and relay
+routing are included. Build steps and the simulator acceptance fixture are in
+the mobile README.
 
 ## Build from source
 
@@ -184,18 +194,18 @@ scripts/dev.sh
 scripts/dev.sh --no-build
 
 # Or package a .app bundle + zip into dist/ (ad-hoc signed for local use)
-scripts/package.sh
+scripts/build/package.sh
 ```
 
 The development script uses `userdata/dev` (override with `REMOVENT_DATA_DIR`),
 skips scheduled update checks, and stops its own processes on Ctrl-C. Use
 `--no-tray` for app/daemon work, `--build-only` to build without launching, or
 `--help` for options. The first build requires compiling dependencies; subsequent
-runs build incrementally. See [the review report](docs/review-2026-09-06.md) for
+runs build incrementally. See [the review report](docs/validation/review-2026-09-06.md) for
 findings, validation and performance measurements.
 
 Run tests with `cargo test --workspace`; the tray integration test is
-`bash tray/Tests/run_integration_test.sh`.
+`bash apps/tray/Tests/run_integration_test.sh`.
 
 ### Benchmarks
 
@@ -230,24 +240,31 @@ VideoToolbox hardware support so a hardware AV1 backend can be selected in a fut
 
 Three processes cooperate:
 
-- **Removent.app** (`crates/app`) — the GPUI user interface and controller-side engine
+- **Removent.app** (`apps/desktop`) — the GPUI user interface and controller-side engine
   (decode, render, input forwarding).
-- **removentd** (`crates/daemon`) — a headless always-on daemon hosting the controlled-side
+- **removentd** (`apps/daemon`) — a headless always-on daemon hosting the controlled-side
   pipeline (capture, encode, input injection), managed by the tray over a Unix-socket IPC.
-- **RemoventTray** (`tray/`, Swift) — the menu-bar app: service toggle, pairing PIN display,
+- **RemoventTray** (`apps/tray/`, Swift) — the menu-bar app: service toggle, pairing PIN display,
   admission prompts.
 
 The wire protocol ("RVP") runs over QUIC with mutual TLS and Ed25519 device identities.
-See [`.agents/`](.agents/README.md) for the full design documents (requirements,
+See [`docs/design/`](docs/design/README.md) for the full design documents (requirements,
 architecture, protocol — currently in Chinese).
 
 ## Updates
 
 Removent checks for updates 30 seconds after launch and then every 24 hours.
-The updater uses GitHub's
-`releases/latest/download/latest.json` endpoint, which excludes prereleases and
-returns 404 until a stable release exists. You can turn checks off in the app's
-settings; they never interfere with LAN-only operation.
+In **Settings → System → Software Update**, choose **Stable** (the default) or
+**Beta**, turn automatic checks off, or check manually. Stable uses the latest
+stable release; Beta also considers `-beta.N` releases. Both channels only offer
+strictly newer versions: switching from a newer beta to Stable waits for a newer
+stable release rather than downgrading. Switching channels clears any pending
+update from the previous channel; it is disabled while checking or installing.
+Checks never interfere with LAN-only operation.
+
+The channel picker is new in the source version following `v0.1.3-beta.1`.
+Earlier builds check Stable only; install a build containing the picker once to
+start receiving beta updates in the app.
 
 Updates are **notify-only** — a badge appears in the settings page and the menu bar, and
 nothing is installed until you ask. When you do update, the download is verified against
@@ -266,10 +283,27 @@ Tag a version matching `Cargo.toml` (`v0.1.2`) and push — `.github/workflows/r
 builds, Developer-ID signs, notarizes, and attaches the DMG/zip/`latest.json` to a GitHub
 release. Required secrets are documented at the top of that workflow file. To cut a release
 locally, set `APPLE_SIGNING_IDENTITY` plus notarization credentials
-(see `scripts/notarize.sh`) and run `scripts/release.sh`.
+(see `scripts/release/notarize.sh`) and run `scripts/release/release.sh`.
 
 ## License
 
 [Apache-2.0](LICENSE)
 
-Only stable SemVer releases are accepted. See the [release guide](docs/release-pipeline.md) for signing and publishing.
+Only stable SemVer releases are accepted. See the [release guide](docs/guides/release-pipeline.md) for signing and publishing.
+
+### iCloud connection sync
+
+The Mac and iPhone/iPad apps support opt-in saved-connection sync using the same
+Apple account and CloudKit container. Names, addresses, protocols and relay routes
+sync; passwords, pairing and host permissions stay on each device. Local use works
+offline, and settings show pending changes and conflicting edits. The Mac keeps
+a macOS 26 minimum and Developer ID distribution.
+
+CloudKit requires separately provisioned builds and a deployed Production schema.
+Those live gates have not yet been verified for this implementation. See the
+[setup and architecture](docs/architecture/cloudkit-sync-design.md) and
+[validation record](docs/validation/cloudkit-sync-validation.md).
+
+## Monorepo
+
+Applications live in `apps/`, reusable libraries in `packages/`, and deployment templates in `infra/`. Use `make check`, `make test`, `make website-check` and `make relay-worker-check` from the repository root. See the [layout and ownership guide](docs/architecture/monorepo.md).

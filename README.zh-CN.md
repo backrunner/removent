@@ -15,7 +15,7 @@ Rust relay 跨网络使用 RVP 私有协议，无需托管账号。
 
 ## 系统要求
 
-- macOS 13.0 或更高版本，Apple Silicon（arm64）
+- macOS 26.0 或更高版本，Apple Silicon（arm64）
 - 使用 Removent 原生协议时，主机在局域网可达，或两端已配置私有 relay
 - 使用兼容连接时，远端提供可访问的 VNC 或 RDP 服务
 
@@ -51,15 +51,15 @@ Linux x86_64 / ARM64 和 macOS 13+（Apple Silicon / Intel）均可一键安装�
 curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install_relay.sh | sh
 ```
 
-安装器校验版本与 SHA-256，随后运行二进制自带的设置向导。日常使用 `removent-relay start / stop / restart / status / logs` 管理，Linux 使用 systemd 247+，修改服务时加 sudo；macOS 使用当前用户的 LaunchAgent，无需 sudo，登录启动、退出登录停止。中继机器无需 Rust 或 Docker。需要正式发布中包含 relay 资产，详见[安装、升级与 Cloudflare 管理](docs/relay-quick-deploy.md)。
+安装器校验版本与 SHA-256，随后运行二进制自带的设置向导。日常使用 `removent-relay start / stop / restart / status / logs` 管理，Linux 使用 systemd 247+，修改服务时加 sudo；macOS 使用当前用户的 LaunchAgent，无需 sudo，登录启动、退出登录停止。中继机器无需 Rust 或 Docker。需要正式发布中包含 relay 资产，详见[安装、升级与 Cloudflare 管理](docs/guides/relay-quick-deploy.md)。
 
-新增可在 VPS 自部署的 Rust/QUIC relay，主机与控制端使用独立凭据，固定 relay 证书指纹，保留 RVP 端到端加密和设备配对。添加 Removent 主机时启用「通过 relay 连接」，可选已有 relay 或输入 `removent://域名或IP:端口`、房间和目标主机指纹，并单独选择 Cloudflare / HTTPS 或 VPS / QUIC。当前协议为 v1。凭据保存在钥匙串；不填凭据时须预先登记设备公钥。配置步骤见[私有 relay 部署](docs/private-relay.md)。
+新增可在 VPS 自部署的 Rust/QUIC relay，主机与控制端使用独立凭据，固定 relay 证书指纹，保留 RVP 端到端加密和设备配对。添加 Removent 主机时启用「通过 relay 连接」，可选已有 relay 或输入 `removent://域名或IP:端口`、房间和目标主机指纹，并单独选择 Cloudflare / HTTPS 或 VPS / QUIC。当前协议为 v1。凭据保存在钥匙串；不填凭据时须预先登记设备公钥。配置步骤见[私有 relay 部署](docs/guides/private-relay.md)。
 
-也支持 [Cloudflare Containers 部署](docs/cloudflare-relay.md)：使用 WSS 承载加密 RVP，提供独立管理凭据保护的启动、停止、状态接口。没有控制端连接时默认 5 分钟休眠；手动停止状态会持久保存，被控端重试不会重新拉起容器。
+也支持 [Cloudflare Containers 部署](docs/guides/cloudflare-relay.md)：使用 WSS 承载加密 RVP，提供独立管理凭据保护的启动、停止、状态接口。没有控制端连接时默认 5 分钟休眠；手动停止状态会持久保存，被控端重试不会重新拉起容器。
 
-原生连接根据发送压力和接收端自动反馈调整码率/帧率，保留捕获尺寸与最低每帧细节预算；弱网优先保文字清晰，降低刷新频率。实测结果与能力边界见[动态清晰度报告](docs/readable-quality-2026-09-20.md)。
+原生连接根据发送压力和接收端自动反馈调整码率/帧率，保留捕获尺寸与最低每帧细节预算；弱网优先保文字清晰，降低刷新频率。实测结果与能力边界见[动态清晰度报告](docs/validation/readable-quality-2026-09-20.md)。
 
-macOS 锁屏、登录窗口和 FileVault 的能力边界见[解锁调研](docs/macos-unlock.md)。Apple Silicon + macOS 26 及以后可在满足系统条件时通过 SSH 完成重启后的 FileVault 解锁；这与 RVP relay 是独立路径，尚未接入。
+macOS 锁屏、登录窗口和 FileVault 的能力边界见[解锁调研](docs/guides/macos-unlock.md)。Apple Silicon + macOS 26 及以后可在满足系统条件时通过 SSH 完成重启后的 FileVault 解锁；这与 RVP relay 是独立路径，尚未接入。
 
 ### 无人值守与登录自启
 
@@ -72,7 +72,7 @@ server 由 macOS launchd 独立管理，退出主窗口或托盘后继续运行�
 
 安装包自带 `Removent.app/Contents/MacOS/removent-cli`，可用 `daemon start`、`daemon login-on`、
 `daemon status` 独立管理 server。完整步骤、命令、系统限制和验证方法见
-[macOS 后台服务说明](docs/macos-background-service.md)。
+[macOS 后台服务说明](docs/guides/macos-background-service.md)。
 
 ### 局域网自动发现
 
@@ -108,7 +108,7 @@ Removent 默认开启，VNC 和 RDP 默认关闭。修改立即生效并在重�
 主控端协商 RFB 3.3／3.7／3.8，支持 Raw、CopyRect、Hextile 和桌面尺寸变化。
 当前认证支持 None（1）、VNC 密码（2）和 Apple ARD（30）。Apple type 35、VeNCrypt/TLS、
 RealVNC 私有认证和 UltraVNC MS-Logon 尚未实现，服务端须提供已支持的认证方式。验证记录和
-具体边界见[兼容性审查](docs/review-2026-09-16.md)。
+具体边界见[兼容性审查](docs/validation/review-2026-09-16.md)。
 
 VNC 输入发送与画面处理独立运行，连续鼠标移动会合并为最新位置，按键、点击和滚动保持顺序，
 以减少高分辨率画面下的输入积压。查看窗口的性能信息默认隐藏；将鼠标移至窗口顶边，点击
@@ -127,8 +127,16 @@ RDP 默认验证服务器证书。自签名证书可导入系统信任，或在�
 
 ## 官方网站
 
-官网源码位于 [`website/`](website/README.md)，基于 svedocs 构建，包含定制首页、
+官网源码位于 [`apps/website/`](apps/website/README.md)，基于 svedocs 构建，包含定制首页、
 中英文文档和本地搜索。开发、验证与静态托管方式见网站 README。
+
+## 手机主控端
+
+[`apps/mobile/`](apps/mobile/README.md) 提供 iPhone/iPad 主控端。手机复用 desktop 的
+Rust 客户端引擎，连接现有的 Mac 被控端；手机本身不作为被控端。当前包含
+Removent、VNC/Apple Remote Desktop 和 RDP 连接表单、触控与键盘输入、钥匙串
+保存连接、Bonjour 发现、文本剪贴板、可选远程音频和 relay 路由。构建步骤与
+模拟器验收 fixture 见 mobile README。
 
 ## 从源码构建
 
@@ -145,15 +153,15 @@ scripts/dev.sh
 scripts/dev.sh --no-build
 
 # 或打包 .app + zip 到 dist/（本地 ad-hoc 签名）
-scripts/package.sh
+scripts/build/package.sh
 ```
 
 开发脚本默认使用独立的 `userdata/dev`（可用 `REMOVENT_DATA_DIR` 覆盖），跳过定时更新
 检查；Ctrl-C 会停止本次启动的进程。`--no-tray` 跳过托盘，`--build-only` 只构建不启动，
 `--help` 查看选项。首次需要编译依赖，后续为增量构建。
-审查发现、验证和性能实测见 [review 报告](docs/review-2026-09-06.md)。
+审查发现、验证和性能实测见 [review 报告](docs/validation/review-2026-09-06.md)。
 
-测试：`cargo test --workspace`；托盘集成测试：`bash tray/Tests/run_integration_test.sh`。
+测试：`cargo test --workspace`；托盘集成测试：`bash apps/tray/Tests/run_integration_test.sh`。
 
 ### Benchmark
 
@@ -185,13 +193,13 @@ HEVC。目前使用 rav1e 软件编码和 rav1d 软件解码。Benchmark 同时�
 
 三个进程协同工作：
 
-- **Removent.app**（`crates/app`）—— GPUI 界面与主控端引擎（解码、渲染、输入转发）。
-- **removentd**（`crates/daemon`）—— 常驻无头守护进程，承载被控端管线（采集、编码、
+- **Removent.app**（`apps/desktop`）—— GPUI 界面与主控端引擎（解码、渲染、输入转发）。
+- **removentd**（`apps/daemon`）—— 常驻无头守护进程，承载被控端管线（采集、编码、
   输入注入），托盘通过 Unix socket IPC 管理它。
-- **RemoventTray**（`tray/`，Swift）—— 菜单栏应用：服务开关、配对 PIN 展示、准入确认。
+- **RemoventTray**（`apps/tray/`，Swift）—— 菜单栏应用：服务开关、配对 PIN 展示、准入确认。
 
 线上协议（"RVP"）基于 QUIC，使用双向 TLS 与 Ed25519 设备身份。完整设计文档见
-[`.agents/`](.agents/README.md)（需求、架构、协议）。
+[`docs/design/`](docs/design/README.md)（需求、架构、协议）。
 
 ## 自动更新
 
@@ -213,11 +221,26 @@ Removent 在启动 30 秒后、之后每 24 小时检查新版本，使用 GitHu
 推送与 `Cargo.toml` 版本一致的 tag（如 `v0.1.2`）即可触发
 `.github/workflows/release.yml`：构建、Developer ID 签名、公证，并把 DMG/zip/
 `latest.json` 附加到 GitHub release。所需 secrets 见该 workflow 文件顶部注释。本地发布：
-设置 `APPLE_SIGNING_IDENTITY` 和公证凭证（见 `scripts/notarize.sh`）后运行
-`scripts/release.sh`。
+设置 `APPLE_SIGNING_IDENTITY` 和公证凭证（见 `scripts/release/notarize.sh`）后运行
+`scripts/release/release.sh`。
 
 ## 开源协议
 
 [Apache-2.0](LICENSE)
 
-更新器仅接受正式 SemVer 版本。发布与签名配置见 [发布指南](docs/release-pipeline.md)。
+更新器仅接受正式 SemVer 版本。发布与签名配置见 [发布指南](docs/guides/release-pipeline.md)。
+
+### iCloud 连接同步
+
+Mac 与 iPhone/iPad 可通过同一 Apple 账户和 CloudKit 容器同步已保存的连接。
+在设置的 iCloud 分区主动开启后，名称、地址、协议和中继路由会同步；密码、设备配对和主机权限仍保留在各自设备上。
+离线时可继续使用本机连接，设置中会显示待同步更改和需要选择的冲突版本。
+桌面端最低支持 macOS 26，并沿用 Developer ID 分发。
+
+此功能需要两端具备 CloudKit 描述文件，并将数据库结构部署到 Production。
+本次实现尚未完成这些真实云端验收。配置方法见[接入说明](docs/architecture/cloudkit-sync-design.md)，
+测试证据见[验证记录](docs/validation/cloudkit-sync-validation.md)。
+
+## Monorepo 目录管理
+
+应用入口放在 `apps/`，公共库放在 `packages/`，部署模板放在 `infra/`。在根目录使用 `make check`、`make test`、`make website-check` 与 `make relay-worker-check`。完整职责划分、依赖边界和大文件拆分规则见[目录管理指南](docs/architecture/monorepo.md)。

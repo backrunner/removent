@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""Fail closed before uploading: metadata, hashes, signatures and notarization."""
+import hashlib
+import json
+import pathlib
+import plistlib
+import re
+import subprocess
+import sys
+import tempfile
+import zipfile
+from gen_latest import OPENSSL, signing_payload, verify_payload
+from release_meta import VERSION, BASE
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+DIST = ROOT / 'dist'
+TEAM = 'PB8H83VL3Z'
+REQUIREMENT = f'=anchor apple generic and identifier "com.alkinum.removent" and certificate leaf[subject.OU] = "{TEAM}" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
+
+def run(*args):
+    result = subprocess.run(args, capture_output=True)
+    if result.returncode:
+        sys.stderr.write(result.stderr.decode(errors='replace'))
+        result.check_returncode()
+    return result.stdout
+
+
+def verify_platform(bundle):
+    helpers = [bundle / 'Contents/Helpers' / name for name in ('RemoventTray.app', 'RemoventSync.app')]
+    for app in [bundle, *helpers]:
+        metadata = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
+        assert metadata['LSMinimumSystemVersion'] == '26.0', f'Wrong macOS minimum: {app}'
+        for binary in (app / 'Contents/MacOS').iterdir():
+            build = run('xcrun', 'vtool', '-show-build', str(binary)).decode()
+            assert re.search(r'\bminos\s+26\.0\b', build), f'Wrong Mach-O deployment target: {binary}'
+
+
+def verify_bundle(bundle):
+    verify_platform(bundle)
+    p = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
+    assert p['RemoventReleaseVersion'] == VERSION
+    assert p['CFBundleShortVersionString'] == BASE
+    assert p['CFBundleIdentifier'] == 'com.alkinum.removent'
+    assert p['CFBundleIconFile'] == 'AppIcon'
+    assert (bundle / 'Contents/Resources/AppIcon.icns').stat().st_size > 1000
+    assert (bundle / 'Contents/MacOS/removent-cli').is_file()
+    # The CI shell protects its private-key files with umask 077; those modes
+    # must not leak into the public app installed for multiple Mac accounts.
+    for path in [bundle, *bundle.rglob('*')]:
+        if path.is_symlink():
+            continue
+        required = 0o555 if path.is_dir() else 0o444
+        assert path.stat().st_mode & required == required, f'App permissions too restrictive: {path}'
+    run('codesign', '--verify', '--deep', '--strict', '-R', REQUIREMENT, str(bundle))
+    run('xcrun', 'stapler', 'validate', str(bundle))
+    run('spctl', '--assess', '--type', 'execute', str(bundle))
+    from configure_cloud_sync import verify as verify_cloud_sync
+    verify_cloud_sync(bundle / 'Contents/Helpers/RemoventSync.app', TEAM)
+    for binary in list((bundle / 'Contents/MacOS').iterdir()) + [bundle / 'Contents/Helpers/RemoventTray.app/Contents/MacOS/RemoventTray', bundle / 'Contents/Helpers/RemoventSync.app/Contents/MacOS/RemoventSync']:
+        assert binary.stat().st_mode & 0o111 == 0o111, binary
+        assert run('lipo', '-archs', str(binary)).strip() == b'arm64', binary
+        dependencies = run('otool', '-L', str(binary)).decode()
+        assert '/opt/homebrew/' not in dependencies and '/usr/local/' not in dependencies, dependencies
+
+
+def main():
+    zip_path = DIST / f'Removent-{VERSION}-macos-arm64.zip'
+    dmg = DIST / f'Removent-{VERSION}-macos-arm64.dmg'
+    manifest = json.loads((DIST / 'latest.json').read_text())
+    assert manifest['version'] == VERSION
+    assert manifest['url'] == f'https://github.com/backrunner/removent/releases/download/v{VERSION}/{zip_path.name}'
+    assert manifest['sha256'] == hashlib.file_digest(zip_path.open('rb'), 'sha256').hexdigest()
+    with tempfile.TemporaryDirectory() as td:
+        public = pathlib.Path(td) / 'key.pem'
+        # Only the embedded public key is used; verification does not need CI secrets.
+        import re
+        source = (ROOT / 'apps/desktop/src/updater/manifest.rs').read_text()
+        key = bytes.fromhex(re.search(r'RELEASE_PUBLIC_KEY_HEX: &str =\s*"([0-9a-f]{64})"', source).group(1))
+        der = pathlib.Path(td) / 'key.der'
+        der.write_bytes(bytes.fromhex('302a300506032b6570032100') + key)
+        run(OPENSSL, 'pkey', '-pubin', '-inform', 'DER', '-in', str(der), '-out', str(public))
+        assert verify_payload(signing_payload(manifest), manifest['signature'], str(public))
+        with zipfile.ZipFile(zip_path) as archive:
+            assert all(n.startswith('Removent.app/') or n.startswith('__MACOSX/') for n in archive.namelist())
+        run('ditto', '-x', '-k', str(zip_path), td)
+        verify_bundle(pathlib.Path(td) / 'Removent.app')
+    run('hdiutil', 'verify', str(dmg))
+    # Check the actual compressed artifact, not just its source staging folder.
+    with tempfile.TemporaryDirectory() as td:
+        mount = pathlib.Path(td) / 'installer'
+        mount.mkdir()
+        run('hdiutil', 'attach', '-quiet', '-readonly', '-nobrowse', '-noautoopen',
+            '-mountpoint', str(mount), str(dmg))
+        try:
+            from verify_dmg_layout import verify
+            verify(mount)
+        finally:
+            run('hdiutil', 'detach', '-quiet', str(mount))
+    run('codesign', '--verify', '--strict', str(dmg))
+    run('xcrun', 'stapler', 'validate', str(dmg))
+    run('spctl', '--assess', '--type', 'open', '--context', 'context:primary-signature', str(dmg))
+    subprocess.run(['shasum', '-a', '256', '-c', 'SHA256SUMS'], cwd=DIST, check=True)
+    print('Release verified:', VERSION)
+
+if __name__ == '__main__':
+    main()

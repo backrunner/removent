@@ -1,0 +1,20 @@
+//! removent-client: controller-side session engine.
+
+pub mod cloud_sync;
+pub mod connection;
+mod input_queue;
+pub use input_queue::{InputSender, InputSnapshot};
+pub mod jitter;
+pub mod keychain;
+pub mod rdp;
+pub mod saved;
+pub mod session;
+mod video_feedback;
+pub mod vnc;
+
+pub use jitter::{AudioPacketIn, JitterBuffer, PopOutcome};
+pub use session::{
+    ClientConfig, ClientSession, ConnectError, DecodedFrame, PinRequest, connect_session,
+    quick_resume,
+};
+pub use vnc::{VncError, VncSession, connect_vnc, connect_vnc_with_credentials};

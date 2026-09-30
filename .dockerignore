@@ -2,7 +2,7 @@
 target
 userdata
 dist
-tray
+apps/tray
 **/.DS_Store
 **/*.key
 **/relay-host.toml
@@ -11,3 +11,12 @@ tray
 **/.wrangler
 **/.dev.vars*
 **/.env*
+
+**/.build
+**/DerivedData*
+**/Libraries
+**/*.xcodeproj
+apps/website
+apps/mobile
+apps/cloud-sync-helper
+assets

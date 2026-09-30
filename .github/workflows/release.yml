@@ -18,11 +18,13 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  MACOSX_DEPLOYMENT_TARGET: '13.0'
+  MACOSX_DEPLOYMENT_TARGET: '26.0'
   RELEASE_BUILD_NUMBER: ${{ github.run_number }}
 
 jobs:
   relay-macos-intel:
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
     runs-on: macos-15-intel
     timeout-minutes: 40
     steps:
@@ -33,9 +35,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: relay-macos-intel
-      - run: cargo test --locked --release -p removent-relay
+      - run: cargo test --locked --release -p removent-relay -p removent-relay-transport
       - run: cargo build --locked --release -p removent-relay
-      - run: python3 scripts/test_relay_launchd.py --live --binary target/release/removent-relay
+      - run: python3 scripts/relay/test_relay_launchd.py --live --binary target/release/removent-relay
   relay-linux:
     strategy:
       fail-fast: false
@@ -69,7 +71,7 @@ jobs:
           RELAY_TARGET: ${{ matrix.target }}
           CC: musl-gcc
         run: |
-          cargo test --locked --release -p removent-relay --target "$RELAY_TARGET"
+          cargo test --locked --release -p removent-relay -p removent-relay-transport --target "$RELAY_TARGET"
           cargo build --locked --release -p removent-relay --target "$RELAY_TARGET"
           readelf -l "target/$RELAY_TARGET/release/removent-relay" > "$RUNNER_TEMP/relay-elf.txt"
           if grep -q INTERP "$RUNNER_TEMP/relay-elf.txt"; then
@@ -82,10 +84,10 @@ jobs:
           RELAY_TARGET: ${{ matrix.target }}
           RELAY_PLATFORM: ${{ matrix.platform }}
         run: |
-          test "$RELEASE_TAG" = "$(python3 scripts/release_meta.py tag)"
-          python3 scripts/package_relay.py --version "$RELEASE_TAG" --platform "$RELAY_PLATFORM" --binary "target/$RELAY_TARGET/release/removent-relay"
+          test "$RELEASE_TAG" = "$(python3 scripts/release/release_meta.py tag)"
+          python3 scripts/release/package_relay.py --version "$RELEASE_TAG" --platform "$RELAY_PLATFORM" --binary "target/$RELAY_TARGET/release/removent-relay"
           sudo install -m 755 "target/$RELAY_TARGET/release/removent-relay" /usr/local/bin/removent-relay
-          sudo python3 scripts/test_relay_systemd.py --live
+          sudo python3 scripts/relay/test_relay_systemd.py --live
       - uses: actions/upload-artifact@v4
         with:
           name: relay-${{ matrix.platform }}
@@ -93,7 +95,7 @@ jobs:
           if-no-files-found: error
   release:
     needs: [relay-linux, relay-macos-intel]
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 120
     permissions:
       contents: write
@@ -106,7 +108,7 @@ jobs:
       - name: Require successful main CI
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/wait_for_ci.py
+        run: python3 scripts/release/wait_for_ci.py
       - name: Verify notarization credentials
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
@@ -154,19 +156,19 @@ jobs:
       - name: Install packaging dependencies
         run: |
           brew install cairo openssl@3
-          python3 -m pip install -r scripts/requirements-release.txt
+          python3 -m pip install -r scripts/release/requirements-release.txt
       - name: Validate source and release tag
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           test "$(uname -m)" = arm64
-          test "$RELEASE_TAG" = "$(python3 scripts/release_meta.py tag)"
+          test "$RELEASE_TAG" = "$(python3 scripts/release/release_meta.py tag)"
           test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
           test -f "docs/releases/${RELEASE_TAG}.md"
           # The exact SHA already passed formatting, Clippy, all tests and
           # development packaging in main CI. Repeat the signing self-test here.
-          python3 scripts/gen_latest.py --self-test
+          python3 scripts/release/gen_latest.py --self-test
       - name: Build and notarize
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -177,11 +179,12 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          APPLE_CLOUDKIT_PROFILE_BASE64: ${{ secrets.APPLE_CLOUDKIT_PROFILE_BASE64 }}
         run: |
           set -euo pipefail
           umask 077
           export UPDATE_SIGNING_KEY_FILE="$RUNNER_TEMP/update-signing-key.pem"
-          trap 'rm -f "$RUNNER_TEMP/notary.p8" "$UPDATE_SIGNING_KEY_FILE"' EXIT
+          trap 'rm -f "$RUNNER_TEMP/notary.p8" "$UPDATE_SIGNING_KEY_FILE" "$RUNNER_TEMP/removent-sync.provisionprofile"' EXIT
           test -n "$APPLE_SIGNING_IDENTITY"
           test -n "$UPDATE_SIGNING_KEY"
           printf '%s\n' "$UPDATE_SIGNING_KEY" > "$UPDATE_SIGNING_KEY_FILE"
@@ -189,7 +192,15 @@ jobs:
               export APPLE_API_KEY_PATH="$RUNNER_TEMP/notary.p8"
               printf '%s' "$APPLE_API_KEY_BASE64" | base64 --decode > "$APPLE_API_KEY_PATH"
           fi
-          bash scripts/release.sh
+          export REMOVENT_CLOUDKIT_PROFILE="$RUNNER_TEMP/removent-sync.provisionprofile"
+          python3 - <<'PY'
+          import base64, os, pathlib
+          encoded = os.environ.get('APPLE_CLOUDKIT_PROFILE_BASE64', '')
+          if not encoded:
+              raise SystemExit('Missing CloudKit Developer ID profile for com.alkinum.removent.sync')
+          pathlib.Path(os.environ['REMOVENT_CLOUDKIT_PROFILE']).write_bytes(base64.b64decode(encoded, validate=True))
+          PY
+          bash scripts/release/release.sh
       - uses: actions/upload-artifact@v4
         with:
           name: signed-release
@@ -216,4 +227,4 @@ jobs:
           export UPDATE_SIGNING_KEY_FILE="$RUNNER_TEMP/update-signing-key.pem"
           trap 'rm -f "$UPDATE_SIGNING_KEY_FILE"' EXIT
           printf '%s\n' "$UPDATE_SIGNING_KEY" > "$UPDATE_SIGNING_KEY_FILE"
-          bash scripts/publish_release.sh
+          bash scripts/release/publish_release.sh

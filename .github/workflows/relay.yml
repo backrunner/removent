@@ -3,7 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    paths: ['crates/relay/**', 'crates/net/**', 'crates/core/**', 'crates/proto/**', 'Cargo.*', 'deploy/relay/**', 'deploy/cloudflare/**', 'scripts/*cloudflare*', 'scripts/*relay*', '.github/workflows/relay.yml', '.github/workflows/release.yml']
+    paths: ['apps/relay/**', 'packages/relay-transport/**', 'packages/net/**', 'packages/core/**', 'packages/proto/**', 'Cargo.*', 'infra/relay/**', 'apps/relay-worker/**', 'scripts/relay/**', 'scripts/release/**', 'scripts/install_relay.sh', '.github/workflows/relay.yml', '.github/workflows/release.yml']
 permissions:
   contents: read
 jobs:
@@ -23,11 +23,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install relay update signing test dependency
         run: brew install openssl@3
-      - run: cargo test --locked -p removent-relay
-      - run: cargo clippy --locked -p removent-relay --all-targets -- -D warnings
+      - run: cargo test --locked -p removent-relay -p removent-relay-transport
+      - run: cargo clippy --locked -p removent-relay -p removent-relay-transport --all-targets -- -D warnings
       - run: cargo build --locked -p removent-relay
-      - run: python3 scripts/test_relay_launchd.py --live
-      - run: python3 -m unittest discover -s scripts -p 'test_*relay*.py'
+      - run: python3 scripts/relay/test_relay_launchd.py --live
+      - run: python3 -m unittest discover -s scripts/relay -p 'test_*relay*.py'
+      - run: python3 -m unittest discover -s scripts/release -p 'test_*relay*.py'
   linux:
     strategy:
       fail-fast: false
@@ -50,15 +51,15 @@ jobs:
           key: relay-${{ matrix.target }}
           cache-on-failure: true
       - run: sudo apt-get update && sudo apt-get install -y musl-tools cmake
-      - run: cargo test --locked -p removent-relay
-      - run: cargo clippy --locked -p removent-relay --all-targets -- -D warnings
+      - run: cargo test --locked -p removent-relay -p removent-relay-transport
+      - run: cargo clippy --locked -p removent-relay -p removent-relay-transport --all-targets -- -D warnings
       - run: sh -n scripts/install_relay.sh && shellcheck scripts/install_relay.sh
       - name: Exercise the installed systemd service
         env:
           RELAY_TARGET: ${{ matrix.target }}
           CC: musl-gcc
         run: |
-          cargo test --locked --release -p removent-relay --target "$RELAY_TARGET"
+          cargo test --locked --release -p removent-relay -p removent-relay-transport --target "$RELAY_TARGET"
           cargo build --locked --release -p removent-relay --target "$RELAY_TARGET"
           readelf -l "target/$RELAY_TARGET/release/removent-relay" > "$RUNNER_TEMP/relay-elf.txt"
           if grep -q INTERP "$RUNNER_TEMP/relay-elf.txt"; then
@@ -66,16 +67,16 @@ jobs:
             exit 1
           fi
           sudo install -m 755 "target/$RELAY_TARGET/release/removent-relay" /usr/local/bin/removent-relay
-          sudo python3 scripts/test_relay_systemd.py --live
-      - run: docker build -f deploy/relay/Dockerfile -t removent-relay .
+          sudo python3 scripts/relay/test_relay_systemd.py --live
+      - run: docker build -f infra/relay/Dockerfile -t removent-relay .
         if: matrix.target == 'x86_64-unknown-linux-musl'
-      - run: docker build -f deploy/cloudflare/Dockerfile -t removent-relay-cloudflare .
+      - run: docker build -f apps/relay-worker/Dockerfile -t removent-relay-cloudflare .
         if: matrix.target == 'x86_64-unknown-linux-musl'
   cloudflare-worker:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: deploy/cloudflare
+        working-directory: apps/relay-worker
     env:
       WRANGLER_SEND_METRICS: 'false'
       REMOVENT_COMPOSE_VALIDATE: '1'
@@ -85,15 +86,17 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: deploy/cloudflare/package-lock.json
+          cache-dependency-path: apps/relay-worker/package-lock.json
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: bash -n scripts/deploy_relay.sh
+      - run: bash -n scripts/relay/deploy_relay.sh
         working-directory: .
       - run: npm ci
       - run: npm run check
       - run: npm test
       - run: npm run bundle:check
-      - run: python3 -m unittest discover -s scripts -p 'test_*relay*.py'
+      - run: python3 -m unittest discover -s scripts/relay -p 'test_*relay*.py'
+        working-directory: .
+      - run: python3 -m unittest discover -s scripts/release -p 'test_*relay*.py'
         working-directory: .

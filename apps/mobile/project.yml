@@ -1,0 +1,86 @@
+name: RemoventMobile
+options:
+  bundleIdPrefix: com.alkinum.removent
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    ARCHS: arm64
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    SWIFT_OBJC_BRIDGING_HEADER: Bridge/RemoventMobile.h
+    LIBRARY_SEARCH_PATHS: ["$(inherited)", "$(SRCROOT)/Libraries/$(PLATFORM_NAME)"]
+    OTHER_LDFLAGS: ["$(inherited)", "-lremovent_mobile", "-lc++", "-liconv", "-lz", "-framework", "Security", "-framework", "SystemConfiguration", "-framework", "VideoToolbox", "-framework", "CoreMedia", "-framework", "CoreVideo", "-framework", "IOSurface", "-framework", "CoreGraphics", "-framework", "Metal"]
+targets:
+  RemoventMobile:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+      - Resources
+      - ../../packages/apple-cloud-sync/Sources
+    info:
+      path: Info.plist
+      properties:
+        RemoventCloudKitEnvironment: "$(REMOVENT_CLOUDKIT_ENVIRONMENT)"
+        UIBackgroundModes: [remote-notification]
+        CFBundleDisplayName: Removent
+        CFBundleShortVersionString: "0.1.3"
+        CFBundleVersion: "1"
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIApplicationSupportsIndirectInputEvents: true
+        NSLocalNetworkUsageDescription: Find and connect to your computers on the local network.
+        NSBonjourServices: ["_removent._udp", "_rfb._tcp", "_rdp._tcp", "_ms-wbt-server._tcp"]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UIFileSharingEnabled: false
+        LSSupportsOpeningDocumentsInPlace: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.alkinum.removent.mobile
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: PB8H83VL3Z
+        CODE_SIGN_ENTITLEMENTS: RemoventMobile.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        Debug:
+          REMOVENT_CLOUDKIT_ENVIRONMENT: Development
+          REMOVENT_APS_ENVIRONMENT: development
+        Release:
+          REMOVENT_CLOUDKIT_ENVIRONMENT: Production
+          REMOVENT_APS_ENVIRONMENT: production
+    preBuildScripts:
+      - name: Build Rust controller
+        script: '"$SRCROOT/../../scripts/build/build_mobile.sh" --platform "$PLATFORM_NAME" --configuration "$CONFIGURATION"'
+        basedOnDependencyAnalysis: false
+  RemoventMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: RemoventMobile
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_OBJC_BRIDGING_HEADER: ""
+  RemoventMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: RemoventMobile
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_OBJC_BRIDGING_HEADER: ""
+schemes:
+  RemoventMobile:
+    build:
+      targets:
+        RemoventMobile: all
+    test:
+      targets: [RemoventMobileTests, RemoventMobileUITests]

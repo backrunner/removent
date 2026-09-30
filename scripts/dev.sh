@@ -24,23 +24,15 @@ if [[ "$(uname -s)" != Darwin ]]; then
     echo "Removent development requires macOS." >&2
     exit 1
 fi
+source scripts/build/macos_env.sh
 if [[ "$build" == 1 ]]; then
-    # GPUI needs Metal from full Xcode; do not change the system xcode-select.
-    if ! xcrun -f metal >/dev/null 2>&1; then
-        for xcode in /Applications/Xcode.app /Applications/Xcode-beta.app; do
-            if [[ -d "$xcode" ]]; then
-                export DEVELOPER_DIR="$xcode/Contents/Developer"
-                break
-            fi
-        done
-    fi
     if ! xcrun -f metal >/dev/null 2>&1; then
         echo "Metal compiler not found. Install full Xcode and its Metal toolchain." >&2
         exit 1
     fi
     cargo build --locked -p removent-app -p removent-daemon -p removent-cli
     if [[ "$tray" == 1 ]]; then
-        swift build -c debug --package-path tray
+        swift build -c debug --package-path apps/tray
     fi
 fi
 
@@ -48,7 +40,7 @@ fi
 target_dir="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
 app="$target_dir/debug/removent"
 daemon="$target_dir/debug/removentd"
-tray_bin="$PWD/tray/.build/debug/RemoventTray"
+tray_bin="$PWD/apps/tray/.build/debug/RemoventTray"
 for bin in "$app" "$daemon"; do
     [[ -x "$bin" ]] || { echo "Missing $bin. Run without --no-build." >&2; exit 1; }
 done

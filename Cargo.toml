@@ -1,18 +1,20 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/app",
-    "crates/client",
-    "crates/host",
-    "crates/core",
-    "crates/proto",
-    "crates/net",
-    "crates/media-capture",
-    "crates/media-codec",
-    "crates/input",
-    "crates/cli",
-    "crates/daemon",
-    "crates/relay",
+    "apps/cli",
+    "apps/daemon",
+    "apps/desktop",
+    "apps/relay",
+    "packages/client",
+    "packages/core",
+    "packages/host",
+    "packages/input",
+    "packages/media-capture",
+    "packages/media-codec",
+    "packages/mobile",
+    "packages/net",
+    "packages/proto",
+    "packages/relay-transport",
 ]
 
 [workspace.package]
@@ -23,15 +25,15 @@ repository = "https://github.com/backrunner/removent"
 rust-version = "1.89"
 
 [workspace.dependencies]
-removent-core = { path = "crates/core" }
-removent-proto = { path = "crates/proto" }
-removent-net = { path = "crates/net" }
-removent-media-capture = { path = "crates/media-capture" }
-removent-media-codec = { path = "crates/media-codec" }
-removent-input = { path = "crates/input" }
-removent-client = { path = "crates/client" }
-removent-host = { path = "crates/host" }
-removent-relay = { path = "crates/relay" }
+removent-core = { path = "packages/core" }
+removent-proto = { path = "packages/proto" }
+removent-net = { path = "packages/net" }
+removent-media-capture = { path = "packages/media-capture" }
+removent-media-codec = { path = "packages/media-codec" }
+removent-input = { path = "packages/input" }
+removent-client = { path = "packages/client" }
+removent-host = { path = "packages/host" }
+removent-relay = { package = "removent-relay-transport", path = "packages/relay-transport" }
 
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
@@ -88,3 +90,8 @@ unsafe_op_in_unsafe_fn = "warn"
 
 [workspace.lints.clippy]
 unwrap_used = "allow"
+
+# apple-cf 0.9.3 hard-codes a macOS Swift bridge; keep the bridge on the target SDK.
+[patch.crates-io]
+apple-cf = { path = "vendor/apple-cf" }
+videotoolbox = { path = "vendor/videotoolbox" }

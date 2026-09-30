@@ -1,0 +1,39 @@
+name: RemoventCloudSync
+options:
+  deploymentTarget:
+    macOS: "26.0"
+targets:
+  RemoventSync:
+    type: application
+    platform: macOS
+    sources:
+      - ../../packages/apple-cloud-sync/Sources
+      - path: SyncHelper/main.swift
+    info:
+      path: SyncHelper/Info.plist
+      properties:
+        CFBundleDisplayName: Removent Sync
+        LSUIElement: true
+        LSMinimumSystemVersion: "26.0"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.alkinum.removent.sync
+        DEVELOPMENT_TEAM: PB8H83VL3Z
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: SyncHelper/RemoventSync.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        SWIFT_VERSION: "5.0"
+        ARCHS: arm64
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
+      configs:
+        Debug:
+          REMOVENT_CLOUDKIT_ENVIRONMENT: Development
+          REMOVENT_APS_ENVIRONMENT: development
+        Release:
+          REMOVENT_CLOUDKIT_ENVIRONMENT: Production
+          REMOVENT_APS_ENVIRONMENT: production
+schemes:
+  RemoventSync:
+    build:
+      targets:
+        RemoventSync: all

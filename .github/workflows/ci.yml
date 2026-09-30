@@ -11,24 +11,24 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   CARGO_TERM_COLOR: always
-  MACOSX_DEPLOYMENT_TARGET: '13.0'
+  MACOSX_DEPLOYMENT_TARGET: '26.0'
 jobs:
   website:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: website
+        working-directory: apps/website
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          package_json_file: website/package.json
+          package_json_file: apps/website/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: pnpm
-          cache-dependency-path: website/pnpm-lock.yaml
+          cache-dependency-path: apps/website/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm check:docs
@@ -38,17 +38,17 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Removent-website
-          path: website/build/
+          path: apps/website/build/
           if-no-files-found: error
           retention-days: 30
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: website-browser-failures
-          path: website/test-results/
+          path: apps/website/test-results/
           retention-days: 7
   check:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -64,17 +64,20 @@ jobs:
       - name: Install update signing dependency
         run: brew install openssl@3
       - run: cargo fmt --all --check
+      - run: python3 scripts/check_layout.py
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace -- --test-threads=1
-      - run: python3 scripts/gen_latest.py --self-test
-      - run: python3 -m unittest discover -s scripts -p 'test_*.py'
-      - run: bash tray/Tests/run_integration_test.sh
-      - run: for script in scripts/*.sh; do bash -n "$script" || exit; done
+      - run: python3 scripts/release/gen_latest.py --self-test
+      - run: bash scripts/check.sh
+      - run: bash apps/tray/Tests/run_integration_test.sh
+      - run: xcrun swift test --package-path packages/apple-cloud-sync
+      - run: bash scripts/build/build_cloud_sync.sh
+      - run: find scripts apps/tray/Tests -name '*.sh' -exec bash -n {} \;
       - name: Check installer
-        run: xcrun swiftc -typecheck -target arm64-apple-macosx13.0 scripts/launcher.swift
+        run: xcrun swiftc -typecheck -target arm64-apple-macosx26.0 apps/installer/main.swift
   build:
     needs: check
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -86,7 +89,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Package development bundle
-        run: bash scripts/package.sh
+        run: bash scripts/build/package.sh
+      - name: Check CloudKit helper lifecycle without cloud access
+        run: python3 scripts/qa/test_cloud_sync_helper.py
       - uses: actions/upload-artifact@v4
         with:
           name: Removent-development-not-notarized

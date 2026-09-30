@@ -1,0 +1,45 @@
+[package]
+name = "removent-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+removent-core = { workspace = true }
+removent-proto = { workspace = true }
+removent-net = { workspace = true }
+removent-media-codec = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+ed25519-dalek = { workspace = true }
+des = { workspace = true }
+aes = { workspace = true }
+md-5 = { workspace = true }
+num-bigint = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+ironrdp = { version = "0.17", features = ["connector", "session", "graphics", "input"] }
+ironrdp-tokio = { version = "0.10", features = ["reqwest-native-tls"] }
+ironrdp-bulk = "0.1"
+tokio-native-tls = "0.3"
+x509-cert = "0.2"
+url = "2"
+hex = { workspace = true }
+
+[dev-dependencies]
+ironrdp-server = { version = "0.13", default-features = false, features = ["helper"] }
+async-trait = "0.1"
+rcgen = { workspace = true }
+rustls = { workspace = true }
+tempfile = "3"
+removent-media-capture = { workspace = true }
+removent-host = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+security-framework = "3"
+security-framework-sys = "2"

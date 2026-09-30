@@ -2,7 +2,10 @@
 /target/
 
 # Swift build artifacts
-/tray/.build/
+/apps/tray/.build/
+/packages/apple-cloud-sync/.build/
+/apps/cloud-sync-helper/.build/
+/apps/cloud-sync-helper/DerivedData*/
 
 # Packaged app bundles, DMG/zip artifacts, generated update manifests
 /dist/
@@ -21,3 +24,14 @@ node_modules/
 .wrangler/
 .dev.vars*
 !*.example
+
+# Generated iOS project and Rust artifacts
+/apps/mobile/Libraries/
+/apps/mobile/DerivedData*/
+
+# Native generated projects and web output
+/apps/mobile/*.xcodeproj/
+/apps/cloud-sync-helper/*.xcodeproj/
+/apps/website/.svelte-kit/
+/apps/website/build/
+/apps/website/test-results/

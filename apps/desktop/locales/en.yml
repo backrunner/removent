@@ -1,0 +1,331 @@
+# English (source locale) UI strings for the Removent app.
+_version: 1
+
+app.name: Removent
+
+home.name_placeholder: Name shown on the local network
+home.pin_placeholder: 6-digit code
+home.search_placeholder: Search name or IP
+home.manual_placeholder: "192.168.1.10"
+
+
+status.ready: Ready
+status.host_starting: Starting host service…
+status.daemon_starting: Starting removentd…
+status.host_stopping: Stopping host service…
+status.connecting_other: Another connection is in progress…
+status.connecting: "Connecting to %{name}…"
+status.connect_failed: "Connection failed: %{err}"
+status.admission_allowed: "Allowed %{peer}"
+status.admission_denied: "Denied %{peer}"
+status.pin_submitted: PIN submitted, negotiating…
+status.pairing_cancelled: Pairing cancelled
+status.device_name_empty: Device name cannot be empty
+status.settings_saved: Settings saved (device name applies after restarting the host service)
+status.settings_save_failed: "Failed to save settings: %{err}"
+status.pairing_busy: Pairing request received; finish the current PIN entry first
+status.pairing_done: "Paired with %{peer}"
+status.auto_admitted: "Auto-allowed %{peer} (auto-admit)"
+status.session_active: "Session active · %{name} · %{codec}"
+status.viewer_open_failed: "Failed to open session window: %{err}; see logs"
+status.peer_connected: "Peer connected · codec %{codec}"
+status.session_ended: "Session ended: %{reason}"
+status.host_session_started: "%{peer} connected (%{codec})"
+status.host_session_ended: "Peer session ended: %{reason}"
+status.admission_expired: Admission request timed out or was handled elsewhere
+status.host_running: Host service running
+status.host_stopped: Host service stopped
+status.daemon_offline: "Screen sharing is unavailable"
+status.daemon_offline_short: Daemon not connected
+status.admission_mode_updated: Admission mode updated
+status.vnc_updated: VNC settings updated (restart the host service to apply)
+status.connection_save_failed: "Failed to save the connection: %{err}"
+status.connection_removed: Saved connection removed
+
+err.session_in_progress: A session is already in progress
+err.frame_channel_missing: Frame channel missing
+
+session.input_overloaded: Connection closed because input delivery stalled. Please reconnect.
+session.peer_disconnected: Peer disconnected
+session.internal_error: Session internal error; terminated
+session.manually_disconnected: Disconnected manually
+
+notice.daemon_spawn_failed: "Failed to start removentd: %{err}"
+notice.daemon_start_timeout: removentd start timed out; host service not enabled
+notice.daemon_binary_missing: removentd executable not found
+notice.discovery_unavailable: "Service broadcast discovery unavailable: %{err} (enabled port scans and manual connections remain available)"
+
+manual.invalid_addr: Invalid address format, e.g. 192.168.1.10 or 192.168.1.10:7890
+
+device.paired: Paired
+device.unpaired: Not paired
+device.searching: "No devices nearby"
+device.searching_hint: Check LAN discovery settings and make sure the remote service is running on this network.
+device.no_match: No matching devices
+device.online: Online · connectable
+device.info: Device Info
+device.address: Address
+device.fingerprint: Fingerprint
+device.trust: Trust
+
+sharing.title: Share this Mac
+device.copy_fingerprint: Copy fingerprint
+
+
+permissions.screen_capture: Screen Recording
+permissions.accessibility: Accessibility
+permissions.screen_capture_purpose: Capture this screen to share with peers
+permissions.accessibility_purpose: Receive keyboard and mouse control from peers
+permissions.open_settings: Open System Settings
+permissions.daemon_restart_hint: The daemon (removentd) has not picked up the permission yet — toggle the host service off and on to restart it
+
+settings.title: Settings
+settings.general: General
+settings.device_name: Device Name
+settings.appearance: Appearance
+settings.theme.system: Follow System
+settings.theme.dark: Dark
+settings.theme.light: Light
+settings.language: Language
+settings.language.system: Follow System
+settings.security: Security
+settings.admission: Admission Control
+settings.admission.ask: "Ask each time"
+settings.admission.trusted: "Trusted devices"
+settings.admission.deny: "Block all"
+settings.vnc: Apple Remote Desktop / VNC
+settings.vnc_enabled: Enable VNC compatibility service
+settings.vnc_password: VNC Password
+settings.vnc_password_placeholder: Leave empty for no password
+settings.vnc_hint: This password is for sharing this Mac over VNC (port 5900). Enter remote credentials in Add connection.
+settings.data: Data
+settings.data_dir: Data Directory
+
+update.section: Software Update
+update.current: Current Version
+update.check_now: Check for Updates
+update.auto_check: Automatically check for updates
+update.channel: Update Channel
+update.channel_stable: Stable
+update.channel_beta: Beta
+update.channel_hint: Stable receives final releases; Beta also receives beta builds. Switching channels never downgrades your app.
+update.checking: Checking for updates…
+update.up_to_date: No newer version in this channel
+update.available: "New version available: %{version}"
+update.download_install: Download and Install
+update.downloading: "Downloading %{version}…"
+update.verifying: Verifying update…
+update.ready: "%{version} is ready to install"
+update.install_now: Install and Relaunch
+update.session_active_hint: A session is in progress — end it before installing
+update.installing: Installing… the app will relaunch automatically
+update.err.fetch: "Failed to fetch update info (%{err})"
+update.err.http_forbidden: "GitHub or the update server denied access; GitHub's anonymous API limit may have been reached (HTTP 403). Try again later"
+update.err.http_not_found: "Update info was not found (HTTP 404). Check the update URL and release channel"
+update.err.http_rate_limit: "The update server is rate limiting requests (HTTP 429). Try again later"
+update.err.dns: "Cannot resolve the update server or proxy address. Check your network and DNS settings"
+update.err.connect: "Cannot connect to the update server. Check your network or proxy settings"
+update.err.timeout: "The update request timed out. Check your network or try again later"
+update.err.tls: "Cannot establish a secure connection to the update server. Check your system clock, certificates and proxy settings"
+update.err.bad_manifest: "Invalid update manifest (%{err})"
+update.err.signature: Update signature verification failed; the download was discarded
+update.err.proto_mismatch: This update requires a newer protocol — please upgrade both ends together
+update.err.download: "Update download failed (%{err})"
+update.err.hash_mismatch: Update file hash mismatch; the download was discarded
+update.err.unpack: "Failed to unpack the update (%{err})"
+update.err.codesign: The update failed macOS code-signature verification and was discarded
+update.err.codesign_team: The update is signed by an unexpected developer team; discarded
+update.err.swap: "Failed to replace the app (%{err})"
+update.err.swap_rollback: "Failed to replace the app (%{err}) and the automatic rollback also failed — the previous version is preserved at %{backup}; move it back into place manually"
+update.err.not_in_bundle: Automatic install only works from an installed .app (this is a dev environment)
+update.err.session_active: A session is in progress; end it before installing
+update.err.busy: Wait for the current update operation before switching channels
+update.err.not_upgrade: This version is not a newer release in the selected channel; check for updates again
+
+action.connect: Connect
+action.cancel: Cancel
+action.close: Close
+action.pair: Pair
+action.allow: Allow
+action.deny: Deny
+action.open: Open
+action.save: Save
+action.edit: Edit
+action.back: Back
+
+pairing.request_title: Pairing Request
+pairing.display_desc: "Another device is requesting to pair. Share this PIN (valid for 5 minutes):"
+pairing.entry_title: Enter Pairing PIN
+pairing.entry_desc: "Enter the 6-digit code shown on the peer's screen:"
+
+admission.title: Connection Request
+admission.desc: If allowed, the peer can view and control this screen. No response within 30 seconds will deny automatically.
+
+viewer.fullscreen_tooltip: "Fullscreen (Ctrl+Cmd+F)"
+viewer.info_tooltip: "Show/hide performance info (Ctrl+Cmd+I)"
+viewer.info_title: Performance
+viewer.info_peer: Remote device
+viewer.info_protocol: Protocol / encoding
+viewer.info_duration: Session duration
+viewer.info_resolution: Remote resolution
+viewer.info_display_fps: Display rate
+viewer.info_frame_age: Last picture
+viewer.info_receive_fps: Receive rate
+viewer.info_receive_rate: Download
+viewer.info_received: Total received
+viewer.info_decode: Pixel processing
+viewer.info_update: Update receive + process
+viewer.info_input_pending: Queued inputs
+viewer.info_input_age: Oldest input waiting
+viewer.info_input_delay: Last input send time
+viewer.info_input_sent: Inputs sent
+viewer.info_coalesced: Pointer moves merged
+viewer.info_idle_hint: A still desktop can have a low frame rate on a healthy connection.
+viewer.info_input_hint: Send time measures local queuing through socket write, excluding the remote response. Only consecutive pointer moves are merged; keys and clicks stay ordered.
+viewer.disconnect_tooltip: "Disconnect (Ctrl+Cmd+Esc)"
+viewer.waiting: Waiting for video stream
+viewer.waiting_stream: Waiting for video stream…
+viewer.ended_title: Connection Closed
+viewer.ended_desc: The peer closed the session, or the network connection was interrupted.
+viewer.close_window: Close Window
+
+device.section: "Devices"
+device.nearby: "Nearby"
+device.this_mac: "This Mac"
+saved.section: "Saved"
+saved.subtitle: "Saved connection"
+saved.protocol: "Protocol"
+saved.remove: "Remove saved connection"
+saved.credentials_hint: "The password is stored in the macOS Keychain and filled in automatically when connecting."
+connection.title: "Remote connections"
+connection.add: "Add connection"
+connection.name: "Name (optional)"
+connection.name_placeholder: "e.g. Office Mac"
+connection.address: "Host"
+connection.host_placeholder: "IP address or hostname"
+connection.port: "Port"
+connection.username: "Username"
+connection.vnc_username: "macOS username (optional)"
+connection.password: "Password"
+connection.domain: "Domain"
+connection.optional: "Optional"
+connection.certificate_exception: "Allow untrusted server certificates for this connection"
+connection.connecting: "Connecting..."
+connection.invalid_host: "Enter an IP address or hostname, with the port in its own field."
+connection.invalid_port: "Enter a port between 1 and 65535."
+connection.username_required: "Enter an RDP username."
+sharing.description: "Allow approved devices to view and control this screen."
+permissions.granted: "Allowed"
+
+settings.subtitle: "Make your connections and workspace feel at home."
+settings.sharing: "Sharing"
+settings.system: "System"
+settings.general_description: "Make this Mac easy to find on your network."
+settings.device_name_hint: "The name other Removent devices see on your network."
+settings.language_hint: "Choose your interface language. Changes apply immediately."
+settings.appearance_description: "A comfortable view of your workspace."
+settings.color_mode: "Color mode"
+settings.theme_hint: "Follow macOS or choose a light or dark appearance."
+settings.preview_hint: "Current appearance preview"
+settings.security_description: "Decide which devices can access this Mac."
+settings.admission_hint: "Applies to connections using the Removent protocol."
+settings.admission.ask_hint: "Approve each connection on this Mac. Recommended for most setups."
+settings.admission.trusted_hint: "Paired devices connect automatically. New devices still need approval."
+settings.admission.deny_hint: "Reject all new Removent connection requests."
+settings.sharing_description: "Share this Mac with compatible clients."
+settings.sharing_scope_hint: "This switch controls the VNC server on this Mac. To connect to another Mac, choose VNC in Add Connection. Restart sharing after changing these settings."
+settings.system_description: "Local data, diagnostics, and application updates."
+settings.data_hint: "Settings, device identity, and diagnostic logs stay on this Mac."
+connection.subtitle: "Choose the connection available on your remote device."
+connection.removent_hint: "Fast Mac-to-Mac connections · Secure pairing"
+connection.vnc_hint: "macOS Screen Sharing · Standard VNC servers"
+connection.rdp_hint: "Windows Remote Desktop · RDP servers"
+connection.credentials_hint: "For macOS Screen Sharing, enter the remote Mac’s short account name and login password. Leave the username empty only when using a dedicated VNC password."
+connection.welcome: "Your devices. Within reach."
+connection.welcome_hint: "Connect to a Mac or PC on your local network and get to work."
+connection.lan_badge: "Local network"
+
+connection.stage_resolving: "Resolving address…"
+connection.stage_connecting: "Connecting to remote device…"
+connection.stage_negotiating: "Negotiating connection…"
+connection.stage_pairing: "Waiting for pairing PIN…"
+connection.stage_authenticating: "Authenticating with remote device…"
+connection.stage_desktop: "Preparing remote desktop…"
+connection.elapsed: "%{seconds}s"
+connection.waiting_hint: "The remote device is taking longer to respond. You can cancel at any time."
+connection.cancel_attempt: "Cancel connection"
+connection.cancel_and_close: "Cancel connection and close"
+connection.cancelled: "Connection cancelled"
+connection.cancelled_hint: "Connection cancelled. Your details are ready to edit and reconnect."
+connection.retry: "Try again"
+
+connection.vnc_tcp: "TCP connection"
+connection.vnc_greeting: "server greeting"
+connection.vnc_negotiation: "security negotiation"
+connection.vnc_authentication: "authentication"
+connection.vnc_desktop: "desktop initialization"
+connection.vnc_timeout: "VNC timed out during %{stage} after %{seconds} seconds. Check that Screen Sharing is enabled on the remote device."
+connection.vnc_auth_failed: "VNC authentication failed. Check the remote Mac account name and login password, or the dedicated VNC password."
+connection.vnc_refused: "The remote device refused the VNC connection. Check that Screen Sharing is enabled and the port is correct."
+
+settings.logs: "Local diagnostics"
+settings.logs_hint: "Connection stages, errors, and crash reports are saved on this Mac. Logs rotate automatically; passwords, pairing PINs, and clipboard contents are excluded."
+settings.open_logs: "Open Logs Folder"
+settings.open_logs_failed: "Could not open the logs folder: %{err}"
+
+connection.use_relay: "Connect through relay"
+connection.relay_room: "Host room ID"
+connection.relay_pin: "Relay certificate fingerprint (QUIC only)"
+connection.host_fingerprint: "Target host certificate fingerprint"
+connection.relay_credential: "Relay credential (optional)"
+connection.relay_trust_hint: "WSS verifies the relay certificate. QUIC requires its fingerprint. Get the host fingerprint from the host through a trusted channel. Without a credential, the relay must have your device public key registered. RVP pairing is still required."
+connection.fingerprint_placeholder: "64 hex characters from the host"
+connection.invalid_relay_pin: "QUIC requires a port and the relay’s full certificate fingerprint."
+connection.invalid_host_fingerprint: "Enter the target host’s full 64-character certificate fingerprint."
+connection.invalid_relay_credential: "Enter the relay’s 64-character credential, or leave empty for registered device authentication."
+connection.relay_credential_missing: "The relay credential is missing from Keychain; enter it again."
+connection.relay_credential_loading: "Reading the saved relay credential…"
+connection.relay_hint: "Use removent://host:port, or enable Connect through relay."
+connection.quic_pin_placeholder: "Required for QUIC; leave empty for Cloudflare / HTTPS"
+connection.invalid_relay: "Use removent://host:port without credentials, paths or query parameters."
+connection.relay_endpoint: "Relay address"
+connection.relay_transport: "Relay deployment"
+connection.relay_websocket: "Cloudflare / HTTPS"
+connection.relay_quic: "VPS / QUIC"
+
+settings.discovery: LAN discovery
+settings.discovery_description: Choose which protocols appear in Nearby. Changes apply immediately.
+settings.discovery_hint: Uses Bonjour/mDNS and scans the local IPv4 network for VNC (5900) and RDP (3389). Unadvertised custom ports can be added manually. Sharing this Mac is controlled separately.
+device.protocol: Protocol
+
+device.discovery_off: LAN discovery is off
+device.discovery_off_hint: Enable a protocol in Settings → LAN discovery, or add a connection manually.
+
+# Connection sync
+sync.title: "iCloud"
+sync.enabled: "Sync saved connections"
+sync.description: "Share connections with your devices using the same iCloud account."
+sync.subtitle: "Passwords, pairing and host settings stay on each device. Turning sync off keeps local connections."
+sync.off: "Off"
+sync.waiting: "Waiting to sync"
+sync.syncing: "Syncing…"
+sync.ready: "Up to date"
+sync.offline: "Waiting for a connection"
+sync.quota: "iCloud storage is full"
+sync.account: "Sign in to iCloud in System Settings"
+sync.configuration: "iCloud is unavailable in this build"
+sync.conflict: "Choose which changes to keep"
+sync.error: "Could not sync. Your local changes are saved."
+sync.pending: "Pending changes: %{count}"
+sync.retry: "Sync now"
+sync.last: "Last synced %{minutes} minutes ago"
+sync.deleted: "Deleted"
+sync.local_version: "This device: %{value}"
+sync.cloud_version: "iCloud: %{value}"
+sync.keep_local: "Keep this device’s version"
+sync.use_cloud: "Use iCloud version"
+sync.upgrade_required: Update Removent to continue syncing
+
+sync.relay: "Relay"
+sync.relay_fingerprint: "Relay fingerprint"
+sync.host_fingerprint: "Host fingerprint"

@@ -15,7 +15,7 @@ Sources and deliverables:
 - `AppIcon-AppStore-1024.png`: opaque square RGB master without a baked outer mask.
 - `AppIcon-preview.png`: appearance on light/dark surfaces and at smaller sizes.
 
-`python3 scripts/branding.py` reproducibly renders SVG layers at 2048px, adds soft
+`python3 scripts/release/branding.py` reproducibly renders SVG layers at 2048px, adds soft
 shadows, then downsamples to delivery sizes. CairoSVG, Pillow and Apple's iconutil
 are required. No image generation API was used.
 

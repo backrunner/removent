@@ -9,39 +9,93 @@ struct SessionView: View {
     @State private var clipboard = false
     @State private var clipboardText = ""
     @State private var gestures = false
+    @State private var actions = false
+    @State private var actionsPresented = false
+    private enum PendingSheet { case clipboard, gestures }
+    @State private var pendingSheet: PendingSheet?
+    @State private var controlsVisible = true
+    @State private var activity = UUID()
+    @State private var keyboardFrame = CGRect.zero
+    @State private var windowSize = CGSize.zero
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var pinFocused: Bool
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .topLeading) {
-                RemoteCanvas(model: model, keyboard: $keyboard, modifiers: $modifiers)
-                    .accessibilityIdentifier("remoteCanvas")
-                    .accessibilityLabel(L("Remote desktop", "远程桌面"))
-                    .accessibilityValue("\(model.receivedFrames)")
-                if !model.ready { connectionState }
-                if model.ready && (stats || model.error != nil) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if stats {
-                            Text("\(Int(model.frameSize.width)) × \(Int(model.frameSize.height)) · \(model.fps) fps · \(model.codec)\n\(model.receivedFrames) \(L("frames", "帧"))")
-                                .font(.caption.monospacedDigit())
+            GeometryReader { safeGeometry in
+                GeometryReader { geometry in
+                    // The actual window stays full-sized when UIKit changes its
+                    // keyboard/home-indicator insets, but follows real rotation
+                    // and iPad window resizing, including hardware keyboard use.
+                    let viewport = Self.viewportSize(available: geometry.size, window: windowSize, ready: model.ready)
+                    let landscape = windowSize.width > 0 && abs(windowSize.width - geometry.size.width) < 1 ?
+                        windowSize.width > windowSize.height : geometry.size.width > geometry.size.height
+                    let viewportHeight = viewport.height
+                    let frame = CGRect(origin: geometry.frame(in: .global).origin, size: viewport)
+                    let keyboardHeight = keyboardFrame.maxY >= frame.maxY - 1 ? max(0, frame.maxY - max(frame.minY, keyboardFrame.minY)) : 0
+                    ZStack(alignment: .topLeading) {
+                        RemoteCanvas(model: model, keyboard: $keyboard, modifiers: $modifiers,
+                                     fillsScreen: model.ready && landscape,
+                                     keyboardFocusAllowed: !actions && !actionsPresented && !clipboard && !gestures && pendingSheet == nil,
+                                     onInteraction: revealControls,
+                                     onWindowSizeChange: { windowSize = $0 },
+                                     onKeyboardFrameChange: { keyboardFrame = $0 })
+                            .frame(width: viewport.width, height: max(1, viewportHeight - (landscape && model.ready ? 0 : keyboardHeight)))
+                            .accessibilityIdentifier("remoteCanvas")
+                            .accessibilityLabel(L("Remote desktop", "远程桌面"))
+                            .accessibilityValue("\(model.receivedFrames)")
+                        if !model.ready { connectionState }
+                        if model.ready && (stats || model.error != nil) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                if stats {
+                                    Text("\(Int(model.frameSize.width)) × \(Int(model.frameSize.height)) · \(model.fps) fps · \(model.codec)\n\(model.receivedFrames) \(L("frames", "帧"))")
+                                        .font(.caption.monospacedDigit())
+                                }
+                                if let error = model.error {
+                                    HStack(alignment: .top) {
+                                        Label(error, systemImage: "exclamationmark.circle").font(.footnote)
+                                        Button(L("Dismiss", "关闭提示"), systemImage: "xmark") { model.error = nil }
+                                            .labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+                                    }
+                                }
+                            }
+                            .padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                            .padding(12).padding(.top, model.ready ? safeGeometry.safeAreaInsets.top + 64 : 0)
                         }
-                        if let error = model.error {
-                            HStack(alignment: .top) {
-                                Label(error, systemImage: "exclamationmark.circle").font(.footnote)
-                                Button(L("Dismiss", "关闭提示"), systemImage: "xmark") { model.error = nil }
-                                    .labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+                        if model.ready {
+                            VStack {
+                                sessionHeader
+                                Spacer(minLength: 0)
+                                controls
+                            }
+                            .padding(.horizontal, max(12, max(safeGeometry.safeAreaInsets.leading, safeGeometry.safeAreaInsets.trailing)))
+                            .padding(.top, safeGeometry.safeAreaInsets.top + 8)
+                            .padding(.bottom, max(safeGeometry.safeAreaInsets.bottom, keyboardHeight) + 8)
+                            .opacity(controlsVisible ? 1 : 0)
+                            .allowsHitTesting(controlsVisible)
+                            .accessibilityHidden(!controlsVisible)
+                            if !controlsVisible {
+                                Button(action: revealControls) {
+                                    Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
+                                }
+                                    .modifier(SessionGlass())
+                                    .padding(.top, safeGeometry.safeAreaInsets.top + 8)
+                                    .padding(.trailing, max(12, safeGeometry.safeAreaInsets.trailing))
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                                    .accessibilityLabel(L("Show controls", "显示操作栏"))
+                                    .accessibilityIdentifier("showSessionControls")
                             }
                         }
                     }
-                    .padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-                    .padding(12)
+                    .frame(width: viewport.width, height: viewportHeight, alignment: .topLeading)
+                    .background(.black)
                 }
+                .ignoresSafeArea(.container, edges: model.ready ? .all : [])
             }
-            .background(.black)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if model.ready { controls.padding(.horizontal, 12).padding(.vertical, 8) }
-            }
+            .ignoresSafeArea(.keyboard, edges: model.ready ? .all : [])
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(model.ready ? .hidden : .visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { model.disconnect() } label: { Image(systemName: "xmark") }
@@ -56,31 +110,95 @@ struct SessionView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Toggle(L("Performance", "性能信息"), systemImage: "chart.bar", isOn: $stats)
-                        if model.remoteAudio { Toggle(L("Mute audio", "静音"), systemImage: "speaker.slash", isOn: $model.muted) }
-                        if model.remoteClipboard {
-                            Button(L("Clipboard", "剪贴板"), systemImage: "doc.on.clipboard") { keyboard = false; clipboard = true }
-                        }
-                        if model.canRefresh {
-                            Button(L("Refresh picture", "刷新画面"), systemImage: "arrow.clockwise") { model.refresh() }
-                        }
-                        Button(L("Touch gestures", "触控手势"), systemImage: "hand.draw") { keyboard = false; gestures = true }
-                    } label: { Image(systemName: "ellipsis") }
-                        .accessibilityLabel(L("Session actions", "会话操作"))
-                        .disabled(!model.ready).accessibilityIdentifier("sessionMenu")
+                    actionsButton
                 }
             }
         }
+        .ignoresSafeArea(.keyboard, edges: model.ready ? .all : [])
         .onChange(of: model.ready) { _, ready in
-            if !ready { keyboard = false; modifiers = 0; clipboard = false }
+            if !ready {
+                keyboard = false; modifiers = 0; keyboardFrame = .zero
+                clipboard = false; gestures = false; actions = false; actionsPresented = false
+                pendingSheet = nil
+            }
+            revealControls()
+        }
+        .onChange(of: keyboard) { _, _ in revealControls() }
+        .onChange(of: actions) { _, value in
+            if value { actionsPresented = true }
+            revealControls()
+        }
+        .onChange(of: clipboard) { _, _ in revealControls() }
+        .onChange(of: gestures) { _, _ in revealControls() }
+        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.voiceOverStatusDidChangeNotification)) { _ in revealControls() }
+        .task(id: activity) {
+            guard model.ready, !keyboard, !actions, !actionsPresented, !clipboard, !gestures, !UIAccessibility.isVoiceOverRunning else { return }
+            do { try await Task.sleep(for: .seconds(4)) } catch { return }
+            guard !Task.isCancelled, model.ready, !keyboard, !actions, !actionsPresented, !clipboard, !gestures, !UIAccessibility.isVoiceOverRunning else { return }
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) { controlsVisible = false }
         }
         .onChange(of: model.needsPIN) { _, _ in pin = ""; pinFocused = false }
         .sheet(isPresented: $clipboard) { clipboardSheet }
         .sheet(isPresented: $gestures) { gestureSheet }
+        .sheet(isPresented: $actions, onDismiss: finishSessionAction) { sessionActionsSheet }
+        // The keyboard leaves little vertical room for session controls in
+        // landscape. Keep those targets usable; forms retain the user's size.
+        .dynamicTypeSize(model.ready ? min(dynamicTypeSize, .xxxLarge) : dynamicTypeSize)
+        .statusBarHidden(model.ready)
         // The desktop canvas is always black; keep its navigation and controls
         // legible even when the rest of the app follows a light appearance.
         .preferredColorScheme(.dark)
+    }
+
+    static func viewportSize(available: CGSize, window: CGSize, ready: Bool) -> CGSize {
+        let fallback = CGSize(width: available.width.isFinite ? max(1, available.width) : 1,
+                              height: available.height.isFinite ? max(1, available.height) : 1)
+        guard ready, abs(window.width - available.width) < 1, window.width > window.height,
+              window.width > 0, window.height > 0 else { return fallback }
+        return window
+    }
+
+    private func revealControls() {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { controlsVisible = true }
+        activity = UUID()
+    }
+    private func finishSessionAction() {
+        actionsPresented = false
+        let destination = pendingSheet
+        pendingSheet = nil
+        revealControls()
+        guard model.ready else { return }
+        switch destination {
+        case .clipboard: clipboard = true
+        case .gestures: gestures = true
+        case nil: break
+        }
+    }
+    private var actionsButton: some View {
+        Button { actions = true } label: {
+            Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+            .accessibilityLabel(L("Session actions", "会话操作"))
+            .disabled(!model.ready).accessibilityIdentifier("sessionMenu")
+    }
+    private var sessionHeader: some View {
+        HStack {
+            Button { model.disconnect() } label: {
+                Image(systemName: "xmark").frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+                .accessibilityLabel(L("Disconnect", "断开连接"))
+                .accessibilityIdentifier("disconnectButton")
+            Spacer(minLength: 8)
+            VStack(spacing: 2) {
+                Text(model.sessionTitle).font(.headline).lineLimit(1)
+                Text(model.status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .accessibilityIdentifier("sessionStatus")
+            }
+            Spacer(minLength: 8)
+            actionsButton
+        }
+        .padding(6).modifier(SessionGlass()).frame(maxWidth: 780)
+        .accessibilityElement(children: .contain)
     }
 
     private var connectionState: some View {
@@ -118,7 +236,7 @@ struct SessionView: View {
                     }
                 }
                 .frame(maxWidth: 420).padding(24)
-                .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height.isFinite ? max(0, geometry.size.height) : 0)
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Color(uiColor: .systemGroupedBackground))
@@ -127,8 +245,10 @@ struct SessionView: View {
 
     private var controls: some View {
         HStack(spacing: 4) {
-            Button { keyboard.toggle() } label: { Image(systemName: keyboard ? "keyboard.chevron.compact.down" : "keyboard") }
-                .frame(minWidth: 48, minHeight: 44)
+            Button { keyboard.toggle() } label: {
+                Image(systemName: keyboard ? "keyboard.chevron.compact.down" : "keyboard")
+                    .frame(width: 48, height: 44).contentShape(Rectangle())
+            }
                 .accessibilityLabel(L("Keyboard", "键盘"))
                 .accessibilityValue(keyboard ? L("Shown", "已显示") : L("Hidden", "已隐藏"))
                 .accessibilityIdentifier("remoteKeyboard")
@@ -151,13 +271,14 @@ struct SessionView: View {
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("remoteKeys")
         }
-        .font(.body.weight(.medium)).buttonStyle(.plain).foregroundStyle(.primary)
-        .padding(8).modifier(SessionGlass())
+        .font(.callout.weight(.medium)).buttonStyle(.plain).foregroundStyle(.primary)
+        .padding(6).modifier(SessionGlass())
         .frame(maxWidth: 780)
+        .accessibilityElement(children: .contain)
     }
     private func modifier(_ title: String, name: String, bit: Int) -> some View {
         let selected = modifiers & bit != 0
-        return Button(title) { modifiers ^= bit }
+        return Button(title) { modifiers ^= bit; revealControls() }
             .padding(.horizontal, 8).frame(minWidth: 44, minHeight: 44)
             .background(selected ? Color.accentColor.opacity(0.22) : .clear, in: RoundedRectangle(cornerRadius: 12))
             .overlay(alignment: .bottom) {
@@ -167,7 +288,7 @@ struct SessionView: View {
             .accessibilityAddTraits(selected ? .isSelected : [])
     }
     private func key(_ title: String, name: String, code: Int) -> some View {
-        Button(title) { model.key(code, modifiers: modifiers) }
+        Button(title) { model.key(code, modifiers: modifiers); revealControls() }
             .padding(.horizontal, 8).frame(minWidth: 44, minHeight: 44)
             .accessibilityLabel(name).accessibilityIdentifier(title)
     }
@@ -192,9 +313,37 @@ struct SessionView: View {
                     Section { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.red) }
                 }
             }
+            .modifier(SessionContentWidth())
             .navigationTitle(L("Clipboard", "剪贴板")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L("Done", "完成")) { clipboard = false } } }
         }
+        .dynamicTypeSize(dynamicTypeSize)
+    }
+    private var sessionActionsSheet: some View {
+        NavigationStack {
+            List {
+                Button(stats ? L("Hide performance", "隐藏性能信息") : L("Performance", "性能信息")) {
+                    stats.toggle(); actions = false
+                }
+                if model.remoteAudio {
+                    Button(model.muted ? L("Unmute audio", "取消静音") : L("Mute audio", "静音")) {
+                        model.muted.toggle(); actions = false
+                    }
+                }
+                if model.remoteClipboard {
+                    Button(L("Clipboard", "剪贴板")) { keyboard = false; pendingSheet = .clipboard; actions = false }
+                }
+                if model.canRefresh {
+                    Button(L("Refresh picture", "刷新画面")) { model.refresh(); actions = false }
+                }
+                Button(L("Touch gestures", "触控手势")) { keyboard = false; pendingSheet = .gestures; actions = false }
+            }
+            .accessibilityIdentifier("sessionActionsList")
+            .modifier(SessionContentWidth())
+            .navigationTitle(L("Session actions", "会话操作")).navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L("Done", "完成")) { actions = false } } }
+        }
+        .dynamicTypeSize(dynamicTypeSize)
     }
     private var gestureSheet: some View {
         NavigationStack {
@@ -206,14 +355,23 @@ struct SessionView: View {
                 LabeledContent(L("Zoom", "缩放"), value: L("Pinch", "双指捏合"))
                 LabeledContent(L("Pan zoomed picture", "平移放大画面"), value: L("Three-finger swipe", "三指滑动"))
             }
+            .modifier(SessionContentWidth())
             .navigationTitle(L("Touch gestures", "触控手势")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L("Done", "完成")) { gestures = false } } }
         }
+        .dynamicTypeSize(dynamicTypeSize)
     }
 }
 
 private struct SessionGlass: ViewModifier {
     func body(content: Content) -> some View {
         content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24))
+    }
+}
+
+private struct SessionContentWidth: ViewModifier {
+    func body(content: Content) -> some View {
+        content.frame(maxWidth: 720).frame(maxWidth: .infinity)
+            .background(Color(uiColor: .systemGroupedBackground))
     }
 }

@@ -74,6 +74,14 @@ final class ConnectionTests: XCTestCase {
     }
 
     func testRVPVideoAndInput() async throws {
+        try await rvpVideoAndInput()
+    }
+
+    func testRVPVideoAndInputAtMaximumDynamicType() async throws {
+        try await rvpVideoAndInput(contentSize: "UICTContentSizeCategoryAccessibilityXXXL")
+    }
+
+    private func rvpVideoAndInput(contentSize: String? = nil) async throws {
         // Start `cargo run -p removent-host --example mobile_fixture` first.
         let url = URL(string:"http://127.0.0.1:48690")!
         guard let (data,_) = try? await URLSession.shared.data(from:url),
@@ -82,14 +90,35 @@ final class ConnectionTests: XCTestCase {
         }
         let before = initial["inputs"] as? Int ?? 0
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchArguments = ["--ui-testing", "--ui-testing-fresh", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if let contentSize { app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSize] }
         app.launch()
         app.buttons["addConnection"].tap()
         let host = app.textFields["connectionHost"]
         XCTAssertTrue(host.waitForExistence(timeout:5)); host.tap(); host.typeText("127.0.0.1")
+        if contentSize != nil, app.buttons["dismissKeyboard"].exists { app.buttons["dismissKeyboard"].tap() }
         let port = app.textFields["connectionPort"]
-        port.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
+        if contentSize != nil {
+            let form = app.collectionViews.containing(.textField, identifier: "connectionPort").firstMatch
+            // A partly visible field can be hittable while the trailing tap
+            // point is covered by the navigation bar or fixed Connect footer.
+            for _ in 0..<8 {
+                let top = app.navigationBars["Connection"].frame.maxY + 16
+                let bottom = app.buttons["connectButton"].frame.minY - 16
+                let field = port.frame
+                if field.minY >= top && field.maxY <= bottom { break }
+                let delta = min(100, max(-100, (top + bottom) / 2 - field.midY))
+                let start = form.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: delta)))
+            }
+        }
+        port.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: contentSize == nil ? 0.5 : 0.85)).tap()
         port.typeText(String(repeating:XCUIKeyboardKey.delete.rawValue,count:5) + "48689")
+        XCTAssertEqual(port.value as? String, "48689")
+        if contentSize != nil {
+            if app.buttons["dismissKeyboard"].exists { app.buttons["dismissKeyboard"].tap() }
+            for _ in 0..<5 where !app.buttons["connectButton"].isHittable { app.swipeUp() }
+        }
         app.buttons["connectButton"].tap()
         let pinField = app.textFields["pairingPIN"]
         if pinField.waitForExistence(timeout:12) {
@@ -107,7 +136,12 @@ final class ConnectionTests: XCTestCase {
         canvas.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
         app.buttons["Esc"].tap()
         app.buttons["remoteKeyboard"].tap()
-        app.typeText("test\n")
+        app.buttons["remoteKey-t"].tap()
+        let (letterData, _) = try await URLSession.shared.data(from: url)
+        let letterStatus = try JSONSerialization.jsonObject(with: letterData) as! [String: Any]
+        XCTAssertEqual(letterStatus["typed_text"] as? String, (initial["typed_text"] as? String ?? "") + "t", "The first letter reaches the host before any word is committed")
+        for letter in ["e", "s", "t"] { app.buttons["remoteKey-\(letter)"].tap() }
+        app.buttons["remoteReturn"].tap()
         app.buttons["remoteKeyboard"].tap()
         let capture = XCTAttachment(screenshot:XCUIScreen.main.screenshot()); capture.name = "RVP mobile connected"
         capture.lifetime = .keepAlways; add(capture)
@@ -115,6 +149,7 @@ final class ConnectionTests: XCTestCase {
         let (finalData,_) = try await URLSession.shared.data(from:url)
         let final = try JSONSerialization.jsonObject(with:finalData) as! [String:Any]
         XCTAssertGreaterThanOrEqual(final["inputs"] as? Int ?? 0, before + 8)
+        XCTAssertEqual(final["typed_text"] as? String, (initial["typed_text"] as? String ?? "") + "test")
         XCUIDevice.shared.press(.home)
         app.activate()
         let reconnect = app.buttons["Reconnect"]
@@ -124,8 +159,84 @@ final class ConnectionTests: XCTestCase {
         await fulfillment(of: [expectation(for: frames, evaluatedWith: canvas)], timeout: 15)
         XCUIDevice.shared.orientation = .landscapeLeft
         try await Task.sleep(for: .seconds(1))
+        let fullFrame = canvas.frame
+        XCTAssertEqual(fullFrame.width, app.frame.width, accuracy: 1)
+        XCTAssertEqual(fullFrame.height, app.frame.height, accuracy: 1)
         self.capture(app, "RVP landscape after reconnect")
+        let reveal = app.buttons["showSessionControls"]
+        XCTAssertTrue(reveal.waitForExistence(timeout: 6), "Session controls fade after idle")
+        XCTAssertFalse(app.buttons["remoteKeyboard"].isHittable)
+        reveal.tap()
+        canvas.pinch(withScale: 1.25, velocity: 1)
+        let picture = canvas.images.firstMatch
+        let zoomedFrame = picture.frame
+        XCTAssertGreaterThan(zoomedFrame.width, fullFrame.width)
+        if reveal.exists { reveal.tap() }
+        XCTAssertLessThan(app.buttons["remoteKeyboard"].frame.width, 80, "Keyboard accessibility target must cover its own button")
+        app.buttons["remoteKeyboard"].tap()
+        XCTAssertTrue(app.buttons["remoteKey-q"].waitForExistence(timeout: 5))
+        XCTAssertEqual(canvas.frame, fullFrame, "Landscape keyboard must overlay without shrinking the canvas")
+        XCTAssertEqual(picture.frame, zoomedFrame, "Opening the keyboard must preserve picture scale and position")
+        XCTAssertFalse(app.buttons["Next keyboard"].exists)
+        app.buttons["remoteKey-q"].tap()
+        app.buttons["remoteKeyboardPage"].tap()
+        app.buttons["remoteKey-1"].tap()
+        app.buttons["remoteKeyboardPage"].tap()
+        app.buttons["remoteBackspace"].tap()
+        app.buttons["Control"].tap()
+        app.buttons["remoteShift"].tap()
+        app.buttons["remoteKey-Q"].tap()
+        app.buttons["remoteKeyboardPage"].tap()
+        app.buttons["remoteKey-?"].tap()
+        let (shortcutData, _) = try await URLSession.shared.data(from: url)
+        let shortcutStatus = try JSONSerialization.jsonObject(with: shortcutData) as! [String: Any]
+        let shortcuts = try XCTUnwrap(shortcutStatus["keys"] as? [[String: Any]])
+        XCTAssertEqual(shortcuts.suffix(4).compactMap { $0["code"] as? Int }, [12, 12, 44, 44])
+        XCTAssertEqual(shortcuts.suffix(4).compactMap { $0["modifiers"] as? Int }, [6, 0, 6, 0], "Ctrl + uppercase/symbol keys must retain Shift")
+        XCTAssertEqual(shortcuts.suffix(4).compactMap { $0["down"] as? Bool }, [true, false, true, false])
+        app.buttons["Control"].tap()
+        app.buttons["remoteKeyboardPage"].tap()
+        app.buttons["remoteShift"].tap()
+        self.capture(app, "RVP landscape English keyboard without canvas resize")
+        app.buttons["hideRemoteKeyboard"].tap()
+        XCTAssertTrue(app.buttons["remoteKey-q"].waitForNonExistence(timeout: 5))
+        XCTAssertEqual(canvas.frame, fullFrame)
+        XCTAssertEqual(picture.frame, zoomedFrame, "Closing the keyboard must preserve picture scale and position")
+        // Keyboard dismissal can take longer than the idle timeout on iPad.
+        // Reveal the controls through the same affordance used by a person.
+        if app.buttons["showSessionControls"].exists { app.buttons["showSessionControls"].tap() }
+        XCTAssertTrue(app.buttons["remoteKeyboard"].isHittable)
+        app.buttons["remoteKeyboard"].tap()
+        XCTAssertTrue(app.buttons["remoteKey-q"].waitForExistence(timeout: 5))
         XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(app.buttons["remoteKey-q"].waitForExistence(timeout: 5))
+        XCTAssertEqual(canvas.frame.width, app.frame.width, accuracy: 1)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(app.buttons["remoteKey-q"].waitForExistence(timeout: 5))
+        XCTAssertEqual(canvas.frame, fullFrame, "Rotation with the keyboard open must use the current window")
+        app.buttons["sessionMenu"].tap()
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["remoteKey-q"].waitForExistence(timeout: 5), "Closing actions must restore the desired English keyboard")
+        app.buttons["sessionMenu"].tap()
+        let gestureAction = app.buttons["Touch gestures"]
+        let actionList = app.collectionViews["sessionActionsList"]
+        XCTAssertTrue(actionList.waitForExistence(timeout: 5))
+        try await Task.sleep(for: .seconds(5))
+        for _ in 0..<5 where !gestureAction.exists || !gestureAction.isHittable { actionList.swipeUp() }
+        self.capture(app, "Session actions after keyboard focus released")
+        XCTAssertTrue(gestureAction.isHittable, "The menu must stay usable past the fade timeout while the keyboard was shown")
+        gestureAction.tap()
+        XCTAssertTrue(app.staticTexts["Click"].waitForExistence(timeout: 5), "Choosing gestures must present its sheet after the actions sheet closes")
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["remoteKey-q"].waitForNonExistence(timeout: 5))
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(reconnect.waitForExistence(timeout: 5), "A disconnected session must dismiss its gesture sheet")
+        reconnect.tap()
+        await fulfillment(of: [expectation(for: connected, evaluatedWith: status)], timeout: 20)
+        XCUIDevice.shared.orientation = .portrait
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         app.buttons["disconnectButton"].tap()
         XCTAssertTrue(app.buttons["addConnection"].waitForExistence(timeout:5))
     }

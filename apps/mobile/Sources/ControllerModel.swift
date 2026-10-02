@@ -55,6 +55,9 @@ final class ControllerModel: ObservableObject {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
                 directory = directory.appendingPathComponent("UITests", isDirectory: true)
+                if ProcessInfo.processInfo.arguments.contains("--ui-testing-fresh") {
+                    directory = directory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                }
             }
             #endif
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,

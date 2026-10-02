@@ -109,7 +109,7 @@ final class ControllerTests: XCTestCase {
         XCTAssertNotNil(model.onFrame, "The canvas must stay subscribed for reconnect")
     }
 
-    func testIMEBackspaceAndSoftwareReturn() {
+    func testDirectEnglishInputWithoutComposition() {
         let keyboard = RemoteKeyboard()
         var deletions = 0
         var text: [String] = []
@@ -117,15 +117,86 @@ final class ControllerTests: XCTestCase {
         keyboard.backspace = { deletions += 1 }
         keyboard.sendText = { text.append($0) }
         keyboard.sendKey = { code, _, down in if down { keys.append(code) } }
-        keyboard.setMarkedText("ni", selectedRange: NSRange(location: 2, length: 0))
-        XCTAssertNotNil(keyboard.markedTextRange)
-        keyboard.deleteBackward()
-        XCTAssertEqual(deletions, 0)
-        XCTAssertTrue(text.isEmpty)
-        keyboard.unmarkText()
+        keyboard.insertText("ni")
+        XCTAssertEqual(text, ["n", "i"], "Each letter must be sent immediately")
+        keyboard.insertText("中文é🙂")
+        XCTAssertEqual(text, ["n", "i"], "Non-ASCII input is rejected")
+        keyboard.insertText(" A1!\n\t")
+        XCTAssertEqual(text, ["n", "i", " ", "A", "1", "!"])
         keyboard.deleteBackward()
         XCTAssertEqual(deletions, 1)
-        XCTAssertFalse(keyboard.textView(keyboard, shouldChangeTextIn: NSRange(location: 0, length: 0), replacementText: "\n"))
-        XCTAssertEqual(keys, [36])
+        XCTAssertEqual(keys, [36, 48])
+        XCTAssertTrue(keyboard.inputView is EnglishKeyboardView)
+        XCTAssertFalse(keyboard is UITextInput)
+    }
+
+    func testHardwareKeyboardUsesEnglishPhysicalKeys() {
+        XCTAssertEqual(RemoteKeyboard.englishCharacter(.keyboardA, modifiers: []), "a")
+        XCTAssertEqual(RemoteKeyboard.englishCharacter(.keyboardA, modifiers: [.shift]), "A")
+        XCTAssertEqual(RemoteKeyboard.englishCharacter(.keyboardA, modifiers: [.alphaShift]), "A")
+        XCTAssertEqual(RemoteKeyboard.englishCharacter(.keyboardA, modifiers: [.alphaShift, .shift]), "a")
+        XCTAssertEqual(RemoteKeyboard.englishCharacter(.keyboard1, modifiers: [.shift]), "!")
+        XCTAssertNil(RemoteKeyboard.englishCharacter(.keyboardEscape, modifiers: []))
+    }
+
+    func testShiftedEnglishShortcutsKeepTheirPhysicalKeyAndShift() throws {
+        for (character, code) in [("A", 0), ("!", 18), ("?", 44), (":", 41), ("{", 33), ("~", 50)] {
+            let key = try XCTUnwrap(RemoteKeyboard.macKeyStroke(for: character.unicodeScalars.first!))
+            XCTAssertEqual(key.code, code)
+            XCTAssertEqual(key.modifiers, 2, "Ctrl/Option + \(character) must retain Shift")
+        }
+        XCTAssertEqual(RemoteKeyboard.macKeyStroke(for: "a")?.modifiers, 0)
+        for value in 32...126 {
+            XCTAssertNotNil(RemoteKeyboard.macKeyStroke(for: Unicode.Scalar(value)!), "Every printable ASCII key must support shortcuts")
+        }
+        XCTAssertNil(RemoteKeyboard.macKeyStroke(for: "中"))
+    }
+
+    func testLandscapeViewportUsesCurrentWindowAcrossKeyboardAndResize() {
+        let original = CGSize(width: 874, height: 402)
+        XCTAssertEqual(SessionView.viewportSize(available: CGSize(width: 874, height: 382), window: original, ready: true), original)
+        let resized = CGSize(width: 874, height: 350)
+        XCTAssertEqual(SessionView.viewportSize(available: CGSize(width: 874, height: 330), window: resized, ready: true), resized)
+        let portrait = CGSize(width: 402, height: 874)
+        let portraitWithKeyboard = CGSize(width: 402, height: 614)
+        XCTAssertEqual(SessionView.viewportSize(available: portraitWithKeyboard, window: portrait, ready: true), portraitWithKeyboard)
+        XCTAssertEqual(SessionView.viewportSize(available: portrait, window: original, ready: true), portrait, "Do not use a stale window orientation")
+        XCTAssertEqual(SessionView.viewportSize(available: .zero, window: original, ready: false), CGSize(width: 1, height: 1))
+        XCTAssertEqual(SessionView.viewportSize(available: CGSize(width: CGFloat.nan, height: -20), window: .zero, ready: false), CGSize(width: 1, height: 1))
+    }
+
+    func testEnglishKeyboardTitlesAndDirectInputSurvivePageChanges() throws {
+        let receiver = RemoteKeyboard()
+        var text: [String] = []
+        receiver.sendText = { text.append($0) }
+        let input = try XCTUnwrap(receiver.inputView)
+        func buttons(in view: UIView) -> [UIButton] {
+            (view as? UIButton).map { [$0] } ?? view.subviews.flatMap { buttons(in: $0) }
+        }
+        func press(_ id: String) throws {
+            let button = try XCTUnwrap(buttons(in: input).first { $0.accessibilityIdentifier == id })
+            XCTAssertFalse(button.configuration?.title?.isEmpty ?? true)
+            button.sendActions(for: .primaryActionTriggered)
+        }
+        try press("remoteShift"); try press("remoteKey-A")
+        try press("remoteKeyboardPage"); try press("remoteKey-1")
+        try press("remoteShift"); try press("remoteKey-~")
+        try press("remoteKeyboardPage"); try press("remoteShift"); try press("remoteKey-z")
+        XCTAssertEqual(text, ["A", "1", "~", "z"])
+        XCTAssertTrue(buttons(in: input).allSatisfy { !($0.configuration?.title?.isEmpty ?? true) })
+    }
+
+    func testLandscapeFillPreservesAspectAndRemoteCoordinates() {
+        let remote = CGSize(width: 1920, height: 1080)
+        let viewport = CGSize(width: 852, height: 393)
+        let fill = CanvasView.displaySize(remoteSize: remote, viewport: viewport, fill: true)
+        XCTAssertEqual(fill.width, viewport.width, accuracy: 0.01)
+        XCTAssertGreaterThan(fill.height, viewport.height)
+        XCTAssertEqual(fill.width / fill.height, remote.width / remote.height, accuracy: 0.001)
+        let center = CanvasView.remotePoint(CGPoint(x: fill.width / 2, y: fill.height / 2), imageSize: fill, remoteSize: remote)
+        XCTAssertEqual(center, CGPoint(x: 960, y: 540))
+        let fit = CanvasView.displaySize(remoteSize: remote, viewport: viewport, fill: false)
+        XCTAssertEqual(fit.height, viewport.height, accuracy: 0.01)
+        XCTAssertLessThan(fit.width, viewport.width)
     }
 }

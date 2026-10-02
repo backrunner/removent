@@ -179,6 +179,14 @@ credentials, Bonjour discovery, text clipboard, optional remote audio, and relay
 routing are included. Build steps and the simulator acceptance fixture are in
 the mobile README.
 
+Connected sessions fill the landscape
+display with preserved aspect ratio and floating controls that fade after four
+idle seconds. The fixed English session keyboard sends ASCII characters directly,
+without language switching or IME candidates; opening it in landscape preserves
+the picture's size and zoom. Session controls cap text scaling at XXXL to stay
+usable above the keyboard; forms and sheets retain full Dynamic Type. See the
+[mobile session validation](docs/validation/mobile-session-2026-10-02.md).
+
 ## Build from source
 
 Requires a stable Rust toolchain (1.89+, required by IronRDP) and full Xcode with Swift and the Metal toolchain.

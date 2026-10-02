@@ -35,8 +35,32 @@ async fn main() -> anyhow::Result<()> {
         while let Ok((mut stream, _)) = listener.accept().await {
             let mut request = [0; 1024];
             let _ = stream.read(&mut request).await;
+            let typed_text: String = status_input
+                .events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|event| match event {
+                    removent_host::RecordedInput::Key {
+                        kind: removent_proto::KeyKind::Down,
+                        unicode: Some(ch),
+                        ..
+                    } => Some(*ch),
+                    _ => None,
+                })
+                .collect();
+            let keys: Vec<_> = status_input.events.lock().unwrap().iter().filter_map(|event| {
+                match event {
+                    removent_host::RecordedInput::Key { vk, mods, kind, unicode: None } => Some(serde_json::json!({
+                        "code":vk, "modifiers":mods.bits(), "down":*kind == removent_proto::KeyKind::Down
+                    })),
+                    _ => None,
+                }
+            }).collect();
             let body = serde_json::json!({"pin":*status_pin.lock().unwrap(),
                 "inputs":status_input.events.lock().unwrap().len(),
+                "typed_text":typed_text,
+                "keys":keys,
                 "clipboard":status_clip.read().unwrap_or_default()})
             .to_string();
             let response = format!(

@@ -138,6 +138,12 @@ Removent、VNC/Apple Remote Desktop 和 RDP 连接表单、触控与键盘输入
 保存连接、Bonjour 发现、文本剪贴板、可选远程音频和 relay 路由。构建步骤与
 模拟器验收 fixture 见 mobile README。
 
+连接后横屏画面保持比例铺满屏幕，悬浮菜单和操作栏空闲四秒后渐隐，
+轻点画面或右上角按钮可恢复。会话使用固定英文键盘，英文、数字和 ASCII 符号直接发送，
+不提供输入法语言切换或候选区；横屏弹出键盘时保留画面尺寸和缩放。
+会话操作栏字号最多放大到 XXXL，确保键盘上方仍可操作；表单和弹层保留完整的动态字体支持。
+验证范围见[手机会话验证记录](docs/validation/mobile-session-2026-10-02.md)。
+
 ## 从源码构建
 
 需要 stable Rust 工具链（1.89+，IronRDP 要求）和完整 Xcode（包含 Swift、Metal 工具链）。

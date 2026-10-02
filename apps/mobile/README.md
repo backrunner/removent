@@ -14,6 +14,21 @@ Requires iOS/iPadOS 26 or newer and Xcode 26 or newer (validated with Xcode 27).
 Controls use native Liquid Glass directly. The connection forms support Dynamic
 Type and iPad sheets; the
 session's floating keyboard controls use one glass surface with 44-point targets.
+Session chrome caps text scaling at XXXL so controls stay above the landscape
+keyboard; forms and sheets retain full Dynamic Type, and key labels fit their rows.
+Connected sessions show the desktop behind floating controls, which fade after
+four idle seconds. Tap the picture or the corner button to reveal them; controls
+stay visible while typing or using a session action. Landscape fills the display
+without stretching (edges can be cropped; use three-finger pan to reach them).
+Opening the keyboard in landscape overlays the picture without resizing or
+resetting its zoom. Portrait continues to fit above the keyboard.
+The session keyboard has a fixed English layout with ASCII numbers and symbols,
+no language switch, dictation or candidate area. Every character goes directly
+to the computer. Hardware keyboards use US key positions and retain remote
+shortcuts, arrows and other special keys. Connection credentials and the
+clipboard editor keep their normal system keyboards.
+See the [full-screen and direct-input validation](../../docs/validation/mobile-session-2026-10-02.md)
+for simulator evidence and remaining device checks.
 Editing a saved connection keeps its Keychain password unless explicitly
 replaced. Changing the computer or account requires entering the password again.
 

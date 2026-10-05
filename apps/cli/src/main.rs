@@ -66,6 +66,17 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some("ping") => cmd_ping(parse_args(&raw[1..])?).await,
+        Some("pairing") => {
+            let action = raw.get(1).map(String::as_str).unwrap_or("show");
+            if action == "watch" {
+                return daemon::watch_pairing().await;
+            }
+            anyhow::ensure!(
+                matches!(action, "show" | "generate" | "revoke"),
+                "Use pairing show|watch|generate|revoke"
+            );
+            cmd_daemon(&format!("pairing-{action}")).await
+        }
         Some("daemon") => {
             let action = raw.get(1).map(String::as_str).unwrap_or("status");
             cmd_daemon(action).await

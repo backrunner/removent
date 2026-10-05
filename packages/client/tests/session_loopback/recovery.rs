@@ -33,6 +33,8 @@ async fn resume_rejected_falls_back_to_full_negotiation() {
             is_main: true,
         };
         let mk_cfg = || HostConfig {
+            authentication: Default::default(),
+            auth_paths: None,
             audio_available: true,
             preapproved_only: false,
             device_name: "RejectHost".into(),
@@ -99,7 +101,7 @@ async fn resume_rejected_falls_back_to_full_negotiation() {
     });
 
     // PIN forwarding for the first (pairing) connection.
-    let pin_request: removent_client::PinRequest = Box::new(move |pin_tx| {
+    let pin_request: removent_client::PinRequest = Box::new(move |_, pin_tx| {
         tokio::spawn(async move {
             if let Ok(pin) = pin_from_host.await {
                 let _ = pin_tx.send(pin);
@@ -114,6 +116,7 @@ async fn resume_rejected_falls_back_to_full_negotiation() {
     )
     .unwrap();
     let mk_cfg = || ClientConfig {
+        pairing_code: None,
         device_name: "RejectClient".into(),
         caps: Caps::all(),
         local_clip: None,
@@ -146,7 +149,7 @@ async fn resume_rejected_falls_back_to_full_negotiation() {
             mk_cfg(),
             Some(bogus),
             Some(ack1),
-            Some(Box::new(|_: oneshot::Sender<String>| {
+            Some(Box::new(|_, _: oneshot::Sender<String>| {
                 panic!("known peer must not request a PIN");
             })),
         ),

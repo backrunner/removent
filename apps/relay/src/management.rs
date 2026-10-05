@@ -310,6 +310,8 @@ pub fn initialize(dir: &Path, args: NetworkArgs, state_dir: Option<&Path>) -> Re
             transport: RelayTransport::Quic,
             insecure_loopback: false,
             server_fingerprint: identity.fingerprint_hex(),
+            server_name: String::new(),
+            accept_invalid_certificate: false,
             host_fingerprint: String::new(),
             room: args.room.clone(),
             token,

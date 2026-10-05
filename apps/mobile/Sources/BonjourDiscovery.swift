@@ -48,12 +48,37 @@ final class BonjourDiscovery: NSObject, ObservableObject, @preconcurrency NetSer
                     nil, 0, NI_NUMERICHOST) == 0 else { return nil }
                 return String(cString:result)
             }
-        }.first ?? service.hostName
+        }.sorted { !$0.contains(":") && $1.contains(":") }.first ?? service.hostName
         guard let host else { return }
         let proto: ConnectionProtocol = service.type == "_removent._udp." ? .removent : service.type == "_rfb._tcp." ? .vnc : .rdp
         let id = key(service)
         devices.removeAll { $0.id == id }
-        devices.append(NearbyDevice(id:id, name:service.name, host:host, port:service.port, protocol:proto))
+        let txt = service.txtRecordData().map(NetService.dictionary(fromTXTRecord:)) ?? [:]
+        let locator = txt["pair"].flatMap { String(data:$0, encoding:.utf8) }
+        let expires = txt["pair-exp"].flatMap { String(data:$0, encoding:.utf8) }.flatMap(TimeInterval.init)
+        devices.append(NearbyDevice(id:id, name:service.name, host:host, port:service.port, protocol:proto, pairingLocator:locator, pairingExpiresAt:expires, pairingIdentity:txt["fp"].flatMap { String(data:$0, encoding:.utf8) }))
         devices.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    static func resolvePairing(_ locator: String) async throws -> NearbyDevice {
+        let discovery = BonjourDiscovery()
+        discovery.start(removent:true, vnc:false, rdp:false)
+        defer { discovery.stop() }
+        let deadline = Date().addingTimeInterval(10)
+        var settled = false
+        while Date() < deadline {
+            if let error = discovery.error { throw MobileError.message(error) }
+            let announced = discovery.devices.filter { $0.protocol == .removent && $0.pairingLocator == locator && ($0.pairingExpiresAt ?? 0) > Date().timeIntervalSince1970 }
+            // A computer may advertise the same identity on several interfaces
+            // or with a Bonjour conflict suffix. Count computers, not records.
+            let matches = Dictionary(grouping:announced, by: { $0.pairingIdentity ?? $0.endpointKey }).values.compactMap { $0.first }
+            if matches.count > 1 { throw MobileError.message(L("Ambiguous code; generate a new connection code.", "连接码重复，请在电脑上重新生成。")) }
+            if let device = matches.first {
+                if settled { return device }
+                settled = true
+                try await Task.sleep(for:.milliseconds(300))
+            } else { try await Task.sleep(for:.milliseconds(100)) }
+        }
+        throw MobileError.message(L("Connection code not found on this network or expired.", "当前网络中未找到此连接码，或连接码已过期。"))
     }
 }

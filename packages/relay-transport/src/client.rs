@@ -1,6 +1,6 @@
 use crate::{
     AUTH_TIMEOUT, client_endpoint,
-    config::{Role, TunnelConfig, decode_secret},
+    config::{Role, TunnelConfig},
     server::Hello,
     wire,
 };
@@ -18,6 +18,7 @@ pub struct Tunnel {
     pub endpoint: quinn::Endpoint,
     pub connection: quinn::Connection,
     pub route: u64,
+    pub resolved_room: Option<String>,
 }
 impl Drop for Tunnel {
     fn drop(&mut self) {
@@ -26,20 +27,54 @@ impl Drop for Tunnel {
 }
 
 pub async fn connect(cfg: &TunnelConfig, role: Role, identity: &DeviceIdentity) -> Result<Tunnel> {
+    connect_with_invitation(cfg, role, identity, None, None).await
+}
+
+async fn connect_with_invitation(
+    cfg: &TunnelConfig,
+    role: Role,
+    identity: &DeviceIdentity,
+    pairing: Option<removent_core::pairing_invitation::Advertisement>,
+    confirmation: Option<removent_net::CertificateConfirmation>,
+) -> Result<Tunnel> {
     cfg.validate()?;
+    let (endpoint, connection) = if let Some(confirmation) = confirmation {
+        let mut probe_config = cfg.clone();
+        probe_config.accept_invalid_certificate = cfg.server_fingerprint.is_empty();
+        let addr = tokio::time::timeout(
+            AUTH_TIMEOUT,
+            tokio::net::lookup_host(cfg.endpoint()?.authority()),
+        )
+        .await
+        .context("Relay lookup timed out")??
+        .next()
+        .context("Relay address not found")?;
+        let endpoint = client_endpoint(addr, identity, &probe_config)?;
+        let connection =
+            removent_net::confirm_quic_peer(&endpoint, addr, &cfg.tls_server_name()?, confirmation)
+                .await?;
+        (endpoint, connection)
+    } else {
+        tokio::time::timeout(AUTH_TIMEOUT, async {
+            let addr = tokio::net::lookup_host(cfg.endpoint()?.authority())
+                .await?
+                .next()
+                .context("Relay address not found")?;
+            let endpoint = client_endpoint(addr, identity, cfg)?;
+            let connection = endpoint.connect(addr, &cfg.tls_server_name()?)?.await?;
+            Ok::<_, anyhow::Error>((endpoint, connection))
+        })
+        .await
+        .context("Relay connection timed out")??
+    };
     tokio::time::timeout(AUTH_TIMEOUT, async {
-        let addr = tokio::net::lookup_host(cfg.endpoint()?.authority())
-            .await?
-            .next()
-            .context("Relay address not found")?;
-        let endpoint = client_endpoint(addr, identity, decode_secret(&cfg.server_fingerprint)?)?;
-        let connection = endpoint.connect(addr, "removent-relay")?.await?;
         let (mut send, mut recv) = connection.open_bi().await?;
         let auth = serde_json::to_vec(&Hello {
             room: cfg.room.clone(),
             token: cfg.token.clone(),
             role,
             public_key: hex::encode(identity.verifying_key().as_bytes()),
+            pairing,
         })?;
         send.write_all(&(auth.len() as u16).to_be_bytes()).await?;
         send.write_all(&auth).await?;
@@ -54,7 +89,23 @@ pub async fn connect(cfg: &TunnelConfig, role: Role, identity: &DeviceIdentity) 
         recv.read_exact(&mut ack)
             .await
             .context("Relay authentication failed or host unavailable")?;
+        let resolved_room = if role == Role::Client && cfg.room.starts_with("pair-") {
+            let mut size = [0; 1];
+            recv.read_exact(&mut size).await?;
+            ensure!((1..=64).contains(&size[0]), "Invalid resolved room");
+            let mut room = vec![0; size[0] as usize];
+            recv.read_exact(&mut room).await?;
+            let room = String::from_utf8(room)?;
+            ensure!(
+                crate::config::valid_room(&room) && !room.starts_with("pair-"),
+                "Invalid resolved room"
+            );
+            Some(room)
+        } else {
+            None
+        };
         Ok::<_, anyhow::Error>(Tunnel {
+            resolved_room,
             endpoint,
             connection,
             route: u64::from_be_bytes(ack),
@@ -68,6 +119,8 @@ pub async fn connect(cfg: &TunnelConfig, role: Role, identity: &DeviceIdentity) 
 /// cancels the task and closes the outer connection, including failed pairing.
 pub struct ClientBridge {
     pub address: SocketAddr,
+    pub resolved_room: Option<String>,
+    pub relay_fingerprint: Option<[u8; 32]>,
     task: tokio::task::JoinHandle<Result<()>>,
 }
 impl Drop for ClientBridge {
@@ -77,15 +130,37 @@ impl Drop for ClientBridge {
 }
 impl ClientBridge {
     pub async fn start(cfg: &TunnelConfig, identity: &DeviceIdentity) -> Result<Self> {
+        Self::start_with_confirmation(cfg, identity, None).await
+    }
+    pub async fn start_with_confirmation(
+        cfg: &TunnelConfig,
+        identity: &DeviceIdentity,
+        confirmation: Option<removent_net::CertificateConfirmation>,
+    ) -> Result<Self> {
         if cfg.is_websocket() {
-            let (address, task) = crate::websocket::start_client(cfg, identity).await?;
-            return Ok(Self { address, task });
+            let (address, task, resolved_room) =
+                crate::websocket::start_client(cfg, identity).await?;
+            return Ok(Self {
+                address,
+                task,
+                resolved_room,
+                relay_fingerprint: None,
+            });
         }
-        let tunnel = connect(cfg, Role::Client, identity).await?;
+        let tunnel =
+            connect_with_invitation(cfg, Role::Client, identity, None, confirmation).await?;
+        let relay_fingerprint =
+            removent_net::RvpConnection::new(tunnel.connection.clone()).peer_fingerprint();
         let socket = UdpSocket::bind("127.0.0.1:0").await?;
         let address = socket.local_addr()?;
+        let resolved_room = tunnel.resolved_room.clone();
         let task = tokio::spawn(client_loop(tunnel, socket));
-        Ok(Self { address, task })
+        Ok(Self {
+            address,
+            task,
+            resolved_room,
+            relay_fingerprint,
+        })
     }
 }
 
@@ -102,12 +177,21 @@ impl HostTunnel {
     }
 }
 pub async fn connect_host(cfg: &TunnelConfig, identity: &DeviceIdentity) -> Result<HostTunnel> {
+    connect_host_with_invitation(cfg, identity, None).await
+}
+pub async fn connect_host_with_invitation(
+    cfg: &TunnelConfig,
+    identity: &DeviceIdentity,
+    pairing: Option<removent_core::pairing_invitation::Advertisement>,
+) -> Result<HostTunnel> {
     if cfg.is_websocket() {
         Ok(HostTunnel::WebSocket(
-            crate::websocket::connect(cfg, Role::Host, identity).await?,
+            crate::websocket::connect_with_invitation(cfg, Role::Host, identity, pairing).await?,
         ))
     } else {
-        Ok(HostTunnel::Quic(connect(cfg, Role::Host, identity).await?))
+        Ok(HostTunnel::Quic(
+            connect_with_invitation(cfg, Role::Host, identity, pairing, None).await?,
+        ))
     }
 }
 

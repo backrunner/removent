@@ -4,6 +4,7 @@ _version: 1
 cli.name: removent-cli
 
 usage: |
+  removent-cli pairing show|watch|generate|revoke
   removent-cli — Removent 冒烟测试工具
 
   用法:

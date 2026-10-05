@@ -107,10 +107,15 @@ impl Decoder for ControlCodec {
 #[derive(Debug, Default)]
 pub struct PairCodec;
 
+const MAX_PAIRING_MSG_LEN: usize = 4096;
+
 impl Encoder<PairingMsg> for PairCodec {
     type Error = NetError;
     fn encode(&mut self, item: PairingMsg, dst: &mut BytesMut) -> Result<()> {
         let body = postcard::to_allocvec(&item).map_err(|e| NetError::Framing(e.to_string()))?;
+        if body.len() > MAX_PAIRING_MSG_LEN {
+            return Err(NetError::Framing("pairing msg too large".into()));
+        }
         dst.put_u32(body.len() as u32);
         dst.put_slice(&body);
         Ok(())
@@ -125,7 +130,7 @@ impl Decoder for PairCodec {
             return Ok(None);
         }
         let body_len = u32::from_be_bytes([src[0], src[1], src[2], src[3]]) as usize;
-        if body_len > 1 << 20 {
+        if body_len > MAX_PAIRING_MSG_LEN {
             return Err(NetError::Framing("pairing msg too large".into()));
         }
         let total = 4 + body_len;
@@ -357,4 +362,33 @@ async fn read_postcard_prefixed<T: serde::de::DeserializeOwned>(
     let mut buf = vec![0u8; body_len];
     recv.read_exact(&mut buf).await.map_err(read_err)?;
     postcard::from_bytes(&buf).map_err(|e| NetError::Handshake(e.to_string()))
+}
+
+#[cfg(test)]
+mod pairing_codec_security_tests {
+    use super::*;
+    #[test]
+    fn oversized_frames_are_rejected_before_body_allocation() {
+        let mut codec = PairCodec;
+        let mut frame =
+            bytes::BytesMut::from(&((MAX_PAIRING_MSG_LEN + 1) as u32).to_be_bytes()[..]);
+        assert!(codec.decode(&mut frame).is_err());
+        let mut frame = bytes::BytesMut::new();
+        assert!(
+            codec
+                .encode(
+                    PairingMsg::AuthVerify {
+                        proofs: vec![crate::pairing::PairingProof {
+                            msg_c: vec![0; MAX_PAIRING_MSG_LEN + 1],
+                            confirm_c: [0; 32],
+                            vk_c: [0; 32],
+                            sig_c: vec![]
+                        }],
+                    },
+                    &mut frame
+                )
+                .is_err()
+        );
+        assert!(frame.is_empty());
+    }
 }

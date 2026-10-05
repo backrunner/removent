@@ -5,6 +5,8 @@ struct SessionView: View {
     @State private var keyboard = false
     @State private var stats = false
     @State private var pin = ""
+    @State private var certificateAlertPresented = false
+    @State private var certificateAlert: CertificatePrompt?
     @State private var modifiers = 0
     @State private var clipboard = false
     @State private var clipboardText = ""
@@ -138,6 +140,23 @@ struct SessionView: View {
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) { controlsVisible = false }
         }
         .onChange(of: model.needsPIN) { _, _ in pin = ""; pinFocused = false }
+        .task(id: model.certificatePrompt?.id) {
+            certificateAlertPresented = false
+            guard let prompt = model.certificatePrompt else { return }
+            // Allow the preceding relay alert to finish dismissing before the
+            // computer confirmation appears. Its actions retain their own ID.
+            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+            guard !Task.isCancelled, model.certificatePrompt?.id == prompt.id else { return }
+            certificateAlert = prompt
+            certificateAlertPresented = true
+        }
+        .alert(certificateAlert?.relay == true ? L("Trust this relay?", "信任此中继？") : L("Trust this computer?", "信任此电脑？"),
+               isPresented: $certificateAlertPresented, presenting: certificateAlert) { prompt in
+            Button(L("Cancel", "取消"), role: .cancel) { model.confirmCertificate(false, promptID:prompt.id) }
+            Button(L("Trust and connect", "信任并连接")) { model.confirmCertificate(true, promptID:prompt.id) }
+        } message: { prompt in
+            Text(prompt.destination + "\n\n" + L("This is your first connection. Confirm this is the destination you want to trust. Its identity will be remembered for future connections.", "这是首次连接，请确认这是您要连接的目标。确认后将记住其身份，后续连接会自动核验。"))
+        }
         .sheet(isPresented: $clipboard) { clipboardSheet }
         .sheet(isPresented: $gestures) { gestureSheet }
         .sheet(isPresented: $actions, onDismiss: finishSessionAction) { sessionActionsSheet }
@@ -204,31 +223,46 @@ struct SessionView: View {
     private var connectionState: some View {
         GeometryReader { geometry in
             ScrollView {
-                VStack(spacing: 20) {
+                VStack(spacing: 16) {
                     if model.needsPIN {
-                        Image(systemName: "lock.shield").font(.system(size: 44)).foregroundStyle(.tint)
+                        Image(systemName: "lock.shield").font(.system(size: 32)).foregroundStyle(.tint)
                             .accessibilityHidden(true)
-                        Text(L("Pair with computer", "与电脑配对")).font(.title2.bold())
+                        Text(model.authenticationMode == "password" ? L("Access password", "访问口令") : model.authenticationMode == "otp" ? L("OTP verification", "OTP 验证") : L("Pair with computer", "与电脑配对")).font(.title3.bold())
                         Text(model.status).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                        TextField(L("Six-digit PIN", "六位配对码"), text: $pin)
-                            .font(.title.monospacedDigit()).multilineTextAlignment(.center)
+                        if model.authenticationMode == "password" {
+                            SecureField(L("Access password", "访问口令"), text: $pin)
+                                .textContentType(.password).focused($pinFocused)
+                                .padding(12).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                                .accessibilityIdentifier("authenticationPassword")
+                        } else {
+                        TextField(model.authenticationMode == "otp" ? L("Six-digit OTP", "六位动态验证码") : L("Six-digit PIN", "六位配对码"), text: $pin)
+                            .font(.title2.monospacedDigit()).multilineTextAlignment(.center)
                             .keyboardType(.numberPad).textContentType(.oneTimeCode).focused($pinFocused)
-                            .padding(14).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                            .padding(12).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
                             .accessibilityIdentifier("pairingPIN")
                             .onChange(of: pin) { _, value in
                                 pin = String(value.filter { $0.isASCII && $0.isNumber }.prefix(6))
                             }
-                        Button(L("Pair", "配对")) { pinFocused = false; model.submitPIN(pin) }
-                            .buttonStyle(PrimaryActionStyle()).controlSize(.large).disabled(pin.count != 6)
+                        }
+                        Button { pinFocused = false; model.submitPIN(pin) } label: {
+                            Text(L("Connect", "连接")).frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(PrimaryActionStyle()).controlSize(.large).disabled(model.authenticationMode == "password" ? pin.isEmpty || pin.utf8.count > 1024 : pin.count != 6)
+                    } else if model.certificateDestination != nil {
+                        Image(systemName: "checkmark.shield").font(.system(size: 32)).foregroundStyle(.tint)
+                        Text(model.status).font(.headline).multilineTextAlignment(.center)
                     } else if model.isConnecting {
                         ProgressView().controlSize(.large)
                         Text(model.status).font(.headline).multilineTextAlignment(.center)
                     } else {
-                        Image(systemName: "network.slash").font(.system(size: 44)).foregroundStyle(.secondary)
+                        Image(systemName: "network.slash").font(.system(size: 32)).foregroundStyle(.secondary)
                             .accessibilityHidden(true)
-                        Text(model.status).font(.title2.bold()).multilineTextAlignment(.center)
-                        Button(L("Reconnect", "重新连接"), systemImage: "arrow.clockwise") { model.retry() }
-                            .buttonStyle(PrimaryActionStyle()).controlSize(.large)
+                        Text(model.status).font(.title3.bold()).multilineTextAlignment(.center)
+                        Button { model.retry() } label: {
+                            Label(L("Reconnect", "重新连接"), systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(PrimaryActionStyle()).controlSize(.large)
                     }
                     if let error = model.error {
                         Label(error, systemImage: "exclamationmark.circle")

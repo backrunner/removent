@@ -252,6 +252,7 @@ mod tests {
 
     fn entry(instance: &str, fp: &str, addr: Option<&str>) -> DeviceEntry {
         DeviceEntry {
+            pairing: None,
             instance: instance.into(),
             name: instance.into(),
             short_fp: fp.into(),

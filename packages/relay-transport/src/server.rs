@@ -22,9 +22,12 @@ pub(crate) struct Hello {
     pub token: String,
     pub role: Role,
     pub public_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pairing: Option<removent_core::pairing_invitation::Advertisement>,
 }
 
 struct RoomState {
+    name: String,
     host_auth: Policy,
     client_auth: Policy,
     routes: Mutex<Routes>,
@@ -32,6 +35,7 @@ struct RoomState {
 #[derive(Default)]
 struct Routes {
     host: Option<Connection>,
+    pairing: Option<removent_core::pairing_invitation::Advertisement>,
     clients: HashMap<u64, Connection>,
 }
 
@@ -75,6 +79,7 @@ impl Drop for Registration {
         match self.role {
             Role::Host => {
                 routes.host = None;
+                routes.pairing = None;
                 for (_, c) in routes.clients.drain() {
                     c.close(0u32.into(), b"host offline");
                 }
@@ -100,6 +105,7 @@ pub async fn serve(
                 Ok((
                     r.name.clone(),
                     Arc::new(RoomState {
+                        name: r.name.clone(),
                         host_auth: Policy::new(&r.host_token_sha256, &r.host_public_keys)?,
                         client_auth: Policy::new(&r.client_token_sha256, &r.client_public_keys)?,
                         routes: Mutex::new(Routes::default()),
@@ -137,7 +143,15 @@ pub async fn serve(
                         recv.read_exact(&mut bytes).await?;
                         let hello: Hello = serde_json::from_slice(&bytes)?;
                         let key = decode_secret(&hello.public_key)?;
-                        let room = rooms.get(&hello.room).ok_or_else(|| anyhow::anyhow!("Unauthorized"))?.clone();
+                        ensure!(hello.pairing.as_ref().is_none_or(|ad| hello.role == Role::Host && ad.valid()), "Invalid invitation");
+                        let room = if hello.role == Role::Client && hello.room.starts_with("pair-") {
+                            let matches: Vec<_> = rooms.values().filter(|r| {
+                                let routes = r.routes.lock().unwrap();
+                                routes.host.is_some() && routes.pairing.as_ref().is_some_and(|ad| ad.matches_room(&hello.room))
+                            }).cloned().collect();
+                            ensure!(matches.len() == 1, "Invitation unavailable");
+                            matches[0].clone()
+                        } else { rooms.get(&hello.room).ok_or_else(|| anyhow::anyhow!("Unauthorized"))?.clone() };
                         let policy = match hello.role { Role::Host => &room.host_auth, Role::Client => &room.client_auth };
                         policy.authorize(&hello.token, &key)?;
                         let nonce: [u8; 32] = rand::random();
@@ -151,10 +165,12 @@ pub async fn serve(
                                 Role::Host => {
                                     ensure!(routes.host.is_none(), "Host already online");
                                     routes.host = Some(conn.clone());
+                                    routes.pairing = hello.pairing;
                                     0
                                 }
                                 Role::Client => {
                                     ensure!(routes.host.is_some(), "Host offline");
+                                    ensure!(!hello.room.starts_with("pair-") || routes.pairing.as_ref().is_some_and(|ad| ad.matches_room(&hello.room)), "Invitation expired");
                                     ensure!(routes.clients.len() < limit, "Room full");
                                     let mut id = rand::random::<u64>();
                                     while id == 0 || routes.clients.contains_key(&id) { id = rand::random(); }
@@ -165,6 +181,11 @@ pub async fn serve(
                         };
                         let registration = Registration { room, role: hello.role, id, conn };
                         send.write_all(&id.to_be_bytes()).await?;
+                        if hello.role == Role::Client && hello.room.starts_with("pair-") {
+                            let room = registration.room.name.as_bytes();
+                            send.write_all(&[room.len() as u8]).await?;
+                            send.write_all(room).await?;
+                        }
                         send.finish()?;
                         Ok::<_, anyhow::Error>(registration)
                     };

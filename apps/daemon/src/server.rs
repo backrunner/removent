@@ -96,6 +96,72 @@ async fn handle_conn(state: Arc<DaemonState>, stream: UnixStream) {
 fn handle_request(state: &Arc<DaemonState>, req: IpcRequest) -> IpcResponse {
     match req {
         IpcRequest::Status => IpcResponse::Status(Box::new(state.snapshot())),
+        IpcRequest::PairingShow => {
+            if let Some(code) = state.active_pin() {
+                let expires_at_unix = (code.len() == 12)
+                    .then(|| {
+                        removent_core::pairing_invitation::Invitation::load(&state.paths)
+                            .ok()
+                            .flatten()
+                            .map(|i| i.expires_at_unix)
+                    })
+                    .flatten();
+                IpcResponse::PairingCode {
+                    code,
+                    expires_at_unix,
+                }
+            } else {
+                IpcResponse::Error {
+                    message: t!("error.no_pairing_code").to_string(),
+                }
+            }
+        }
+        IpcRequest::PairingGenerate => {
+            let settings = state.settings.lock().unwrap();
+            if settings.authentication.mode != removent_core::AuthenticationMode::PairingCode
+                || settings.paired_only
+                || settings.admission == removent_core::settings::AdmissionMode::DenyAll
+            {
+                return IpcResponse::Error {
+                    message: t!("error.pairing_disabled").to_string(),
+                };
+            }
+            if !state.enabled.load(Ordering::SeqCst) || !state.sessions.lock().unwrap().is_empty() {
+                return IpcResponse::Error {
+                    message: t!("error.pairing_busy").to_string(),
+                };
+            }
+            // Serialize generation with authentication changes and service disable.
+            match removent_core::pairing_invitation::Invitation::generate(&state.paths) {
+                Ok(invite) => {
+                    let code = invite.code().expose().to_owned();
+                    state.show_pin(code.clone());
+                    state.enabled_watch.send_modify(|_| {});
+                    IpcResponse::PairingCode {
+                        code,
+                        expires_at_unix: Some(invite.expires_at_unix),
+                    }
+                }
+                Err(e) => IpcResponse::Error {
+                    message: e.to_string(),
+                },
+            }
+        }
+        IpcRequest::PairingRevoke => {
+            match removent_core::pairing_invitation::Invitation::revoke(&state.paths) {
+                Ok(()) => {
+                    state.clear_pin();
+                    // Do not interrupt an established session to remove an already-used code.
+                    if state.sessions.lock().unwrap().is_empty() {
+                        state.enabled_watch.send_modify(|_| {});
+                    }
+                    IpcResponse::Ok
+                }
+                Err(e) => IpcResponse::Error {
+                    message: e.to_string(),
+                },
+            }
+        }
         IpcRequest::RequestPermissions => {
             // Login startup never prompts. An explicit setup action runs in
             // the actual launchd process, keeping TCC attribution consistent.
@@ -120,7 +186,17 @@ fn handle_request(state: &Arc<DaemonState>, req: IpcRequest) -> IpcResponse {
                 if state.login_window {
                     crate::login_window::restrict(&mut s);
                 }
-                *state.settings.lock().unwrap() = s;
+                let mut current = state.settings.lock().unwrap();
+                let restart = current.authentication != s.authentication
+                    || current.admission != s.admission
+                    || current.paired_only != s.paired_only;
+                *current = s;
+                if restart {
+                    let _ = removent_core::pairing_invitation::Invitation::revoke(&state.paths);
+                    state.clear_pin();
+                    removent_host::session::clear_resume_registry();
+                    state.enabled_watch.send_modify(|_| {});
+                }
                 IpcResponse::Ok
             }
             Err(e) => IpcResponse::Error {
@@ -148,5 +224,121 @@ fn handle_request(state: &Arc<DaemonState>, req: IpcRequest) -> IpcResponse {
             state.shutdown.cancel();
             IpcResponse::Ok
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn authentication_reload_notifies_runner_without_changing_host_switch() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = removent_core::DataPaths {
+            root: dir.path().into(),
+        };
+        let settings = Settings {
+            host_enabled: false,
+            ..Default::default()
+        };
+        settings.save(&paths).unwrap();
+        let state = Arc::new(DaemonState::new(paths.clone(), settings, "test".into()));
+        let mut changes = state.enabled_watch.subscribe();
+        Settings::update(&paths, |s| {
+            s.authentication.mode = removent_core::AuthenticationMode::None
+        })
+        .unwrap();
+        assert!(matches!(
+            handle_request(&state, IpcRequest::ReloadSettings),
+            IpcResponse::Ok
+        ));
+        assert!(changes.has_changed().unwrap());
+        assert!(!*changes.borrow_and_update());
+        assert!(!state.enabled.load(Ordering::SeqCst));
+        assert_eq!(
+            state.settings.lock().unwrap().authentication.mode,
+            removent_core::AuthenticationMode::None
+        );
+        Settings::update(&paths, |s| s.device_name = "New name".into()).unwrap();
+        assert!(matches!(
+            handle_request(&state, IpcRequest::ReloadSettings),
+            IpcResponse::Ok
+        ));
+        assert!(!changes.has_changed().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod invitation_tests {
+    use super::*;
+    #[test]
+    fn cli_invitation_lifecycle_and_host_policy_are_enforced() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = removent_core::DataPaths {
+            root: dir.path().into(),
+        };
+        let settings = Settings {
+            host_enabled: true,
+            admission: removent_core::AdmissionMode::TrustedAuto,
+            ..Default::default()
+        };
+        settings.save(&paths).unwrap();
+        let state = Arc::new(DaemonState::new(paths, settings, "test".into()));
+        let code = match handle_request(&state, IpcRequest::PairingGenerate) {
+            IpcResponse::PairingCode {
+                code,
+                expires_at_unix: Some(_),
+            } => code,
+            _ => panic!("expected generated code"),
+        };
+        assert_eq!(code.len(), 12);
+        state.show_pin("654321".into());
+        assert!(matches!(handle_request(&state, IpcRequest::PairingShow),
+            IpcResponse::PairingCode { code, .. } if code == "654321"));
+        state.clear_reactive_pin();
+        assert_eq!(state.active_pin().as_deref(), Some(code.as_str()));
+        // Survives daemon restart even without an in-memory display PIN.
+        *state.pending_pin.lock().unwrap() = None;
+        assert_eq!(state.active_pin().as_deref(), Some(code.as_str()));
+
+        assert!(
+            matches!(handle_request(&state, IpcRequest::PairingShow), IpcResponse::PairingCode { code: shown, .. } if shown == code)
+        );
+        assert!(matches!(
+            handle_request(&state, IpcRequest::PairingRevoke),
+            IpcResponse::Ok
+        ));
+        assert!(matches!(
+            handle_request(&state, IpcRequest::PairingShow),
+            IpcResponse::Error { .. }
+        ));
+        state.show_pin("123456".into());
+        assert!(
+            matches!(handle_request(&state, IpcRequest::PairingShow), IpcResponse::PairingCode { code, .. } if code == "123456")
+        );
+        let mut events = state.events.subscribe();
+        state.clear_reactive_pin();
+        assert!(matches!(
+            events.try_recv(),
+            Ok(removent_core::ipc::IpcEvent::PairingCleared)
+        ));
+        assert!(matches!(
+            handle_request(&state, IpcRequest::PairingGenerate),
+            IpcResponse::PairingCode { .. }
+        ));
+        state.set_enabled(false).unwrap();
+        assert_eq!(state.active_pin(), None);
+        assert!(
+            removent_core::pairing_invitation::Invitation::load(&state.paths)
+                .unwrap()
+                .is_none()
+        );
+        state.set_enabled(true).unwrap();
+        assert_eq!(state.active_pin(), None);
+        state.settings.lock().unwrap().authentication.mode =
+            removent_core::AuthenticationMode::None;
+        assert!(matches!(
+            handle_request(&state, IpcRequest::PairingGenerate),
+            IpcResponse::Error { .. }
+        ));
     }
 }

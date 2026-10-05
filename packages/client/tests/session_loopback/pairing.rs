@@ -22,6 +22,8 @@ async fn wrong_pin_fails_with_pairing_error() {
         let conn = RvpConnection::new(incoming.await.expect("conn"));
         let mut peers = PeersStore::in_memory();
         let cfg = HostConfig {
+            authentication: Default::default(),
+            auth_paths: None,
             audio_available: true,
             preapproved_only: false,
             device_name: "WrongPinHost".into(),
@@ -64,7 +66,7 @@ async fn wrong_pin_fails_with_pairing_error() {
     });
 
     // After getting the PIN shown by the host, the client deliberately enters it wrong.
-    let pin_request: removent_client::PinRequest = Box::new(move |pin_tx| {
+    let pin_request: removent_client::PinRequest = Box::new(move |_, pin_tx| {
         tokio::spawn(async move {
             if let Ok(pin) = pin_from_host.await {
                 let wrong = if pin == "000000" { "000001" } else { "000000" };
@@ -84,6 +86,7 @@ async fn wrong_pin_fails_with_pairing_error() {
         server_addr,
         &client_id,
         ClientConfig {
+            pairing_code: None,
             device_name: "WrongPinClient".into(),
             caps: Caps::all(),
             local_clip: None,

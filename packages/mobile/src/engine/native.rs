@@ -27,41 +27,113 @@ pub(super) async fn run_native(
 ) -> Result<()> {
     let identity = &attempt.shared.identity;
     let mut bridge = None;
-    let mut expected = request.relay.as_ref().map(|r| r.host_pin());
+    let mut expected = request.relay.as_ref().and_then(|r| r.optional_host_pin());
     let address = if let Some(route) = &request.relay {
         attempt.progress("Connecting");
-        let config = removent_relay::config::TunnelConfig {
+        let mut config = removent_relay::config::TunnelConfig {
             server: route.endpoint.clone(),
             transport: route.transport,
             insecure_loopback: false,
             server_fingerprint: route.server_fingerprint.clone(),
+            server_name: route.server_name.clone(),
+            accept_invalid_certificate: route.accept_invalid_certificate,
             room: request.address.host.clone(),
             token: request.password.clone(),
             host_fingerprint: route.host_fingerprint.clone(),
         };
-        bridge = Some(removent_relay::client::ClientBridge::start(&config, identity).await?);
+        let relay_key = format!(
+            "relay-server:{}:{}",
+            config.server,
+            config.tls_server_name()?
+        );
+        let relay_trust = removent_client::host_pins::for_relay_connection(
+            &attempt.shared.paths,
+            &relay_key,
+            if config.server_fingerprint.is_empty() {
+                None
+            } else {
+                Some(removent_relay::config::decode_secret(
+                    &config.server_fingerprint,
+                )?)
+            },
+            !config.is_websocket() && !config.accept_invalid_certificate,
+        )?;
+        if !config.is_websocket() {
+            config.server_fingerprint = relay_trust.expected.map(hex::encode).unwrap_or_default();
+        }
+        let confirmation = (!config.is_websocket()
+            && relay_trust.needs_confirmation
+            && !config.accept_invalid_certificate)
+            .then(|| attempt.certificate_confirmation(config.server.clone(), true));
+        bridge = Some(
+            removent_relay::client::ClientBridge::start_with_confirmation(
+                &config,
+                identity,
+                confirmation,
+            )
+            .await?,
+        );
+        if !config.accept_invalid_certificate
+            && let Some(pin) = bridge.as_ref().unwrap().relay_fingerprint
+        {
+            removent_client::host_pins::remember(&attempt.shared.paths, &relay_key, pin, false)?;
+        }
         bridge.as_ref().unwrap().address
     } else {
-        addresses(&request).await?[0]
+        if let Some(code) = &request.pairing_code {
+            #[cfg(target_os = "ios")]
+            {
+                let (tx, rx) = oneshot::channel();
+                attempt.update(|s| { s.pairing_address = Some(tx); s.event(json!({"type":"resolve_pairing", "locator":code.locator(), "generation":attempt.generation})); });
+                let address = tokio::time::timeout(Duration::from_secs(15), rx)
+                    .await
+                    .context("Pairing lookup timed out")?
+                    .context("Pairing lookup cancelled")?
+                    .map_err(anyhow::Error::msg)?;
+                match address.to_string().parse::<SocketAddr>() {
+                    Ok(address) => address,
+                    Err(_) => tokio::time::timeout(
+                        Duration::from_secs(5),
+                        tokio::net::lookup_host((address.host.as_str(), address.port)),
+                    )
+                    .await
+                    .context("Pairing destination lookup timed out")??
+                    .next()
+                    .context("Pairing destination unavailable")?,
+                }
+            }
+            #[cfg(not(target_os = "ios"))]
+            {
+                removent_net::discovery::resolve_pairing_locator(code.locator()).await?
+            }
+        } else {
+            addresses(&request).await?[0]
+        }
     };
-    let pin_path = attempt.shared.paths.root.join("mobile-host-pins.json");
-    let mut pins: std::collections::BTreeMap<String, String> = match std::fs::read(&pin_path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Default::default(),
-        Err(e) => return Err(e.into()),
+    let pin_key = if let Some(route) = &request.relay {
+        format!(
+            "relay:{}:{}",
+            route.endpoint,
+            bridge
+                .as_ref()
+                .and_then(|b| b.resolved_room.as_deref())
+                .unwrap_or(&request.address.host)
+        )
+    } else if request.pairing_code.is_some() {
+        address.to_string()
+    } else {
+        request.address.to_string()
     };
-    let pin_key = request.address.to_string();
-    if request.relay.is_none()
-        && let Some(pin) = pins.get(&pin_key)
-    {
-        expected = Some(
-            hex::decode(pin)?
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("Invalid saved host fingerprint"))?,
-        );
-    }
+    let trust = removent_client::host_pins::for_connection(
+        &attempt.shared.paths,
+        &pin_key,
+        expected,
+        request.pairing_code.is_some(),
+    )?;
+    expected = trust.expected;
     let clip = MemoryClipboard::new();
     let config = || removent_client::ClientConfig {
+        pairing_code: request.pairing_code.clone(),
         device_name: identity.device_name.clone(),
         caps: Caps {
             video: true,
@@ -74,19 +146,38 @@ pub(super) async fn run_native(
     };
     let pin_attempt = attempt.clone();
     attempt.progress("Negotiating");
-    let mut session = removent_client::connect_session(
+    let destination = if let Some(route) = &request.relay {
+        format!(
+            "{} · {}",
+            bridge
+                .as_ref()
+                .and_then(|b| b.resolved_room.as_deref())
+                .unwrap_or(&request.address.host),
+            route.endpoint
+        )
+    } else if request.pairing_code.is_some() {
+        address.to_string()
+    } else {
+        request.address.to_string()
+    };
+    let confirmation = trust
+        .needs_confirmation
+        .then(|| attempt.certificate_confirmation(destination, false));
+    let mut session = removent_client::connect_session_with_confirmation(
         endpoint(address, identity, expected)?,
         address,
         identity,
         config(),
         None,
         None,
-        Some(Box::new(move |pin| {
+        Some(Box::new(move |mode, pin| {
             pin_attempt.update(|s| {
                 s.pin = Some(pin);
-                s.event(json!({"type":"pin", "generation":pin_attempt.generation}));
+                s.auth_mode = mode;
+                s.event(json!({"type":"pin", "mode":mode, "generation":pin_attempt.generation}));
             });
         })),
+        confirmation,
     )
     .await?;
     let peer_pin = session
@@ -94,10 +185,27 @@ pub(super) async fn run_native(
         .peer_fingerprint()
         .context("Host certificate missing")?;
     expected = Some(peer_pin); // Resumes must authenticate the exact initial host.
-    if request.relay.is_none() {
-        pins.insert(pin_key, hex::encode(peer_pin));
-        removent_core::settings::atomic_write(&pin_path, &serde_json::to_vec(&pins)?)?;
+    {
+        removent_client::host_pins::remember(
+            &attempt.shared.paths,
+            &pin_key,
+            peer_pin,
+            request.pairing_code.is_some(),
+        )?;
     }
+    let resolved = request.pairing_code.as_ref().map(|_| {
+        let mut route = request.relay.clone();
+        if let Some(route) = &mut route {
+            route.host_fingerprint = hex::encode(peer_pin);
+        }
+        let host = bridge
+            .as_ref()
+            .and_then(|b| b.resolved_room.clone())
+            .unwrap_or_else(|| {
+                removent_client::connection::ConnectionAddress::from_socket(address).host
+            });
+        json!({"host":host, "port":if route.is_some() { 0 } else { address.port() }, "relay":route})
+    });
     let mut resumed_once = false;
     loop {
         let params = session.negotiated.audio;
@@ -112,7 +220,7 @@ pub(super) async fn run_native(
         attempt.event(
             json!({"type":"ready", "codec":format!("{:?}", session.negotiated.video.codec),
             "audio":params.enabled, "sample_rate":params.sample_rate, "channels":params.channels,
-            "clipboard":clipboard, "refresh":true, "fingerprint":hex::encode(peer_pin)}),
+            "clipboard":clipboard, "refresh":true, "fingerprint":hex::encode(peer_pin), "resolved":resolved}),
         );
         let mut pcm_open = params.enabled;
         loop {
@@ -162,7 +270,11 @@ pub(super) async fn run_native(
                     endpoint(address, identity, expected)?,
                     address,
                     identity,
-                    config(),
+                    {
+                        let mut cfg = config();
+                        cfg.pairing_code = None;
+                        cfg
+                    },
                     token,
                     ack.clone(),
                 ),

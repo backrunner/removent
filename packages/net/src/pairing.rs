@@ -38,6 +38,52 @@ pub enum PairingMsg {
         confirm_h: [u8; 32],
         sig_h: Vec<u8>,
     },
+    // Append variants to preserve postcard discriminants for legacy pairing.
+    AuthChallenge {
+        mode: removent_proto::AuthenticationMode,
+        challenges: Vec<PairingChallenge>,
+    },
+    AuthVerify {
+        proofs: Vec<PairingProof>,
+    },
+    BeginInvitation {
+        nonce_c: [u8; 16],
+        fp_c: String,
+        locator: String,
+    },
+}
+
+// Flat payloads prevent untrusted authentication frames from recursively
+// nesting PairingMsg and overflowing the decoder's stack.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PairingChallenge {
+    pub nonce_h: [u8; 16],
+    pub msg_h: Vec<u8>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PairingProof {
+    pub msg_c: Vec<u8>,
+    pub confirm_c: [u8; 32],
+    pub vk_c: [u8; 32],
+    pub sig_c: Vec<u8>,
+}
+impl From<PairingChallenge> for PairingMsg {
+    fn from(value: PairingChallenge) -> Self {
+        Self::Challenge {
+            nonce_h: value.nonce_h,
+            msg_h: value.msg_h,
+        }
+    }
+}
+impl From<PairingProof> for PairingMsg {
+    fn from(value: PairingProof) -> Self {
+        Self::Verify {
+            msg_c: value.msg_c,
+            confirm_c: value.confirm_c,
+            vk_c: value.vk_c,
+            sig_c: value.sig_c,
+        }
+    }
 }
 
 const CLIENT_ROLE_ID: &[u8] = b"removent-client";
@@ -184,12 +230,17 @@ pub struct HostHandshake {
 
 /// On Begin received: generate the PIN and prepare the Challenge reply.
 pub fn host_on_begin(begin: &PairingMsg) -> Result<HostHandshake> {
-    let PairingMsg::Begin { nonce_c, .. } = begin else {
-        return Err(NetError::Pairing("expected Begin".into()));
+    host_on_begin_with_secret(begin, &generate_pin())
+}
+
+pub fn host_on_begin_with_secret(begin: &PairingMsg, secret: &str) -> Result<HostHandshake> {
+    let nonce_c = match begin {
+        PairingMsg::Begin { nonce_c, .. } | PairingMsg::BeginInvitation { nonce_c, .. } => nonce_c,
+        _ => return Err(NetError::Pairing("expected Begin".into())),
     };
     let mut nonce_h = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut nonce_h);
-    let pin = generate_pin();
+    let pin = secret.to_owned();
     let (spake, msg_h) = Spake2::<Ed25519Group>::start_b(
         &Password::new(pin.as_bytes()),
         &Identity::new(CLIENT_ROLE_ID),
@@ -272,6 +323,18 @@ mod tests {
             root: dir.path().to_path_buf(),
         };
         (identity::load_or_create(&p, name).unwrap(), dir)
+    }
+
+    #[test]
+    fn legacy_confirm_wire_discriminant_is_unchanged() {
+        let confirm = PairingMsg::Confirm {
+            ok: false,
+            confirm_h: [0; 32],
+            sig_h: vec![],
+        };
+        let bytes = postcard::to_allocvec(&confirm).unwrap();
+        assert_eq!(bytes[0], 3);
+        assert_eq!(postcard::from_bytes::<PairingMsg>(&bytes).unwrap(), confirm);
     }
 
     #[test]

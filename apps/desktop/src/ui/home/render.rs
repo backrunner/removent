@@ -65,7 +65,10 @@ impl Render for HomeView {
             .on_action(cx.listener(|this, _: &HomeEscape, window, cx| {
                 if this.admission.is_some() {
                     this.answer_admission(false, cx);
-                } else if matches!(this.pin_dialog, Some(PinDialog::Entry(_))) {
+                } else if matches!(
+                    this.pin_dialog,
+                    Some(PinDialog::Entry(_) | PinDialog::Trust { .. })
+                ) {
                     this.cancel_pin(window, cx);
                 } else if matches!(this.pin_dialog, Some(PinDialog::Display(_))) {
                     this.pin_dialog = None;

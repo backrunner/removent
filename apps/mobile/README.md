@@ -5,7 +5,15 @@ host; the mobile app shares the Rust controller session engine with Removent
 desktop and presents it through a small SwiftUI shell.
 
 The controller supports native Removent/RVP, VNC / Apple Remote Desktop, and
-RDP connection forms. Native sessions include PIN pairing, mutual certificate
+RDP connection forms. Native sessions follow the desktop host authentication policy: pairing code (default),
+access password, authenticator OTP, or no authentication. Policy and OTP setup live in
+desktop Settings → Security; the mobile app prompts only for the required credential.
+Desktop Security settings also choose whether paired controllers must pair each connection.
+Enter a host-generated 12-digit connection code in the address field to connect by Bonjour on
+LAN, or select the same relay and use that code instead of the room. No host fingerprint is
+needed before invitation pairing. After success, **Remember this computer** saves the resolved
+destination and verified fingerprint, never the temporary code.
+Native sessions include mutual certificate
 pinning, relay routing, adaptive video receive, touch/mouse and keyboard input,
 text clipboard, optional Opus playback, saved connections in Keychain, Bonjour
 discovery, one quick resume, and explicit foreground/background session state.
@@ -64,7 +72,8 @@ that touch/keyboard input reaches the fixture. It does not prove performance on
 a physical device or WAN quality. The VNC/RDP client engines remain the same
 Rust implementations exercised by the desktop interop suites; a live RDP
 server is required for mobile RDP acceptance. Run each fixture in a separate
-terminal; both listen only on loopback. The VNC fixture exercises raw RFB frames
+terminal. By default both listen only on loopback; `REMOVENT_FIXTURE_INVITATION=1` makes the
+RVP fixture advertise a one-time code over Bonjour and listen on IPv4 interfaces. The VNC fixture exercises raw RFB frames
 and records input without controlling the computer. The RVP test additionally
 types through the software keyboard and reconnects after backgrounding.
 
@@ -87,3 +96,16 @@ acceptance are documented in [`docs/architecture/cloudkit-sync-design.md`](../..
 
 The Rust build script currently produces arm64 libraries for physical devices and
 Apple Silicon simulators. The Xcode project declares that supported architecture.
+
+The synthetic RVP fixture also accepts `REMOVENT_FIXTURE_AUTH=password|otp|none`.
+Password is `fixture-password`; OTP setup secret is `GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ`
+(TOTP, SHA-1, 6 digits, 30 seconds). These are synthetic loopback-only test credentials.
+
+Relay setup uses the relay address and optional SNI (empty uses the address
+hostname). The form does not expose certificate fingerprint fields. **Relay access
+password** is optional and supplied by the relay administrator when access is
+restricted. The first connection asks the user to trust the computer, and an
+unknown QUIC relay is confirmed separately before any relay access password is
+sent. Cancelling stops the connection. Successful connections remember the exact
+certificate locally; subsequent connections check it and reject changes.
+Certificate verification exceptions remain local when connections sync.

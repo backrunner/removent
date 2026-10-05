@@ -78,6 +78,7 @@ impl SavedConnection {
     /// Rebuild a request; the password field is empty because it is never persisted.
     pub fn to_request(&self) -> ConnectionRequest {
         ConnectionRequest {
+            pairing_code: None,
             protocol: self.protocol,
             address: ConnectionAddress {
                 host: self.host.clone(),

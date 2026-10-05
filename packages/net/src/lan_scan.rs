@@ -218,6 +218,7 @@ async fn scan_round(
             entries.insert(
                 id.clone(),
                 DeviceEntry {
+                    pairing: None,
                     instance: id,
                     name: target.remote.ip().to_string(),
                     short_fp: String::new(),
@@ -356,6 +357,7 @@ mod tests {
         let known = Table::from([(
             "known".into(),
             DeviceEntry {
+                pairing: None,
                 instance: "known".into(),
                 name: "PC".into(),
                 short_fp: String::new(),

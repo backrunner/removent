@@ -3,9 +3,9 @@ _version: 1
 
 app.name: Removent
 
-home.name_placeholder: 在局域网中显示的名称
+home.name_placeholder: "设备名称"
 home.pin_placeholder: 6 位数字
-home.search_placeholder: 搜索名称或 IP
+home.search_placeholder: "名称或 IP"
 home.manual_placeholder: "192.168.1.10"
 
 
@@ -69,6 +69,8 @@ device.fingerprint: 指纹
 device.trust: 信任状态
 
 sharing.title: 共享本机
+sharing.enabled: 共享已开启
+sharing.disabled: 共享已关闭
 device.copy_fingerprint: 复制指纹
 
 
@@ -80,6 +82,7 @@ permissions.open_settings: 打开系统设置
 permissions.daemon_restart_hint: 守护进程（removentd）尚未获得该权限——请关闭再开启主机服务以重启它
 
 settings.title: 设置
+settings.back_to_devices: 返回设备
 settings.general: 通用
 settings.device_name: 设备名称
 settings.appearance: 外观
@@ -96,7 +99,7 @@ settings.admission.deny: "拒绝所有"
 settings.vnc: Apple Remote Desktop / VNC
 settings.vnc_enabled: 启用 VNC 兼容服务
 settings.vnc_password: VNC 密码
-settings.vnc_password_placeholder: 留空表示无需密码
+settings.vnc_password_placeholder: "选填"
 settings.vnc_hint: 此密码用于通过 VNC 共享本机（端口 5900）。远程设备的凭据请在「添加连接」中填写。
 settings.data: 数据
 settings.data_dir: 数据目录
@@ -106,8 +109,8 @@ update.current: 当前版本
 update.check_now: 检查更新
 update.auto_check: 自动检查更新
 update.channel: 更新渠道
-update.channel_stable: Stable · 稳定版
-update.channel_beta: Beta · 测试版
+update.channel_stable: Stable
+update.channel_beta: Beta
 update.channel_hint: Stable 接收正式版，Beta 也接收测试版。切换渠道只会升级，不会降级。
 update.checking: 正在检查更新…
 update.up_to_date: 当前渠道没有更高版本
@@ -200,9 +203,9 @@ saved.credentials_hint: "密码保存在 macOS 钥匙串中，连接时自动填
 connection.title: "远程连接"
 connection.add: "添加连接"
 connection.name: "名称（可选）"
-connection.name_placeholder: "例如：办公室 Mac"
+connection.name_placeholder: "办公室 Mac"
 connection.address: "主机地址"
-connection.host_placeholder: "IP 地址或主机名"
+connection.host_placeholder: "IP 或域名"
 connection.port: "端口"
 connection.username: "用户名"
 connection.vnc_username: "macOS 用户名（可选）"
@@ -241,7 +244,7 @@ connection.removent_hint: "Mac 之间的高速连接 · 安全配对"
 connection.vnc_hint: "macOS 屏幕共享 · 标准 VNC 服务"
 connection.rdp_hint: "Windows 远程桌面 · RDP 服务"
 connection.credentials_hint: "连接 macOS 屏幕共享时，请填写远端 Mac 的账户短名称与登录密码。仅使用 VNC 专用密码时，用户名留空。"
-connection.welcome: "你的设备，触手可及。"
+connection.welcome: "连接到设备"
 connection.welcome_hint: "连接局域网中的 Mac 或 PC，在这里开启远程工作。"
 connection.lan_badge: "局域网直连"
 
@@ -275,18 +278,14 @@ settings.open_logs_failed: "无法打开日志文件夹：%{err}"
 
 connection.use_relay: "通过 relay 连接"
 connection.relay_room: "主机房间 ID"
-connection.relay_pin: "Relay 证书指纹（仅 QUIC）"
-connection.host_fingerprint: "目标主机证书指纹"
-connection.relay_credential: "Relay 凭据（可选）"
-connection.relay_trust_hint: "WSS 会验证 relay 证书，QUIC 需填写其指纹。请通过可信渠道从被控方获取主机指纹。不填凭据时，relay 必须已登记本机公钥；连接仍需完成 RVP 配对授权。"
-connection.fingerprint_placeholder: "从被控方获取的 64 位十六进制指纹"
-connection.invalid_relay_pin: "QUIC 需要端口和 relay 的完整证书指纹。"
-connection.invalid_host_fingerprint: "请输入目标主机完整的 64 位证书指纹。"
-connection.invalid_relay_credential: "请输入 relay 的 64 位凭据，或留空使用已登记设备认证。"
-connection.relay_credential_missing: "钥匙串中的 relay 凭据不可用，请重新输入。"
-connection.relay_credential_loading: "正在读取已保存的 relay 凭据…"
+connection.relay_credential: "中继访问密码（选填）"
+connection.relay_trust_hint: "仅在中继设置了访问密码时填写。首次连接会请您确认目标，确认后记住其身份。"
+connection.invalid_relay_pin: "已保存的中继证书信息无效，请重新创建连接。"
+connection.invalid_host_fingerprint: "已保存的电脑证书信息无效，请重新创建连接。"
+connection.invalid_relay_credential: "请粘贴中继管理员提供的完整访问密码，或留空。"
+connection.relay_credential_missing: "已保存的中继访问密码不可用，请重新输入。"
+connection.relay_credential_loading: "正在读取已保存的中继访问密码…"
 connection.relay_hint: "使用 removent://主机:端口，或启用通过 relay 连接。"
-connection.quic_pin_placeholder: "QUIC 需填写；Cloudflare / HTTPS 留空"
 connection.invalid_relay: "请输入 removent://域名或IP:端口；地址中不能包含凭据、路径或查询参数。"
 connection.relay_endpoint: "Relay 地址"
 connection.relay_transport: "Relay 部署方式"
@@ -329,3 +328,53 @@ sync.upgrade_required: 请更新 Removent 以继续同步
 sync.relay: "中继"
 sync.relay_fingerprint: "中继指纹"
 sync.host_fingerprint: "主机指纹"
+
+auth.title: "连接认证方式"
+auth.hint: "选择主控端的认证方式。口令、OTP 和无认证支持无人值守连接。"
+auth.pairing: "配对码"
+auth.password: "访问口令"
+auth.otp: "OTP"
+auth.none: "无认证"
+auth.password_desc: "输入远程电脑上设置的访问口令。"
+auth.otp_desc: "输入验证器中当前的六位动态验证码。"
+auth.password_hint: "选择口令认证前，请先设置访问口令。"
+auth.password_required: "请先设置非空访问口令（最多 1024 字节）。"
+auth.use_password: "使用口令"
+auth.connect: "连接"
+auth.otp_setup: "绑定验证器"
+auth.otp_setup_hint: "手动添加此密钥：TOTP、SHA-1、6 位、30 秒。每个验证码仅可使用一次。"
+auth.copy_secret: "复制绑定密钥"
+auth.none_hint: "任何可连接到此电脑的人均可直接访问和控制，无需提供凭据。"
+auth.allow: "允许连接"
+auth.allow_hint: "通过所选认证方式后直接连接，无需现场确认。"
+
+# Pairing policy and proactive invitations
+pairing.policy: "配对策略"
+pairing.policy_hint: "选择已配对设备是否每次连接都需输入新配对码。"
+pairing.remember: "记住已配对设备"
+pairing.every_connection: "每次连接都配对"
+pairing.invitation: "连接码"
+pairing.invitation_hint: "在同一局域网或 relay 的控制端输入此 12 位连接码，五分钟内可连接一次。"
+pairing.generate: "生成连接码"
+pairing.copy: "复制配对码"
+pairing.revoke: "撤销连接码"
+pairing.daemon_required: "请先启动共享服务，再生成连接码。"
+pairing.temporary: "请先连接后保存电脑，临时连接码不能直接保存。"
+pairing.address_or_code: "地址 / 房间 / 连接码"
+pairing.room_or_code: "房间 / 连接码"
+
+connection.sni: "SNI（选填）"
+connection.sni_placeholder: "默认使用中继域名"
+connection.invalid_sni: "SNI 请输入主机名，不含协议、路径或端口。"
+connection.verify_relay_certificate: "验证中继证书"
+connection.unverified_relay_hint: "连接仍然加密，但不验证中继的身份。"
+
+trust.relay_title: "信任此中继？"
+
+trust.computer_title: "信任此电脑？"
+
+trust.description: "这是首次连接，请确认这是您要连接的目标。确认后将记住其身份，后续连接会自动核验。"
+
+trust.waiting: "请确认首次连接"
+
+trust.connect: "信任并连接"

@@ -77,6 +77,11 @@ enum PinDialog {
     Display(String),
     /// Controlling side: enter the PIN shown on the peer's screen.
     Entry(oneshot::Sender<String>),
+    Trust {
+        destination: String,
+        relay: bool,
+        tx: oneshot::Sender<bool>,
+    },
 }
 
 pub struct HomeView {
@@ -108,6 +113,8 @@ pub struct HomeView {
     /// transition replays on each open (animation state is keyed by id and may survive remount).
     dialog_seq: u64,
     pin_input: Entity<InputState>,
+    auth_mode: removent_core::AuthenticationMode,
+    auth_password_input: Entity<InputState>,
     search_input: Entity<InputState>,
     connection_dialog: Option<Entity<ConnectionDialog>>,
     connection_subscription: Option<gpui::Subscription>,
@@ -128,7 +135,9 @@ pub struct HomeView {
 
 /// Grouped PIN display: 6 digits → "123 456".
 fn group_pin(pin: &str) -> String {
-    if pin.len() == 6 && pin.is_ascii() {
+    if pin.len() == 12 && pin.is_ascii() {
+        format!("{} {}", &pin[..6], &pin[6..])
+    } else if pin.len() == 6 && pin.is_ascii() {
         format!("{} {}", &pin[..3], &pin[3..])
     } else {
         pin.to_string()
@@ -177,6 +186,33 @@ fn sidebar_line() -> Div {
         .whitespace_normal()
         .text_ellipsis()
         .line_clamp(1)
+}
+
+/// Shared compact typography for nearby, saved and local device rows.
+fn sidebar_labels(width: f32, title: String, subtitle: String, cx: &App) -> Div {
+    div()
+        .w(px(width))
+        .flex_shrink_0()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap(px(2.))
+        .child(
+            sidebar_line()
+                .w(px(width))
+                .text_size(px(13.))
+                .line_height(px(16.))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .child(title),
+        )
+        .child(
+            sidebar_line()
+                .w(px(width))
+                .text_size(px(11.))
+                .line_height(px(14.))
+                .text_color(cx.theme().muted_foreground)
+                .child(subtitle),
+        )
 }
 
 /// Bookmark glyph keyed by protocol, matching the connection dialog picker.

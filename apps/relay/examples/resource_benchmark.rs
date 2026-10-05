@@ -228,6 +228,8 @@ async fn main() -> Result<()> {
     .await??;
     let log_task = tokio::spawn(async move { while let Ok(Some(_)) = logs.next_line().await {} });
     let base = TunnelConfig {
+        server_name: String::new(),
+        accept_invalid_certificate: false,
         server: format!("removent://{address}"),
         transport: if websocket {
             RelayTransport::WebSocket

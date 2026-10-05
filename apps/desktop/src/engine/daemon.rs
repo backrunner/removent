@@ -1,6 +1,20 @@
 use super::*;
 
 impl Engine {
+    pub fn generate_pairing_code(&self) {
+        if let Some(tx) = self.daemon_req.lock().unwrap().as_ref() {
+            let _ = tx.send(IpcRequest::PairingGenerate);
+        } else {
+            let _ = self
+                .events_tx
+                .send(UiEvent::Notice(t!("pairing.daemon_required").to_string()));
+        }
+    }
+    pub fn revoke_pairing_code(&self) {
+        if let Some(tx) = self.daemon_req.lock().unwrap().as_ref() {
+            let _ = tx.send(IpcRequest::PairingRevoke);
+        }
+    }
     /// Enable/disable the host service; tries to spawn the daemon first when offline.
     pub fn set_host_enabled(&self, on: bool) {
         if let Some(tx) = self.daemon_req.lock().unwrap().as_ref() {

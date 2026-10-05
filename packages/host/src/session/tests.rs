@@ -793,3 +793,144 @@ fn previous_generation_token_is_tolerated_once() {
     assert!(validate_resume_full(fp, &t2).is_none());
     invalidate_resume(fp);
 }
+
+#[test]
+fn resume_policy_requires_same_authentication_credentials() {
+    let fp = "authentication-policy-resume-test";
+    let token = [73; 16];
+    let ack = removent_proto::NegotiateAck {
+        video: removent_proto::VideoParams {
+            codec: CodecId::H264,
+            max_bitrate_kbps: 3000,
+            max_fps: 30,
+            initial_scale: 1.0,
+        },
+        audio: removent_proto::AudioParams {
+            enabled: false,
+            sample_rate: 48000,
+            channels: 2,
+            bitrate_kbps: 64,
+            frame_ms: 10,
+        },
+        resume_token: Some(token),
+    };
+    let mut auth = removent_core::AuthenticationSettings {
+        mode: removent_core::AuthenticationMode::Password,
+        password: "first".into(),
+        ..Default::default()
+    };
+    remember_resume(fp, &token, &ack, Caps::all(), None);
+    remember_resume_policy(fp, &auth);
+    assert!(resume_policy_matches(fp, &auth));
+    auth.password = "second".into();
+    assert!(!resume_policy_matches(fp, &auth));
+    auth.mode = removent_core::AuthenticationMode::None;
+    assert!(!resume_policy_matches(fp, &auth));
+    invalidate_resume(fp);
+}
+
+#[test]
+fn every_connection_policy_rejects_even_matching_fresh_resume_token() {
+    let fp = "every-connection-resume-test";
+    let token = [91; 16];
+    let auth = removent_core::AuthenticationSettings {
+        pairing_policy: removent_core::authentication::PairingPolicy::EveryConnection,
+        ..Default::default()
+    };
+    remember_resume(fp, &token, &test_ack(), Caps::all(), None);
+    remember_resume_policy(fp, &auth);
+    assert!(validate_resume_full(fp, &token).is_some());
+    assert!(!resume_policy_matches(fp, &auth));
+    invalidate_resume(fp);
+}
+
+#[tokio::test]
+async fn resume_handshake_rechecks_revoked_trust_and_reduced_capability_grants() {
+    for trusted in [true, false] {
+        let (_endpoints, client, host) = quic_pair().await;
+        let fp = hex::encode(host.peer_fingerprint().unwrap());
+        let token = [47; 16];
+        let auth = removent_core::AuthenticationSettings::default();
+        remember_resume(&fp, &token, &test_ack(), Caps::all(), None);
+        remember_resume_policy(&fp, &auth);
+        let mut peers = PeersStore::in_memory();
+        peers
+            .upsert(PeerRecord {
+                fingerprint: fp.clone(),
+                short_fp: fp[..16].into(),
+                name: "Restricted".into(),
+                trusted,
+                granted_caps: Caps {
+                    video: true,
+                    ..Caps::none()
+                },
+                added_at_unix: 0,
+                last_connected_unix: 0,
+            })
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let id = removent_core::identity::load_or_create(
+            &removent_core::DataPaths {
+                root: dir.path().into(),
+            },
+            "ResumePolicyTest",
+        )
+        .unwrap();
+        let task = tokio::spawn(async move {
+            serve_connection(
+                host,
+                &id,
+                &mut peers,
+                &HostConfig {
+                    authentication: auth,
+                    auth_paths: None,
+                    audio_available: false,
+                    preapproved_only: false,
+                    device_name: "ResumePolicyTest".into(),
+                    admission: AdmissionMode::TrustedAuto,
+                    video_bitrate_kbps: 1000,
+                    video_fps: 30,
+                    input_sink: Some(Arc::new(crate::input_sink::RecorderInputSink::default())),
+                    local_clip: None,
+                },
+                HostInteractions {
+                    show_pairing_pin: Box::new(|_| {}),
+                    admission_prompt: Box::new(|_, _| Box::pin(async { false })),
+                },
+                removent_proto::DisplayInfo {
+                    id: 1,
+                    w_px: 320,
+                    h_px: 240,
+                    scale: 1.,
+                    dpi: 96,
+                    is_main: true,
+                },
+            )
+            .await
+        });
+        let (ack, _sink, _source) = client
+            .connect_handshake(removent_proto::HandshakeClient {
+                magic: removent_proto::MAGIC,
+                proto_version: PROTO_VERSION,
+                feature_bits: removent_proto::feature_bits::AUTH_METHODS,
+                hello: removent_proto::Hello {
+                    app_version: "test".into(),
+                    device_name: "Restricted".into(),
+                    os_version: "test".into(),
+                    caps: Caps::all(),
+                    resume_token: Some(token),
+                },
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            ack.resume_accepted,
+            Some(false),
+            "A fresh token must not bypass updated grants or trust"
+        );
+        client.inner().close(0u32.into(), b"test complete");
+        task.abort();
+        let _ = task.await;
+        invalidate_resume(&fp);
+    }
+}

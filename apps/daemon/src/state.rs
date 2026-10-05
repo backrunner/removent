@@ -33,6 +33,7 @@ pub struct DaemonState {
     /// most one; 0 = none).
     current_session: AtomicU64,
     pub pending_pin: Mutex<Option<String>>,
+    pending_pin_expiry: AtomicU64,
     /// Number of connected management ends (tray/app/cli).
     pub tray_connections: AtomicUsize,
     pub events: broadcast::Sender<IpcEvent>,
@@ -88,6 +89,7 @@ impl DaemonState {
             next_session_id: AtomicU64::new(1),
             current_session: AtomicU64::new(0),
             pending_pin: Mutex::new(None),
+            pending_pin_expiry: AtomicU64::new(0),
             tray_connections: AtomicUsize::new(0),
             events,
             pending_admissions: Mutex::new(HashMap::new()),
@@ -120,7 +122,7 @@ impl DaemonState {
             device_name: settings.device_name.clone(),
             fp_short: self.fp_short.clone(),
             sessions: self.sessions.lock().unwrap().clone(),
-            pending_pin: self.pending_pin.lock().unwrap().clone(),
+            pending_pin: self.active_pin(),
             tray_connected: self.tray_connections.load(Ordering::SeqCst) > 0,
             screen_recording_granted: crate::tcc::screen_recording_granted(),
             accessibility_granted: crate::tcc::accessibility_granted(),
@@ -141,11 +143,52 @@ impl DaemonState {
             self.enabled_watch.send_replace(on);
             self.broadcast(IpcEvent::StateChanged { running: on });
         }
+        if !on {
+            self.clear_pin();
+            removent_host::session::clear_resume_registry();
+            if let Err(error) = removent_core::pairing_invitation::Invitation::revoke(&self.paths) {
+                tracing::warn!(%error, "failed to revoke invitation after disabling host");
+            }
+        }
         Ok(())
     }
 
     /// Pairing PIN display: stash and broadcast it for management ends to present.
+    pub fn active_pin(&self) -> Option<String> {
+        if !self.enabled.load(Ordering::SeqCst) {
+            return None;
+        }
+        if let Some(pin) = self.pending_pin.lock().unwrap().clone()
+            && pin.len() == 6
+            && self.pending_pin_expiry.load(Ordering::SeqCst)
+                > removent_core::pairing_invitation::now()
+        {
+            return Some(pin);
+        }
+        removent_core::pairing_invitation::Invitation::load(&self.paths)
+            .ok()
+            .flatten()
+            .map(|i| i.code().expose().to_owned())
+    }
+    pub fn clear_pin(&self) {
+        *self.pending_pin.lock().unwrap() = None;
+        // A persisted invitation may have been displayed from a status snapshot
+        // after daemon restart, without a corresponding in-memory pending PIN.
+        self.broadcast(IpcEvent::PairingCleared);
+    }
+    pub fn clear_reactive_pin(&self) {
+        let mut pin = self.pending_pin.lock().unwrap();
+        if pin.as_ref().is_some_and(|p| p.len() == 6) {
+            *pin = None;
+            drop(pin);
+            self.broadcast(IpcEvent::PairingCleared);
+        }
+    }
     pub fn show_pin(&self, pin: String) {
+        self.pending_pin_expiry.store(
+            removent_core::pairing_invitation::now() + 300,
+            Ordering::SeqCst,
+        );
         *self.pending_pin.lock().unwrap() = Some(pin.clone());
         self.broadcast(IpcEvent::PairingPin { pin });
     }

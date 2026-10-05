@@ -62,6 +62,35 @@ impl RemoventEndpoint {
     }
 }
 
+/// Optional TLS name override; empty uses the endpoint hostname.
+pub fn normalize_server_name(value: &str) -> Result<String, &'static str> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(String::new());
+    }
+    if let Ok(ip) = value.parse::<std::net::IpAddr>() {
+        return Ok(ip.to_string());
+    }
+    let url::Host::Domain(name) = url::Host::parse(value).map_err(|_| "Invalid TLS server name")?
+    else {
+        return Err("Invalid TLS server name");
+    };
+    if name.len() > 253
+        || name.split('.').any(|label| {
+            label.is_empty()
+                || label.len() > 63
+                || label.starts_with('-')
+                || label.ends_with('-')
+                || !label
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'-')
+        })
+    {
+        return Err("Invalid TLS server name");
+    }
+    Ok(name)
+}
+
 pub fn valid_room(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64

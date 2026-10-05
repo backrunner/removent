@@ -6,7 +6,6 @@
 
 use anyhow::Result;
 use futures::FutureExt;
-use removent_client::connect_session;
 use removent_client::connection::{ConnectionProgress, ConnectionStage};
 use removent_client::connection::{ConnectionProtocol, ConnectionRequest};
 use removent_client::keychain;
@@ -42,6 +41,7 @@ pub enum UiEvent {
     PairingPin(String),
     /// Pairing complete.
     PairingDone(String),
+    PairingCleared,
     /// Controlled side: admission request (forwarded by the daemon), awaiting user decision.
     AdmissionRequest {
         request_id: u64,
@@ -51,7 +51,14 @@ pub enum UiEvent {
     /// Controlling side: the user must enter the peer's PIN to finish pairing.
     ClientNeedsPin {
         generation: usize,
+        mode: removent_core::AuthenticationMode,
         tx: tokio::sync::oneshot::Sender<String>,
+    },
+    ConfirmCertificate {
+        generation: usize,
+        destination: String,
+        relay: bool,
+        tx: tokio::sync::oneshot::Sender<bool>,
     },
     ConnectionProgress {
         generation: usize,
@@ -102,6 +109,10 @@ pub enum UiEvent {
     },
     /// Auto-update state machine snapshot (release.md §3; apps/desktop/src/updater.rs).
     UpdateStatus(UpdateStatus),
+    PairedConnections {
+        generation: usize,
+        entries: Vec<SavedConnection>,
+    },
     CloudSync {
         status: serde_json::Value,
         entries: Vec<SavedConnection>,
@@ -111,7 +122,9 @@ pub enum UiEvent {
 impl UiEvent {
     pub fn belongs_to_client(&self, current: usize) -> bool {
         match self {
-            Self::ClientNeedsPin { generation, .. }
+            Self::PairedConnections { generation, .. }
+            | Self::ClientNeedsPin { generation, .. }
+            | Self::ConfirmCertificate { generation, .. }
             | Self::ConnectionProgress { generation, .. }
             | Self::SessionReady { generation, .. }
             | Self::ConnectFailed { generation, .. }
@@ -193,6 +206,23 @@ struct ClientAttempt {
 }
 
 impl ClientAttempt {
+    fn certificate_confirmation(
+        &self,
+        destination: String,
+        relay: bool,
+    ) -> removent_net::CertificateConfirmation {
+        let attempt = self.clone();
+        Box::new(move |_, tx| {
+            if attempt.channels.lock().unwrap().generation == attempt.generation {
+                let _ = attempt.events.send(UiEvent::ConfirmCertificate {
+                    generation: attempt.generation,
+                    destination,
+                    relay,
+                    tx,
+                });
+            }
+        })
+    }
     fn progress(&self, stage: ConnectionStage) {
         if self.channels.lock().unwrap().generation == self.generation {
             tracing::info!(

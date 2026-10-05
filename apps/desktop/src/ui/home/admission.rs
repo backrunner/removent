@@ -28,8 +28,8 @@ impl HomeView {
     }
 
     pub(super) fn submit_pin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let pin = self.pin_input.read(cx).value().trim().to_string();
-        if pin.len() != 6 || !pin.bytes().all(|b| b.is_ascii_digit()) {
+        let pin = self.pin_input.read(cx).value().to_string();
+        if !self.auth_mode.valid_input(&pin) {
             return;
         }
         if !matches!(self.pin_dialog, Some(PinDialog::Entry(_))) {
@@ -44,11 +44,27 @@ impl HomeView {
         cx.notify();
     }
 
+    pub(super) fn confirm_certificate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(PinDialog::Trust { tx, .. }) = self.pin_dialog.take() {
+            let _ = tx.send(true);
+            self.set_connection_stage(ConnectionStage::Negotiating, cx);
+            window.focus(&self.focus);
+        }
+        cx.notify();
+    }
+
     pub(super) fn cancel_pin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(PinDialog::Entry(tx)) = self.pin_dialog.take() {
-            drop(tx);
-            self.clear_pin_input(window, cx);
-            self.cancel_connection(cx);
+        match self.pin_dialog.take() {
+            Some(PinDialog::Entry(tx)) => {
+                drop(tx);
+                self.clear_pin_input(window, cx);
+                self.cancel_connection(cx);
+            }
+            Some(PinDialog::Trust { tx, .. }) => {
+                let _ = tx.send(false);
+                self.cancel_connection(cx);
+            }
+            other => self.pin_dialog = other,
         }
         cx.notify();
     }

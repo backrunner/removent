@@ -34,6 +34,16 @@ pub enum Command {
         clipboard: bool,
     },
     Disconnect,
+    PairingAddress {
+        generation: u64,
+        host: String,
+        port: u16,
+        error: Option<String>,
+    },
+    ConfirmCertificate {
+        generation: u64,
+        accept: bool,
+    },
     Pin {
         generation: u64,
         pin: String,
@@ -95,6 +105,14 @@ pub struct State {
     input: Option<InputChannel>,
     control: Option<mpsc::Sender<ControlMsg>>,
     pin: Option<oneshot::Sender<String>>,
+    certificate: Option<oneshot::Sender<bool>>,
+    auth_mode: removent_core::AuthenticationMode,
+    #[cfg(target_os = "ios")]
+    pairing_address: Option<
+        oneshot::Sender<
+            std::result::Result<removent_client::connection::ConnectionAddress, String>,
+        >,
+    >,
     clipboard: Option<Arc<MemoryClipboard>>,
 }
 
@@ -105,6 +123,11 @@ impl State {
         self.input = None;
         self.control = None;
         self.pin = None;
+        self.certificate = None;
+        #[cfg(target_os = "ios")]
+        {
+            self.pairing_address = None;
+        }
         self.clipboard = None;
     }
     fn event(&mut self, event: Value) {
@@ -148,6 +171,19 @@ impl Attempt {
     fn event(&self, mut event: Value) {
         event["generation"] = self.generation.into();
         self.update(|s| s.event(event));
+    }
+    fn certificate_confirmation(
+        &self,
+        destination: String,
+        relay: bool,
+    ) -> removent_net::CertificateConfirmation {
+        let attempt = self.clone();
+        Box::new(move |_, tx| {
+            attempt.update(|state| {
+            state.certificate = Some(tx);
+            state.event(json!({"type":"certificate", "generation":attempt.generation, "destination":destination, "relay":relay}));
+        })
+        })
     }
     fn progress(&self, stage: &str) {
         self.event(json!({"type":"progress", "stage":stage}));
@@ -292,15 +328,7 @@ impl Engine {
                 }
                 // Validate persisted public routing fields at the same boundary as new forms.
                 if let Some(route) = &request.relay {
-                    request.relay = Some(
-                        removent_client::connection::RelayRoute::parse(
-                            &route.endpoint,
-                            route.transport,
-                            &route.server_fingerprint,
-                            &route.host_fingerprint,
-                        )
-                        .map_err(anyhow::Error::msg)?,
-                    );
+                    request.relay = Some(route.validated(false).map_err(anyhow::Error::msg)?);
                 }
                 saved.touch(&id)?;
                 self.connect(request, audio, clipboard)
@@ -326,6 +354,10 @@ impl Engine {
                     "Saved credentials must belong to this bookmark"
                 );
                 let request = self.request_with_credentials(&request, credential_id.as_deref())?;
+                ensure!(
+                    request.pairing_code.is_none(),
+                    "Connection codes are temporary and cannot be saved"
+                );
                 let mut entry = SavedConnection::from_request(&request, name);
                 entry.id = id.unwrap_or_default();
                 let entry = SavedConnections::load(&self.shared.paths)?
@@ -365,12 +397,56 @@ impl Engine {
                 }
                 Ok(Value::Null)
             }
+            Command::PairingAddress {
+                generation,
+                host,
+                port,
+                error,
+            } => {
+                #[cfg(target_os = "ios")]
+                {
+                    let mut state = self.shared.state.lock().unwrap();
+                    ensure!(state.generation == generation, "Connection was cancelled");
+                    let address = if let Some(error) = error {
+                        Err(error)
+                    } else {
+                        removent_client::connection::ConnectionAddress::parse(
+                            &host,
+                            &port.to_string(),
+                        )
+                        .map_err(|e| e.to_string())
+                    };
+                    state
+                        .pairing_address
+                        .take()
+                        .context("No pairing lookup pending")?
+                        .send(address)
+                        .map_err(|_| anyhow::anyhow!("Lookup cancelled"))?;
+                    Ok(Value::Null)
+                }
+                #[cfg(not(target_os = "ios"))]
+                {
+                    let _ = (generation, host, port, error);
+                    anyhow::bail!("System Bonjour is only used on iOS")
+                }
+            }
+            Command::ConfirmCertificate { generation, accept } => {
+                let mut state = self.shared.state.lock().unwrap();
+                ensure!(state.generation == generation, "Connection was cancelled");
+                state
+                    .certificate
+                    .take()
+                    .context("No certificate confirmation is pending")?
+                    .send(accept)
+                    .map_err(|_| anyhow::anyhow!("Certificate confirmation expired"))?;
+                Ok(Value::Null)
+            }
             Command::Pin { generation, pin } => {
-                ensure!(
-                    pin.len() == 6 && pin.bytes().all(|b| b.is_ascii_digit()),
-                    "Enter the six-digit PIN"
-                );
                 let mut s = self.shared.state.lock().unwrap();
+                ensure!(
+                    s.auth_mode.valid_input(&pin),
+                    "Enter a valid password or six-digit code"
+                );
                 ensure!(s.generation == generation, "Connection was cancelled");
                 s.pin
                     .take()

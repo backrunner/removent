@@ -47,6 +47,46 @@ Grant them under *System Settings → Privacy & Security*, then toggle the host 
 the menu-bar tray. On the other Mac, find this device in the device list (or connect by IP),
 enter the pairing PIN shown on the host, and you're in.
 
+#### Unattended connection authentication
+
+Choose **Settings → Security → Connection authentication** on the desktop host.
+The iPhone/iPad app and desktop controller follow the host's choice automatically:
+
+- **Pairing code** (default): enter the six-digit code displayed on the host. Choose **Remember paired devices** or **Pair every connection** in desktop Security settings.
+- **Access password**: set a non-empty host password; every new session requires it, including previously paired devices.
+- **OTP**: copy the setup secret into an authenticator as TOTP / SHA-1 / 6 digits / 30 seconds, then enter its current code. Each code can be used once; adjacent clock steps are tolerated.
+- **No authentication**: anyone who can reach the host can connect and control it without credentials.
+
+Password, OTP and no authentication accept connections without a local approval prompt.
+Turn off **Allow connections** to deny access. Policy changes restart the sharing listener,
+end active sessions and invalidate old resume tokens. Credentials remain in the host's private
+`settings.toml` (0600); they do not sync through iCloud. Relay routing credentials remain separate,
+and the restricted LoginWindow service still requires previously approved device grants.
+Password/OTP require updated controllers; the pairing-code wire format remains compatible.
+
+#### Connection by code and CLI
+
+The host can generate a **12-digit connection code** from desktop Security settings or the CLI.
+Enter that code in the controller's address field to find and pair with the computer on the same
+LAN. Through a relay, select the same relay and enter its access password if required, then enter the code
+instead of a room name; the host fingerprint is established by successful pairing.
+A generated code expires after five minutes and is consumed by one successful connection.
+Generating a code authorizes that connection without a second local approval prompt.
+The host must be sharing, allow new-device pairing, and have no active session when generating.
+
+```sh
+removent-cli pairing generate  # Generate a connection code
+removent-cli pairing show      # Show the current connection code or pending six-digit PIN
+removent-cli pairing watch     # Print pairing-code events as they arrive
+removent-cli pairing revoke    # Cancel the generated code
+```
+
+The CLI reads the local daemon's private socket. Use the same data directory as the desktop
+host (`REMOVENT_DATA_DIR` when overridden). Remembered pairing binds the controller's device
+certificate; **Pair every connection** also disables quick resume. Controllers save the resolved
+computer address or relay room after pairing, never the temporary code. Code-only connections
+require updated host, controller, and relay versions. Relay room names starting with `pair-` are reserved.
+
 ### LAN discovery
 
 Settings → **LAN discovery** controls automatic discovery separately for Removent,
@@ -145,7 +185,7 @@ management](docs/guides/relay-quick-deploy.md).
 
 [Deploy the Rust relay](docs/guides/private-relay.md) on a VPS, configure separate host/controller
 credentials (or registered device keys), then select the relay in **Add connection**
-and enter `removent://host:port` and the target host fingerprint. Select
+and enter `removent://host:port`; SNI is optional and the first connection asks you to confirm the destination. Select
 Cloudflare / HTTPS or VPS / QUIC separately. The current protocol is v1. Credentials stay in Keychain. The
 daemon maintains the host tunnel independently of the desktop and tray.
 
@@ -179,7 +219,9 @@ credentials, Bonjour discovery, text clipboard, optional remote audio, and relay
 routing are included. Build steps and the simulator acceptance fixture are in
 the mobile README.
 
-Connected sessions fill the landscape
+The mobile interface uses compact computer rows, adaptive connection forms and
+native navigation controls. Glass is reserved for navigation and actions; list
+content stays on standard system surfaces. Connected sessions fill the landscape
 display with preserved aspect ratio and floating controls that fade after four
 idle seconds. The fixed English session keyboard sends ASCII characters directly,
 without language switching or IME candidates; opening it in landscape preserves

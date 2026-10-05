@@ -40,7 +40,9 @@ struct MobileCloudSyncSection: View {
     }
     var body: some View {
         Section {
-            Toggle(L("Sync saved connections", "同步已保存的连接"), isOn: Binding(get: { sync.status.enabled }, set: sync.setEnabled))
+            Toggle(isOn: Binding(get: { sync.status.enabled }, set: sync.setEnabled)) {
+                Label(L("Sync saved connections", "同步已保存的连接"), systemImage: "icloud")
+            }
                 .accessibilityIdentifier("cloudSyncToggle")
             LabeledContent(L("Status", "状态"), value: statusText).accessibilityIdentifier("cloudSyncStatus")
             if sync.status.enabled {
@@ -64,7 +66,7 @@ struct MobileCloudSyncSection: View {
                     }.font(.subheadline).padding(.vertical, 6)
                 }
             }
-            if let error = sync.localError { Text(error).foregroundStyle(.red).font(.footnote) }
+            if let error = sync.localError { Text(error).foregroundStyle(.red).font(.footnote).textSelection(.enabled) }
         } header: { Text("iCloud") } footer: {
             Text(L("Share saved connections with Removent on your other devices using the same iCloud account. Passwords and device pairing stay on each device. Turning sync off keeps local connections.",
                    "通过同一 iCloud 账户，与其他设备上的 Removent 共享已保存的连接。密码和设备配对保留在各自设备上。关闭同步会保留本机连接。"))

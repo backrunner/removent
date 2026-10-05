@@ -39,19 +39,17 @@ pub enum ConnectError {
 
 /// Connection configuration.
 pub struct ClientConfig {
+    pub pairing_code: Option<removent_core::pairing_invitation::PairingCode>,
     pub device_name: String,
     pub caps: Caps,
     /// Local clipboard bridge (NSPasteboard on real machines; an in-memory impl in tests).
     pub local_clip: Option<std::sync::Arc<dyn removent_core::TextClipboard>>,
 }
 
-/// User input callback: returns the PIN transcribed by the user.
-pub type PinInput = oneshot::Receiver<String>;
-
-/// Fired only when the session actually needs a PIN (unknown peer, pairing
-/// initiated): the UI shows the PIN prompt at this point, not at connect time.
-/// The callback receives the sender half used to deliver the transcribed PIN.
-pub type PinRequest = Box<dyn FnOnce(oneshot::Sender<String>) + Send>;
+/// Called after the host challenge identifies its authentication method.
+/// Supplies the sender used to return a password, pairing code or TOTP code.
+pub type PinRequest =
+    Box<dyn FnOnce(removent_proto::AuthenticationMode, oneshot::Sender<String>) + Send>;
 
 /// Minimum interval between KeyframeRequests (protocol.md §7.1).
 const KEYFRAME_MIN_INTERVAL: Duration = Duration::from_millis(500);
@@ -264,9 +262,9 @@ mod pairing;
 mod tests;
 
 use control::build_session;
-pub use handshake::connect_session;
 #[cfg(test)]
 use handshake::expect_msg;
+pub use handshake::{connect_session, connect_session_with_confirmation};
 use media::{AbortOnDrop, spawn_media_loops};
 pub use pairing::quick_resume;
 use pairing::{hex_encode, platform_version, spawn_pairing_initiator};

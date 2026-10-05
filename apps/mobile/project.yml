@@ -29,7 +29,7 @@ targets:
         UIBackgroundModes: [remote-notification]
         CFBundleDisplayName: Removent
         CFBundleShortVersionString: "0.1.3"
-        CFBundleVersion: "1"
+        CFBundleVersion: "4"
         LSRequiresIPhoneOS: true
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true

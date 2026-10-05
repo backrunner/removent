@@ -16,11 +16,92 @@ async fn main() -> anyhow::Result<()> {
         root: dir.path().into(),
     };
     let identity = removent_core::identity::load_or_create(&paths, "Mobile Test Computer")?;
+    let proactive = std::env::var("REMOVENT_FIXTURE_INVITATION").as_deref() == Ok("1");
+    let invitation = if proactive {
+        Some(removent_core::pairing_invitation::Invitation::generate(
+            &paths,
+        )?)
+    } else {
+        None
+    };
+    let advertisement = if proactive {
+        let ad = removent_net::Advertiser::start(
+            "Mobile Test Computer",
+            &identity.short_fingerprint_hex(),
+            48689,
+            removent_proto::Caps::all(),
+        )?;
+        ad.set_pairing(invitation.as_ref().map(|i| i.advertisement()))?;
+        Some(ad)
+    } else {
+        None
+    };
+    let _keep_advertisement = advertisement;
     let (endpoint, _) = removent_net::make_server_endpoint(
-        "127.0.0.1:48689".parse()?,
+        if proactive {
+            "0.0.0.0:48689"
+        } else {
+            "127.0.0.1:48689"
+        }
+        .parse()?,
         &identity,
         PinState::new([], true),
     )?;
+    // Optional local QUIC relay verifies the two consecutive mobile trust prompts.
+    if std::env::var("REMOVENT_FIXTURE_RELAY").as_deref() == Ok("1") {
+        use removent_relay::config::{Room, ServerConfig, TunnelConfig, token_hash};
+        let relay_paths = DataPaths {
+            root: paths.root.join("relay"),
+        };
+        let relay = removent_core::identity::load_or_create(&relay_paths, "Mobile Test Relay")?;
+        let address = "127.0.0.1:48691".parse()?;
+        let relay_endpoint = removent_relay::server_endpoint(address, &relay)?;
+        let host_token = "11".repeat(32);
+        let config = ServerConfig {
+            updates: Default::default(),
+            listen: address,
+            allowed_cidrs: vec![],
+            identity_dir: relay_paths.root,
+            max_connections: 16,
+            max_clients_per_room: 4,
+            max_bytes_per_second: 1_000_000_000,
+            rooms: vec![Room {
+                name: "office".into(),
+                host_token_sha256: hex::encode(token_hash(&host_token)?),
+                client_token_sha256: hex::encode(token_hash(&"22".repeat(32))?),
+                host_public_keys: vec![],
+                client_public_keys: vec![],
+            }],
+        };
+        tokio::spawn(removent_relay::server::serve(
+            relay_endpoint,
+            config,
+            tokio_util::sync::CancellationToken::new(),
+        ));
+        let tunnel = TunnelConfig {
+            server: format!("removent://{address}"),
+            transport: removent_core::removent_uri::RelayTransport::Quic,
+            insecure_loopback: false,
+            server_name: String::new(),
+            accept_invalid_certificate: false,
+            server_fingerprint: relay.fingerprint_hex(),
+            host_fingerprint: identity.fingerprint_hex(),
+            room: "office".into(),
+            token: host_token,
+        };
+        let target = endpoint.local_addr()?;
+        let host_identity = identity.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Ok(tunnel) =
+                    removent_relay::client::connect_host(&tunnel, &host_identity).await
+                {
+                    let _ = tunnel.run(target).await;
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        });
+    }
     let pin = Arc::new(Mutex::new(String::new()));
     let recorder = Arc::new(RecorderInputSink::default());
     let clipboard = MemoryClipboard::new();
@@ -31,10 +112,22 @@ async fn main() -> anyhow::Result<()> {
     let status_pin = pin.clone();
     let status_input = recorder.clone();
     let status_clip = clipboard.clone();
+    let status_paths = paths.clone();
     tokio::spawn(async move {
         while let Ok((mut stream, _)) = listener.accept().await {
             let mut request = [0; 1024];
             let _ = stream.read(&mut request).await;
+            let auth_mode =
+                std::env::var("REMOVENT_FIXTURE_AUTH").unwrap_or_else(|_| "pairing_code".into());
+            let auth = removent_core::AuthenticationSettings {
+                mode: removent_core::AuthenticationMode::Otp,
+                otp_secret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ".into(),
+                ..Default::default()
+            };
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
             let typed_text: String = status_input
                 .events
                 .lock()
@@ -57,11 +150,11 @@ async fn main() -> anyhow::Result<()> {
                     _ => None,
                 }
             }).collect();
-            let body = serde_json::json!({"pin":*status_pin.lock().unwrap(),
+            let body = serde_json::json!({"relay":std::env::var("REMOVENT_FIXTURE_RELAY").as_deref() == Ok("1"), "auth_mode":auth_mode, "otp":auth.totp().unwrap().generate(now), "pin":*status_pin.lock().unwrap(),
                 "inputs":status_input.events.lock().unwrap().len(),
                 "typed_text":typed_text,
                 "keys":keys,
-                "clipboard":status_clip.read().unwrap_or_default()})
+                "clipboard":status_clip.read().unwrap_or_default(), "invitation":removent_core::pairing_invitation::Invitation::load(&status_paths).ok().flatten().map(|i| i.code().expose().to_owned())})
             .to_string();
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -83,6 +176,24 @@ async fn main() -> anyhow::Result<()> {
         };
         let pin = pin.clone();
         let cfg = HostConfig {
+            authentication: match std::env::var("REMOVENT_FIXTURE_AUTH").as_deref() {
+                Ok("password") => removent_core::AuthenticationSettings {
+                    mode: removent_core::AuthenticationMode::Password,
+                    password: "fixture-password".into(),
+                    ..Default::default()
+                },
+                Ok("otp") => removent_core::AuthenticationSettings {
+                    mode: removent_core::AuthenticationMode::Otp,
+                    otp_secret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ".into(),
+                    ..Default::default()
+                },
+                Ok("none") => removent_core::AuthenticationSettings {
+                    mode: removent_core::AuthenticationMode::None,
+                    ..Default::default()
+                },
+                _ => Default::default(),
+            },
+            auth_paths: Some(paths.clone()),
             device_name: "Mobile Test Computer".into(),
             audio_available: true,
             preapproved_only: false,

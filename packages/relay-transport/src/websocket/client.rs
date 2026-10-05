@@ -61,28 +61,65 @@ pub async fn connect(
     role: Role,
     identity: &DeviceIdentity,
 ) -> Result<Tunnel> {
+    connect_with_invitation(config, role, identity, None).await
+}
+
+pub async fn connect_with_invitation(
+    config: &TunnelConfig,
+    role: Role,
+    identity: &DeviceIdentity,
+    pairing: Option<removent_core::pairing_invitation::Advertisement>,
+) -> Result<Tunnel> {
     config.validate()?;
     ensure!(config.is_websocket(), "Expected a WebSocket relay profile");
     tokio::time::timeout(CONNECT_TIMEOUT, async {
-        let request = handshake_request(config, role, identity)?;
-        // WebPKI verifies the WSS edge certificate, including hostname. Never
-        // forward credentials across redirects or allow a TLS bypass.
+        let mut request = handshake_request(config, role, identity)?;
+        if let Some(ad) = &pairing {
+            ensure!(
+                role == Role::Host && ad.valid(),
+                "Invalid invitation advertisement"
+            );
+            request
+                .headers_mut()
+                .insert("x-removent-pair", ad.locator.parse()?);
+            request.headers_mut().insert(
+                "x-removent-pair-exp",
+                ad.expires_at_unix.to_string().parse()?,
+            );
+        }
+        // Connect to the endpoint address; SNI only selects the TLS name.
+        // HTTP Host and the signed relay audience remain bound to the endpoint.
         let roots =
             rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
+        let mut tls = rustls::ClientConfig::builder_with_provider(Arc::new(
             rustls::crypto::aws_lc_rs::default_provider(),
         ))
         .with_safe_default_protocol_versions()?
         .with_root_certificates(roots)
         .with_no_client_auth();
-        let (mut socket, response) = tokio_tungstenite::connect_async_tls_with_config(
-            request,
-            Some(limits()),
-            true,
-            Some(tokio_tungstenite::Connector::Rustls(Arc::new(tls))),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("WebSocket relay connection rejected or unavailable"))?;
+        if config.accept_invalid_certificate {
+            tls.dangerous().set_certificate_verifier(Arc::new(
+                removent_net::tls::ServerPinVerifier::new(removent_net::PinState::new([], true)),
+            ));
+        }
+        let tcp = tokio::net::TcpStream::connect(config.endpoint()?.authority()).await?;
+        tcp.set_nodelay(true)?;
+        let stream = if config.insecure_loopback {
+            tokio_tungstenite::MaybeTlsStream::Plain(tcp)
+        } else {
+            let name = rustls::pki_types::ServerName::try_from(config.tls_server_name()?)?;
+            let stream = tokio_rustls::TlsConnector::from(Arc::new(tls))
+                .connect(name, tcp)
+                .await
+                .context("Relay TLS certificate validation or handshake failed")?;
+            tokio_tungstenite::MaybeTlsStream::Rustls(stream)
+        };
+        let (mut socket, response) =
+            tokio_tungstenite::client_async_with_config(request, stream, Some(limits()))
+                .await
+                .map_err(|_| {
+                    anyhow::anyhow!("WebSocket relay connection rejected or unavailable")
+                })?;
         ensure!(
             response
                 .headers()
@@ -114,13 +151,33 @@ pub async fn connect(
                 _ => anyhow::bail!("WebSocket relay authentication failed or host unavailable"),
             }
         };
-        ensure!(ack.len() == 8, "Invalid relay acknowledgement");
-        let route = u64::from_be_bytes(ack[..].try_into()?);
+        let invitation = role == Role::Client && config.room.starts_with("pair-");
+        ensure!(
+            if invitation {
+                (9..=72).contains(&ack.len())
+            } else {
+                ack.len() == 8
+            },
+            "Invalid relay acknowledgement"
+        );
+        let resolved_room = if invitation {
+            let room = std::str::from_utf8(&ack[8..])?;
+            ensure!(
+                crate::config::valid_room(room) && !room.starts_with("pair-"),
+                "Invalid resolved room"
+            );
+            Some(room.to_owned())
+        } else {
+            None
+        };
+        let route = u64::from_be_bytes(ack[..8].try_into()?);
         ensure!(
             (role == Role::Host) == (route == 0),
             "Invalid relay role acknowledgement"
         );
-        Ok::<_, anyhow::Error>(Tunnel::start(socket, route))
+        let mut tunnel = Tunnel::start(socket, route);
+        tunnel.resolved_room = resolved_room;
+        Ok::<_, anyhow::Error>(tunnel)
     })
     .await
     .context("WebSocket relay startup timed out")?
@@ -129,10 +186,15 @@ pub async fn connect(
 pub async fn start_client(
     config: &TunnelConfig,
     identity: &DeviceIdentity,
-) -> Result<(SocketAddr, tokio::task::JoinHandle<Result<()>>)> {
+) -> Result<(
+    SocketAddr,
+    tokio::task::JoinHandle<Result<()>>,
+    Option<String>,
+)> {
     let mut tunnel = connect(config, Role::Client, identity).await?;
     let socket = UdpSocket::bind("127.0.0.1:0").await?;
     let address = socket.local_addr()?;
+    let resolved_room = tunnel.resolved_room.clone();
     let task = tokio::spawn(async move {
         let sender = tunnel.sender.clone();
         let route = tunnel.route;
@@ -154,7 +216,7 @@ pub async fn start_client(
             }
         }
     });
-    Ok((address, task))
+    Ok((address, task, resolved_room))
 }
 
 struct Route {
@@ -206,6 +268,82 @@ pub async fn host_loop(mut tunnel: Tunnel, target: SocketAddr) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    #[allow(clippy::result_large_err)] // tungstenite's handshake callback fixes this error type.
+    async fn websocket_sni_override_keeps_http_destination_and_certificate_validation_is_optional()
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let id = removent_core::identity::load_or_create(
+            &removent_core::DataPaths {
+                root: dir.path().into(),
+            },
+            "test",
+        )
+        .unwrap();
+        for skip in [false, true] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let tls = rustls::ServerConfig::builder_with_provider(Arc::new(
+                rustls::crypto::aws_lc_rs::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![rustls::pki_types::CertificateDer::from(id.cert_der.clone())],
+                rustls::pki_types::PrivatePkcs8KeyDer::from(id.private_pkcs8_der().unwrap()).into(),
+            )
+            .unwrap();
+            let task = tokio::spawn(async move {
+                let (tcp, _) = listener.accept().await.unwrap();
+                let stream = tokio_rustls::TlsAcceptor::from(Arc::new(tls))
+                    .accept(tcp)
+                    .await;
+                let Ok(stream) = stream else {
+                    assert!(!skip);
+                    return;
+                };
+                assert_eq!(stream.get_ref().1.server_name(), Some("relay.example"));
+                let mut socket = tokio_tungstenite::accept_hdr_async(stream, move |request: &tokio_tungstenite::tungstenite::handshake::server::Request, mut response: tokio_tungstenite::tungstenite::handshake::server::Response| {
+                    assert_eq!(request.headers()["host"], addr.to_string());
+                    assert_eq!(request.headers()["x-removent-audience"], format!("removent://{addr}"));
+                    response.headers_mut().insert("sec-websocket-protocol", PROTOCOL.parse().unwrap());
+                    Ok(response)
+                }).await.unwrap();
+                socket
+                    .send(Message::Binary(vec![0; 32].into()))
+                    .await
+                    .unwrap();
+                assert!(matches!(
+                    socket.next().await.unwrap().unwrap(),
+                    Message::Binary(_)
+                ));
+                socket
+                    .send(Message::Binary(1u64.to_be_bytes().to_vec().into()))
+                    .await
+                    .unwrap();
+                let _ = socket.next().await;
+            });
+            let cfg = TunnelConfig {
+                server: format!("removent://{addr}"),
+                transport: removent_core::removent_uri::RelayTransport::WebSocket,
+                insecure_loopback: false,
+                server_fingerprint: String::new(),
+                server_name: "relay.example".into(),
+                accept_invalid_certificate: skip,
+                host_fingerprint: String::new(),
+                room: "office".into(),
+                token: String::new(),
+            };
+            let result = connect(&cfg, Role::Client, &id).await;
+            assert_eq!(result.is_ok(), skip);
+            if !skip {
+                assert!(format!("{:#}", result.err().unwrap()).contains("certificate"));
+            }
+            task.abort();
+        }
+    }
+
     #[test]
     fn admission_signature_uses_the_canonical_url_sent_to_cloudflare() {
         let dir = tempfile::tempdir().unwrap();
@@ -221,6 +359,8 @@ mod tests {
             transport: removent_core::removent_uri::RelayTransport::WebSocket,
             insecure_loopback: false,
             server_fingerprint: String::new(),
+            server_name: String::new(),
+            accept_invalid_certificate: false,
             host_fingerprint: String::new(),
             room: "office".into(),
             token: String::new(),

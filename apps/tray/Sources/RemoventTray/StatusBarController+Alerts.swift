@@ -47,18 +47,35 @@ extension StatusBarController {
     func showPairingAlert(pin: String) {
         if suppressAlerts { return }
         if mainAppRunning {
-            trayLog("main app is running; pairing PIN \(pin) handled by main window, tray shows no alert")
+            trayLog("main app is running; pairing prompt handled by main window")
             return
         }
+        if let alert = pairingAlert {
+            alert.informativeText = String(format: String(localized: "alert.pairing_pin_detail", bundle: .trayResources), pin)
+            return
+        }
+        // Admission modals are never nested. The pending code remains available in the menu.
+        if alertActive { return }
         let alert = NSAlert()
         alert.messageText = String(localized: "alert.pairing_request", bundle: .trayResources, comment: "Pairing alert title")
         alert.informativeText = String(format: String(localized: "alert.pairing_pin_detail", bundle: .trayResources, comment: "Pairing alert body"), pin)
         alert.addButton(withTitle: String(localized: "alert.ok", bundle: .trayResources, comment: "Alert OK button"))
         alertActive = true
+        pairingAlert = alert
+        DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self, weak alert] in
+            if let self, let alert, self.pairingAlert === alert { self.dismissPairingAlert() }
+        }
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
+        pairingAlert = nil
         alertActive = false
         processQueuedAdmissionAlerts()
+    }
+
+    func dismissPairingAlert() {
+        guard let alert = pairingAlert else { return }
+        NSApp.abortModal()
+        alert.window.orderOut(nil)
     }
 
     /// Error alert; in test mode only logs.

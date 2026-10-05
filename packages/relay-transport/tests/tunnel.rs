@@ -86,6 +86,8 @@ impl Fixture {
                 RelayTransport::Quic
             },
             insecure_loopback: websocket,
+            server_name: String::new(),
+            accept_invalid_certificate: false,
             server_fingerprint: if websocket {
                 String::new()
             } else {
@@ -240,6 +242,74 @@ async fn controller_cannot_inject_another_controllers_route() {
 struct HostTask(tokio::task::JoinHandle<Result<()>>);
 
 #[tokio::test]
+async fn invitation_locators_route_both_carriers_without_exposing_pairing_secret() {
+    use removent_core::pairing_invitation::{Advertisement, now};
+    for websocket in [false, true] {
+        let f = Fixture::transport(websocket, None).await;
+        let ad = Advertisement {
+            locator: "234567".into(),
+            expires_at_unix: now() + 300,
+        };
+        let echo = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let tunnel = client::connect_host_with_invitation(&f.host_cfg, &f.host, Some(ad.clone()))
+            .await
+            .unwrap();
+        let _host = HostTask(tokio::spawn(tunnel.run(echo.local_addr().unwrap())));
+        let mut config = f.client_cfg.clone();
+        config.room = "pair-234567".into();
+        config.host_fingerprint.clear();
+        let bridge = ClientBridge::start(&config, &f.viewer).await.unwrap();
+        assert_eq!(bridge.resolved_room.as_deref(), Some("office"));
+        let viewer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        viewer
+            .send_to(b"encrypted-rvp-request", bridge.address)
+            .await
+            .unwrap();
+        let mut bytes = [0; 128];
+        let (size, addr) = tokio::time::timeout(Duration::from_secs(3), echo.recv_from(&mut bytes))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&bytes[..size], b"encrypted-rvp-request");
+        echo.send_to(b"encrypted-rvp-reply", addr).await.unwrap();
+        let size = tokio::time::timeout(Duration::from_secs(3), viewer.recv(&mut bytes))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&bytes[..size], b"encrypted-rvp-reply");
+        let mut wrong = config.clone();
+        wrong.token = "ff".repeat(32);
+        assert!(
+            ClientBridge::start(&wrong, &f.viewer).await.is_err(),
+            "code lookup cannot bypass relay credentials"
+        );
+        wrong = config.clone();
+        wrong.room = "pair-765432".into();
+        assert!(
+            ClientBridge::start(&wrong, &f.viewer).await.is_err(),
+            "unregistered locator rejected"
+        );
+        // Every lookup rechecks expiry rather than leaving a permanent alias.
+        drop(bridge);
+        drop(_host);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let expiring = Advertisement {
+            locator: "987654".into(),
+            expires_at_unix: now() + 3,
+        };
+        let _host = client::connect_host_with_invitation(&f.host_cfg, &f.host, Some(expiring))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(3200)).await;
+        wrong.room = "pair-987654".into();
+        assert!(
+            ClientBridge::start(&wrong, &f.viewer).await.is_err(),
+            "expired locator rejected"
+        );
+    }
+}
+
+#[tokio::test]
 async fn container_readiness_probes_get_http_responses_without_websocket_auth() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let f = Fixture::transport(true, None).await;
@@ -309,6 +379,26 @@ async fn websocket_credentials_roles_capacity_route_isolation_and_cleanup() {
     );
     drop((extra1, extra2));
     let _host = connect(&f.host_cfg, Role::Host, &f.host).await.unwrap();
+}
+
+#[tokio::test]
+async fn websocket_invitation_cold_start_waits_for_verified_host_advertisement() {
+    let f = Fixture::transport(true, None).await;
+    let mut config = f.client_cfg.clone();
+    config.room = "pair-345678".into();
+    let viewer = f.viewer.clone();
+    let controller = tokio::spawn(async move { ClientBridge::start(&config, &viewer).await });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!controller.is_finished());
+    let ad = removent_core::pairing_invitation::Advertisement {
+        locator: "345678".into(),
+        expires_at_unix: removent_core::pairing_invitation::now() + 300,
+    };
+    let _host = client::connect_host_with_invitation(&f.host_cfg, &f.host, Some(ad))
+        .await
+        .unwrap();
+    let controller = controller.await.unwrap().unwrap();
+    assert_eq!(controller.resolved_room.as_deref(), Some("office"));
 }
 
 #[tokio::test]
@@ -732,4 +822,61 @@ async fn network_allowlist_rejects_real_peers_before_auth_on_both_carriers() {
                 .is_ok()
         );
     }
+}
+
+#[tokio::test]
+async fn websocket_cold_start_rejects_malformed_invitation_aliases_immediately() {
+    let f = Fixture::transport(true, None).await;
+    for room in [
+        "pair-12345",
+        "pair-abcdef",
+        "pair-1234567",
+        "pair-１２３４５６",
+    ] {
+        let mut config = f.client_cfg.clone();
+        config.room = room.into();
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            ClientBridge::start(&config, &f.viewer),
+        )
+        .await
+        .expect("Invalid aliases must not enter the cold-start wait");
+        assert!(result.is_err());
+    }
+}
+
+#[tokio::test]
+async fn first_relay_certificate_is_confirmed_before_authentication() {
+    let fixture = Fixture::new().await;
+    let host = client::connect_host(&fixture.host_cfg, &fixture.host)
+        .await
+        .unwrap();
+    let mut cfg = fixture.client_cfg.clone();
+    cfg.server_fingerprint.clear();
+    let rejected = ClientBridge::start_with_confirmation(
+        &cfg,
+        &fixture.viewer,
+        Some(Box::new(|_, answer| {
+            answer.send(false).unwrap();
+        })),
+    )
+    .await;
+    assert!(rejected.is_err());
+    let expected: [u8; 32] = hex::decode(&fixture.client_cfg.server_fingerprint)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let bridge = ClientBridge::start_with_confirmation(
+        &cfg,
+        &fixture.viewer,
+        Some(Box::new(move |fp, answer| {
+            assert_eq!(fp, expected);
+            answer.send(true).unwrap();
+        })),
+    )
+    .await
+    .unwrap();
+    assert_eq!(bridge.relay_fingerprint, Some(expected));
+    drop(bridge);
+    drop(host);
 }

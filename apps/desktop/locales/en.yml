@@ -3,9 +3,9 @@ _version: 1
 
 app.name: Removent
 
-home.name_placeholder: Name shown on the local network
+home.name_placeholder: "Device name"
 home.pin_placeholder: 6-digit code
-home.search_placeholder: Search name or IP
+home.search_placeholder: "Name or IP"
 home.manual_placeholder: "192.168.1.10"
 
 
@@ -69,6 +69,8 @@ device.fingerprint: Fingerprint
 device.trust: Trust
 
 sharing.title: Share this Mac
+sharing.enabled: Sharing on
+sharing.disabled: Sharing off
 device.copy_fingerprint: Copy fingerprint
 
 
@@ -80,6 +82,7 @@ permissions.open_settings: Open System Settings
 permissions.daemon_restart_hint: The daemon (removentd) has not picked up the permission yet — toggle the host service off and on to restart it
 
 settings.title: Settings
+settings.back_to_devices: Back to Devices
 settings.general: General
 settings.device_name: Device Name
 settings.appearance: Appearance
@@ -96,7 +99,7 @@ settings.admission.deny: "Block all"
 settings.vnc: Apple Remote Desktop / VNC
 settings.vnc_enabled: Enable VNC compatibility service
 settings.vnc_password: VNC Password
-settings.vnc_password_placeholder: Leave empty for no password
+settings.vnc_password_placeholder: "Optional"
 settings.vnc_hint: This password is for sharing this Mac over VNC (port 5900). Enter remote credentials in Add connection.
 settings.data: Data
 settings.data_dir: Data Directory
@@ -200,9 +203,9 @@ saved.credentials_hint: "The password is stored in the macOS Keychain and filled
 connection.title: "Remote connections"
 connection.add: "Add connection"
 connection.name: "Name (optional)"
-connection.name_placeholder: "e.g. Office Mac"
+connection.name_placeholder: "Office Mac"
 connection.address: "Host"
-connection.host_placeholder: "IP address or hostname"
+connection.host_placeholder: "IP or hostname"
 connection.port: "Port"
 connection.username: "Username"
 connection.vnc_username: "macOS username (optional)"
@@ -241,7 +244,7 @@ connection.removent_hint: "Fast Mac-to-Mac connections · Secure pairing"
 connection.vnc_hint: "macOS Screen Sharing · Standard VNC servers"
 connection.rdp_hint: "Windows Remote Desktop · RDP servers"
 connection.credentials_hint: "For macOS Screen Sharing, enter the remote Mac’s short account name and login password. Leave the username empty only when using a dedicated VNC password."
-connection.welcome: "Your devices. Within reach."
+connection.welcome: "Connect to a device"
 connection.welcome_hint: "Connect to a Mac or PC on your local network and get to work."
 connection.lan_badge: "Local network"
 
@@ -275,18 +278,14 @@ settings.open_logs_failed: "Could not open the logs folder: %{err}"
 
 connection.use_relay: "Connect through relay"
 connection.relay_room: "Host room ID"
-connection.relay_pin: "Relay certificate fingerprint (QUIC only)"
-connection.host_fingerprint: "Target host certificate fingerprint"
-connection.relay_credential: "Relay credential (optional)"
-connection.relay_trust_hint: "WSS verifies the relay certificate. QUIC requires its fingerprint. Get the host fingerprint from the host through a trusted channel. Without a credential, the relay must have your device public key registered. RVP pairing is still required."
-connection.fingerprint_placeholder: "64 hex characters from the host"
-connection.invalid_relay_pin: "QUIC requires a port and the relay’s full certificate fingerprint."
-connection.invalid_host_fingerprint: "Enter the target host’s full 64-character certificate fingerprint."
-connection.invalid_relay_credential: "Enter the relay’s 64-character credential, or leave empty for registered device authentication."
-connection.relay_credential_missing: "The relay credential is missing from Keychain; enter it again."
-connection.relay_credential_loading: "Reading the saved relay credential…"
+connection.relay_credential: "Relay access password (optional)"
+connection.relay_trust_hint: "Only needed when the relay requires an access password. The first connection asks you to confirm the destination and remembers its identity."
+connection.invalid_relay_pin: "The saved relay certificate is invalid. Recreate this connection."
+connection.invalid_host_fingerprint: "The saved computer certificate is invalid. Recreate this connection."
+connection.invalid_relay_credential: "Paste the full access password provided by your relay administrator, or leave empty."
+connection.relay_credential_missing: "The saved relay access password is unavailable; enter it again."
+connection.relay_credential_loading: "Reading the saved relay access password…"
 connection.relay_hint: "Use removent://host:port, or enable Connect through relay."
-connection.quic_pin_placeholder: "Required for QUIC; leave empty for Cloudflare / HTTPS"
 connection.invalid_relay: "Use removent://host:port without credentials, paths or query parameters."
 connection.relay_endpoint: "Relay address"
 connection.relay_transport: "Relay deployment"
@@ -329,3 +328,53 @@ sync.upgrade_required: Update Removent to continue syncing
 sync.relay: "Relay"
 sync.relay_fingerprint: "Relay fingerprint"
 sync.host_fingerprint: "Host fingerprint"
+
+auth.title: "Connection authentication"
+auth.hint: "Choose how controllers authenticate. Password, OTP and no authentication allow unattended connections."
+auth.pairing: "Pairing code"
+auth.password: "Access password"
+auth.otp: "OTP"
+auth.none: "No authentication"
+auth.password_desc: "Enter the access password configured on the remote computer."
+auth.otp_desc: "Enter the current six-digit code from your authenticator."
+auth.password_hint: "Set a password before selecting password authentication."
+auth.password_required: "Set a non-empty access password first (at most 1024 bytes)."
+auth.use_password: "Use password"
+auth.connect: "Connect"
+auth.otp_setup: "Authenticator setup"
+auth.otp_setup_hint: "Add this secret manually: TOTP, SHA-1, 6 digits, 30 seconds. Each code can be used once."
+auth.copy_secret: "Copy setup secret"
+auth.none_hint: "Anyone who can reach this computer can connect and control it without credentials."
+auth.allow: "Allow connections"
+auth.allow_hint: "Accept connections using the selected authentication method without local approval."
+
+# Pairing policy and proactive invitations
+pairing.policy: "Pairing policy"
+pairing.policy_hint: "Choose whether paired devices need a new code for each connection."
+pairing.remember: "Remember devices"
+pairing.every_connection: "Pair every connection"
+pairing.invitation: "Connection code"
+pairing.invitation_hint: "Enter this 12-digit code on a controller on the same LAN or relay. Valid for 5 minutes and one connection."
+pairing.generate: "Generate code"
+pairing.copy: "Copy code"
+pairing.revoke: "Revoke code"
+pairing.daemon_required: "Start the sharing service before generating a connection code."
+pairing.temporary: "Connect first to save the computer. Temporary codes cannot be saved."
+pairing.address_or_code: "Address / room / connection code"
+pairing.room_or_code: "Room / connection code"
+
+connection.sni: "SNI (optional)"
+connection.sni_placeholder: "Default: relay hostname"
+connection.invalid_sni: "Enter a hostname for SNI, without a scheme, path or port."
+connection.verify_relay_certificate: "Verify relay certificate"
+connection.unverified_relay_hint: "Encrypted connection; relay identity is not verified."
+
+trust.relay_title: "Trust this relay?"
+
+trust.computer_title: "Trust this computer?"
+
+trust.description: "This is your first connection. Confirm this is the destination you want to trust. Its identity will be remembered for future connections."
+
+trust.waiting: "Confirm the first connection"
+
+trust.connect: "Trust and connect"

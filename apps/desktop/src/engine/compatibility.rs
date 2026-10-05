@@ -87,7 +87,7 @@ pub(super) async fn run_vnc_client(
 
 pub(super) async fn run_requested_client(
     identity: Option<DeviceIdentity>,
-    request: ConnectionRequest,
+    mut request: ConnectionRequest,
     paths: DataPaths,
     settings: Settings,
     attempt: ClientAttempt,
@@ -96,19 +96,17 @@ pub(super) async fn run_requested_client(
         ConnectionProtocol::Removent => {
             attempt.progress(ConnectionStage::Resolving);
             if let Some(route) = &request.relay {
-                let route = removent_client::connection::RelayRoute::parse(
-                    &route.endpoint,
-                    route.transport,
-                    &route.server_fingerprint,
-                    &route.host_fingerprint,
-                )
-                .map_err(|key| anyhow::anyhow!(t!(key).to_string()))?;
+                let route = route
+                    .validated(request.pairing_code.is_some())
+                    .map_err(|key| anyhow::anyhow!(t!(key).to_string()))?;
                 let room = &request.address.host;
-                let config = removent_relay::config::TunnelConfig {
+                let mut config = removent_relay::config::TunnelConfig {
                     server: route.endpoint.clone(),
                     transport: route.transport,
                     insecure_loopback: false,
                     server_fingerprint: route.server_fingerprint.clone(),
+                    server_name: route.server_name.clone(),
+                    accept_invalid_certificate: route.accept_invalid_certificate,
                     room: room.to_owned(),
                     token: request.password.clone(),
                     host_fingerprint: route.host_fingerprint.clone(),
@@ -116,32 +114,90 @@ pub(super) async fn run_requested_client(
                 let identity =
                     identity.ok_or_else(|| anyhow::anyhow!("Device identity missing"))?;
                 attempt.progress(ConnectionStage::Connecting);
-                let bridge =
-                    removent_relay::client::ClientBridge::start(&config, &identity).await?;
+                let relay_key = format!(
+                    "relay-server:{}:{}",
+                    config.server,
+                    config.tls_server_name()?
+                );
+                let relay_trust = removent_client::host_pins::for_relay_connection(
+                    &paths,
+                    &relay_key,
+                    if config.server_fingerprint.is_empty() {
+                        None
+                    } else {
+                        Some(removent_relay::config::decode_secret(
+                            &config.server_fingerprint,
+                        )?)
+                    },
+                    !config.is_websocket() && !config.accept_invalid_certificate,
+                )?;
+                if !config.is_websocket() {
+                    config.server_fingerprint =
+                        relay_trust.expected.map(hex::encode).unwrap_or_default();
+                }
+                let confirmation = (!config.is_websocket()
+                    && relay_trust.needs_confirmation
+                    && !config.accept_invalid_certificate)
+                    .then(|| attempt.certificate_confirmation(config.server.clone(), true));
+                let bridge = removent_relay::client::ClientBridge::start_with_confirmation(
+                    &config,
+                    &identity,
+                    confirmation,
+                )
+                .await?;
+                if !config.accept_invalid_certificate
+                    && let Some(pin) = bridge.relay_fingerprint
+                {
+                    removent_client::host_pins::remember(&paths, &relay_key, pin, false)?;
+                }
+                if request.pairing_code.is_some() {
+                    request.address.host = bridge
+                        .resolved_room
+                        .clone()
+                        .ok_or_else(|| anyhow::anyhow!("Relay did not resolve invitation"))?;
+                }
+                let pin_key = format!("relay:{}:{}", route.endpoint, request.address.host);
+                let invitation = request.pairing_code.is_some().then_some(request);
                 return run_client(
                     identity,
-                    bridge.address,
+                    native::NativeDestination {
+                        address: bridge.address,
+                        expected_host: route.optional_host_pin(),
+                        key: Some(pin_key),
+                        invitation,
+                    },
                     paths,
                     settings,
                     attempt,
-                    Some(route.host_pin()),
                 )
                 .await;
             }
-            let addr = tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                tokio::net::lookup_host((request.address.host.as_str(), request.address.port)),
-            )
-            .await??
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("No addresses found for {}", request.address.host))?;
+            let addr = if let Some(code) = &request.pairing_code {
+                removent_net::discovery::resolve_pairing_locator(code.locator()).await?
+            } else {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    tokio::net::lookup_host((request.address.host.as_str(), request.address.port)),
+                )
+                .await??
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("No addresses found for {}", request.address.host))?
+            };
+            if request.pairing_code.is_some() {
+                request.address = removent_client::connection::ConnectionAddress::from_socket(addr);
+            }
+            let invitation = request.pairing_code.is_some().then_some(request);
             run_client(
                 identity.ok_or_else(|| anyhow::anyhow!("Device identity missing"))?,
-                addr,
+                native::NativeDestination {
+                    address: addr,
+                    expected_host: None,
+                    key: None,
+                    invitation,
+                },
                 paths,
                 settings,
                 attempt,
-                None,
             )
             .await
         }

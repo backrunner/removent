@@ -68,3 +68,104 @@ fn form_validation_never_starts_or_cancels_a_session() {
     assert_eq!(engine.shared.state.lock().unwrap().generation, 0);
     assert!(engine.task.is_none());
 }
+
+#[test]
+fn authentication_input_is_validated_by_host_mode_and_stale_generations_cannot_consume_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut engine = Engine::new(dir.path().to_str().unwrap(), "AuthMobile").unwrap();
+    let (tx, mut rx) = oneshot::channel();
+    {
+        let mut state = engine.shared.state.lock().unwrap();
+        state.auth_mode = removent_core::AuthenticationMode::Password;
+        state.pin = Some(tx);
+    }
+    assert!(
+        engine
+            .command(Command::Pin {
+                generation: 99,
+                pin: "correct-password".into()
+            })
+            .is_err()
+    );
+    assert!(
+        engine
+            .command(Command::Pin {
+                generation: 0,
+                pin: "".into()
+            })
+            .is_err()
+    );
+    engine
+        .command(Command::Pin {
+            generation: 0,
+            pin: "correct-password".into(),
+        })
+        .unwrap();
+    assert_eq!(rx.try_recv().unwrap(), "correct-password");
+    let (tx, mut rx) = oneshot::channel();
+    {
+        let mut state = engine.shared.state.lock().unwrap();
+        state.auth_mode = removent_core::AuthenticationMode::Otp;
+        state.pin = Some(tx);
+    }
+    assert!(
+        engine
+            .command(Command::Pin {
+                generation: 0,
+                pin: "password".into()
+            })
+            .is_err()
+    );
+    engine
+        .command(Command::Pin {
+            generation: 0,
+            pin: "123456".into(),
+        })
+        .unwrap();
+    assert_eq!(rx.try_recv().unwrap(), "123456");
+}
+
+#[test]
+fn certificate_confirmation_cannot_be_consumed_by_a_stale_attempt_or_survive_cancellation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut engine = Engine::new(dir.path().to_str().unwrap(), "TrustMobile").unwrap();
+    let (tx, mut rx) = oneshot::channel();
+    engine.shared.state.lock().unwrap().certificate = Some(tx);
+    assert!(
+        engine
+            .command(Command::ConfirmCertificate {
+                generation: 99,
+                accept: true
+            })
+            .is_err()
+    );
+    assert!(matches!(
+        rx.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    engine
+        .command(Command::ConfirmCertificate {
+            generation: 0,
+            accept: false,
+        })
+        .unwrap();
+    assert!(!rx.try_recv().unwrap());
+    let (tx, mut rx) = oneshot::channel();
+    engine.shared.state.lock().unwrap().certificate = Some(tx);
+    engine.stop();
+    assert!(matches!(
+        rx.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    let old = Attempt {
+        shared: engine.shared.clone(),
+        generation: 0,
+    };
+    let (tx, mut rx) = oneshot::channel();
+    (old.certificate_confirmation("office".into(), false))([1; 32], tx);
+    assert!(matches!(
+        rx.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    assert!(engine.shared.state.lock().unwrap().events.is_empty());
+}

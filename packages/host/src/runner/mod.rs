@@ -49,6 +49,8 @@ pub enum HostEvent {
     SessionEnded {
         reason: String,
     },
+    /// A displayed reactive PIN is no longer usable.
+    PairingCleared,
     /// Pairing completed (PIN flow finished; the peer is registered as a trusted device).
     PairingDone {
         peer_name: String,
@@ -91,25 +93,16 @@ pub fn reject_busy(conn: RvpConnection, device_name: String, paths: DataPaths) {
     tokio::spawn(reject_busy_inner(conn, device_name, paths));
 }
 
-async fn reject_busy_inner(conn: RvpConnection, device_name: String, paths: DataPaths) {
-    // Honest pairing hint, computed like serve_connection does: a trusted peer
-    // hitting a busy host must not see a PIN-popup flash.
-    let peer_known = conn
-        .peer_fingerprint()
-        .map(hex::encode)
-        .and_then(|fp| {
-            PeersStore::load(&paths)
-                .ok()
-                .map(|peers| peers.by_fingerprint(&fp).is_some())
-        })
-        .unwrap_or(false);
+async fn reject_busy_inner(conn: RvpConnection, device_name: String, _paths: DataPaths) {
+    // Busy rejects this attempt without authenticating it. Suppress credentials
+    // even on unknown devices or a quick resume with no input callback.
     let hs = HandshakeServer {
         proto_version: PROTO_VERSION,
         // Honest declaration, same as serve_connection.
         feature_bits: 0,
         device_name,
         resume_accepted: None,
-        peer_known,
+        peer_known: true,
     };
     match conn.accept_handshake(|_| hs).await {
         Ok((_hello, mut sink, _source)) => {
@@ -215,6 +208,12 @@ pub async fn serve_forever(
         Advertiser::start(&settings.device_name, &fp_short, port, Caps::all())
             .map_err(|e| anyhow::anyhow!("{e}"))?,
     );
+    if settings.authentication.mode == removent_core::AuthenticationMode::PairingCode {
+        advertiser.set_pairing(
+            removent_core::pairing_invitation::Invitation::load(&cfg.paths)?
+                .map(|v| v.advertisement()),
+        )?;
+    }
     // At most one active session across both RVP and legacy VNC. Both paths
     // share the same screen capture and input injection resources.
     let session_slot = Arc::new(tokio::sync::Semaphore::new(1));
@@ -251,6 +250,9 @@ pub async fn serve_forever(
     let relay_config = cfg.paths.root.join("relay-host.toml");
     if relay_config.exists() {
         let identity = identity.clone();
+        let invitation_paths = cfg.paths.clone();
+        let pairing_enabled =
+            settings.authentication.mode == removent_core::AuthenticationMode::PairingCode;
         let cbs = cbs.clone();
         let stop = shutdown.clone();
         connections.spawn(async move {
@@ -258,7 +260,17 @@ pub async fn serve_forever(
             loop {
                 let result = async {
                     let cfg = removent_relay::config::TunnelConfig::load(&relay_config)?;
-                    let tunnel = removent_relay::client::connect_host(&cfg, &identity).await?;
+                    let tunnel = removent_relay::client::connect_host_with_invitation(
+                        &cfg,
+                        &identity,
+                        if pairing_enabled {
+                            removent_core::pairing_invitation::Invitation::load(&invitation_paths)?
+                                .map(|v| v.advertisement())
+                        } else {
+                            None
+                        },
+                    )
+                    .await?;
                     (cbs.on_event)(HostEvent::RelayState {
                         connected: true,
                         error: None,
@@ -353,6 +365,19 @@ pub async fn serve_forever(
     Ok(())
 }
 
+struct PairingDisplayGuard {
+    shown: Arc<AtomicBool>,
+    cbs: Arc<HostCallbacks>,
+}
+
+impl Drop for PairingDisplayGuard {
+    fn drop(&mut self) {
+        if self.shown.swap(false, Ordering::SeqCst) {
+            (self.cbs.on_event)(HostEvent::PairingCleared);
+        }
+    }
+}
+
 /// Serves one accepted connection: negotiation/pairing, then the media session.
 /// Holds the session semaphore permit until the session ends.
 async fn run_connection(
@@ -369,16 +394,24 @@ async fn run_connection(
         }
     };
     let peer_fp = conn.peer_fingerprint().map(hex::encode).unwrap_or_default();
-    let was_known = !peer_fp.is_empty() && peers.by_fingerprint(&peer_fp).is_some();
     if ctx.settings.paired_only && !peers.by_fingerprint(&peer_fp).is_some_and(|p| p.trusted) {
         conn.inner().close(1u32.into(), b"paired devices only");
         return;
     }
 
+    let pairing_shown = Arc::new(AtomicBool::new(false));
+    let _pairing_display = PairingDisplayGuard {
+        shown: pairing_shown.clone(),
+        cbs: ctx.cbs.clone(),
+    };
+    let shown_pin = pairing_shown.clone();
     let cb_pin = ctx.cbs.clone();
     let cb_adm = ctx.cbs.clone();
     let interactions = HostInteractions {
-        show_pairing_pin: Box::new(move |pin| (cb_pin.show_pairing_pin)(pin)),
+        show_pairing_pin: Box::new(move |pin| {
+            shown_pin.store(true, Ordering::SeqCst);
+            (cb_pin.show_pairing_pin)(pin);
+        }),
         admission_prompt: Box::new(move |peer_name, fp16| {
             (cb_adm.admission_prompt)(peer_name, fp16)
         }),
@@ -398,6 +431,8 @@ async fn run_connection(
             });
 
     let host_cfg = HostConfig {
+        authentication: ctx.settings.authentication.clone(),
+        auth_paths: Some(ctx.paths.clone()),
         audio_available: !ctx.settings.window_server_capture,
         preapproved_only: ctx.settings.paired_only,
         device_name: ctx.settings.device_name.clone(),
@@ -430,11 +465,12 @@ async fn run_connection(
         }
     };
 
+    pairing_shown.store(false, Ordering::SeqCst);
     let peer_name = peers
         .by_fingerprint(&established.peer_fp_hex)
         .map(|p| p.name.clone())
-        .unwrap_or_else(|| "unknown device".to_string());
-    if !was_known {
+        .unwrap_or_else(|| established.peer_name.clone());
+    if host_cfg.authentication.mode == removent_core::AuthenticationMode::PairingCode {
         (ctx.cbs.on_event)(HostEvent::PairingDone {
             peer_name: peer_name.clone(),
         });

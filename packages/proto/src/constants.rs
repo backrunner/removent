@@ -62,4 +62,6 @@ pub mod feature_bits {
     pub const RICH_CLIPBOARD: u64 = 1 << 4;
     /// Peer can encode/decode the software AV1 temporal-unit wire format.
     pub const SOFTWARE_AV1: u64 = 1 << 5;
+    pub const AUTH_METHODS: u64 = 1 << 6;
+    pub const PAIRING_INVITATION: u64 = 1 << 7;
 }

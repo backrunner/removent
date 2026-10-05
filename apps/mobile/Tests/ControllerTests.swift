@@ -29,6 +29,49 @@ final class ControllerTests: XCTestCase {
         try model.reload(); XCTAssertEqual(model.bookmarks.first?.id, bookmark.id)
     }
 
+    func testConnectionCodeValidationDoesNotRequireHiddenPortOrHostPin() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let model = ControllerModel(storageDirectory: directory, startServices: false)
+        defer { model.disconnect(); try? FileManager.default.removeItem(at: directory) }
+        var draft = ConnectionDraft(); draft.host = "123456-654321"; draft.port = "invalid"
+        XCTAssertTrue(draft.isPairingCode)
+        try model.validate(draft)
+        XCTAssertThrowsError(try model.save(draft), "A one-time credential must never be saved or synced")
+        draft.useRelay = true; draft.relayEndpoint = "removent://relay.example:443"
+        try model.validate(draft)
+        draft.host = "office"
+        try model.validate(draft)
+    }
+
+    func testCertificateConfirmationIgnoresStaleEventsAndClearsOnDisconnect() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let model = ControllerModel(storageDirectory: directory, startServices: false)
+        defer { model.disconnect(); try? FileManager.default.removeItem(at: directory) }
+        model.accept(["type":"certificate", "generation":99, "destination":"stale", "relay":true])
+        XCTAssertNil(model.certificateDestination)
+        model.accept(["type":"certificate", "generation":0, "destination":"office", "relay":false])
+        XCTAssertEqual(model.certificateDestination, "office")
+        XCTAssertFalse(model.confirmingRelay); XCTAssertFalse(model.isConnecting)
+        model.disconnect(dismiss:false)
+        XCTAssertNil(model.certificateDestination)
+        model.accept(["type":"certificate", "generation":0, "destination":"stale", "relay":true])
+        XCTAssertNil(model.certificateDestination)
+    }
+
+    func testDismissedRelayPromptCannotAnswerTheNextComputerPrompt() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let model = ControllerModel(storageDirectory: directory, startServices: false)
+        defer { model.disconnect(); try? FileManager.default.removeItem(at: directory) }
+        model.accept(["type":"certificate", "generation":0, "destination":"relay", "relay":true])
+        let relayID = model.certificatePrompt!.id
+        model.accept(["type":"certificate", "generation":0, "destination":"computer", "relay":false])
+        let computerID = model.certificatePrompt!.id
+        model.confirmCertificate(false, promptID:relayID)
+        XCTAssertEqual(model.certificatePrompt?.id, computerID)
+        XCTAssertEqual(model.certificateDestination, "computer")
+        XCTAssertNil(model.error)
+    }
+
     func testZoomedCoordinatesAndEdges() {
         XCTAssertEqual(CanvasView.remotePoint(CGPoint(x:150,y:100), imageSize:CGSize(width:300,height:200),
             remoteSize:CGSize(width:1920,height:1080)), CGPoint(x:960,y:540))
@@ -40,9 +83,24 @@ final class ControllerTests: XCTestCase {
         var draft = ConnectionDraft(); draft.host = "office"; draft.useRelay = true
         draft.relayEndpoint = "removent://relay.example:443"; draft.hostFingerprint = String(repeating:"a",count:64)
         let request = try draft.request(audio:true,clipboard:true)
-        XCTAssertEqual((request["relay"] as? [String:String])?["transport"], "websocket")
+        XCTAssertEqual((request["relay"] as? [String:Any])?["transport"] as? String, "websocket")
         XCTAssertEqual(request["accept_invalid_certificate"] as? Bool, false)
     }
+    func testRelaySNIAndOptionalCertificateValidation() throws {
+        var draft = ConnectionDraft(); draft.host = "office"; draft.useRelay = true
+        draft.relayEndpoint = "removent://127.0.0.1:443"
+        var route = try XCTUnwrap(try draft.request(audio: false, clipboard: false)["relay"] as? [String: Any])
+        XCTAssertEqual(route["accept_invalid_certificate"] as? Bool, false)
+        XCTAssertEqual(route["host_fingerprint"] as? String, "")
+        draft.relayServerName = "relay.example"; draft.verifyRelayCertificate = false
+        route = try XCTUnwrap(try draft.request(audio: false, clipboard: false)["relay"] as? [String: Any])
+        XCTAssertEqual(route["server_name"] as? String, "relay.example")
+        XCTAssertEqual(route["accept_invalid_certificate"] as? Bool, true)
+        let legacy = try JSONDecoder().decode(RelayRoute.self, from: Data(#"{"endpoint":"removent://relay.example:443","transport":"websocket","server_fingerprint":"","host_fingerprint":""}"#.utf8))
+        XCTAssertNil(legacy.accept_invalid_certificate)
+        XCTAssertNil(legacy.server_name)
+    }
+
     func testKeyboardModifiersAndSpecialKeys() {
         XCTAssertEqual(RemoteKeyboard.modifiers([.command,.shift]),18)
         XCTAssertEqual(RemoteKeyboard.special(.keyboardLeftArrow),123)
@@ -89,6 +147,20 @@ final class ControllerTests: XCTestCase {
         XCTAssertNil(edit.credentialID)
         try model.save(edit)
         XCTAssertFalse(try XCTUnwrap(model.bookmarks.first).password_hint)
+    }
+
+    func testAuthenticationPromptFollowsHostPolicyAndIgnoresStaleEvents() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let model = ControllerModel(storageDirectory: directory, startServices: false)
+        defer { model.disconnect(); try? FileManager.default.removeItem(at: directory) }
+        model.accept(["type": "pin", "generation": 0, "mode": "password"])
+        XCTAssertTrue(model.needsPIN); XCTAssertEqual(model.authenticationMode, "password")
+        model.accept(["type": "pin", "generation": 99, "mode": "otp"])
+        XCTAssertEqual(model.authenticationMode, "password")
+        model.accept(["type": "pin", "generation": 0, "mode": "otp"])
+        XCTAssertEqual(model.authenticationMode, "otp")
+        model.accept(["type": "ready", "generation": 0])
+        XCTAssertFalse(model.needsPIN)
     }
 
     func testSessionFailureAndIndependentRefreshCapability() throws {

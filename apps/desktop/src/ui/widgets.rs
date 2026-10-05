@@ -62,21 +62,35 @@ pub fn segmented_with_disabled(
     cx: &App,
 ) -> Div {
     let t = cx.theme();
-    // Inset track with a raised active segment; wraps at compact window sizes.
+    let text_system = cx.text_system();
+    let font_id = text_system.resolve_font(&gpui::font(t.font_family.clone()));
+    let segment_width = options
+        .iter()
+        .map(|label| {
+            label
+                .chars()
+                .map(|ch| {
+                    text_system
+                        .advance(font_id, px(12.), ch)
+                        .map(|advance| advance.width)
+                        .unwrap_or(px(12.))
+                })
+                .fold(px(0.), |width, advance| width + advance)
+        })
+        .fold(px(0.), |width, next| width.max(next))
+        + px(24.);
+    // Related choices remain grouped, with equal widths measured from their labels.
     let track = t.background;
     let mut row = div()
         .flex()
         .w_auto()
         .max_w_full()
-        // Narrow panes (settings at minimum window width) must wrap instead of clipping
-        // the trailing segments.
-        .flex_wrap()
         .items_center()
         .gap(px(2.))
-        .p(px(4.))
+        .p(px(2.))
         .border_1()
         .border_color(t.border)
-        .rounded(px(10.))
+        .rounded(px(8.))
         .bg(track);
     row.style().align_self = Some(gpui::AlignSelf::FlexStart);
     for (i, label) in options.iter().enumerate() {
@@ -87,8 +101,9 @@ pub fn segmented_with_disabled(
             .label(label.clone())
             .ghost()
             .small()
-            .h(px(30.))
-            .rounded(px(7.))
+            .w(segment_width)
+            .h(px(28.))
+            .rounded(px(6.))
             .segment(active)
             .disabled(disabled)
             .on_click(move |ev, window, app| cb(i, ev, window, app));
@@ -126,7 +141,7 @@ pub fn overlay_chip(cx: &App) -> Div {
         .rounded(px(20.))
 }
 
-/// Raised surface shared by settings, permissions and device metadata.
+/// Content grouping stays quiet; depth is reserved for navigation and overlays.
 pub fn form_group(cx: &App) -> Div {
     div()
         .flex()
@@ -134,11 +149,11 @@ pub fn form_group(cx: &App) -> Div {
         .w_full()
         .min_w_0()
         .flex_shrink_0()
-        .rounded(px(14.))
+        .rounded(px(10.))
         .bg(cx.theme().group_box)
         .border_1()
         .border_color(cx.theme().border)
-        .shadow_xs()
+        .shadow_none()
 }
 
 /// Form section heading, shared by device metadata and settings.
@@ -151,7 +166,7 @@ pub fn group_title(text: impl Into<SharedString>, cx: &App) -> Div {
         .child(text.into())
 }
 
-/// Section identity: a tinted icon tile and a clear title/description hierarchy.
+/// Section identity uses a monochrome symbol and a clear title/description hierarchy.
 pub fn section_header(name: &'static str, title: String, description: String, cx: &App) -> Div {
     div()
         .flex()
@@ -166,13 +181,13 @@ pub fn section_header(name: &'static str, title: String, description: String, cx
                 .flex()
                 .items_center()
                 .justify_center()
-                .size(px(40.))
+                .size(px(28.))
                 .flex_shrink_0()
-                .rounded(px(12.))
-                .bg(cx.theme().accent.opacity(0.12))
-                .border_1()
-                .border_color(cx.theme().accent.opacity(0.18))
-                .child(icon(name).size(px(20.)).text_color(cx.theme().accent)),
+                .child(
+                    icon(name)
+                        .size(px(22.))
+                        .text_color(cx.theme().muted_foreground),
+                ),
         )
         .child(
             div()

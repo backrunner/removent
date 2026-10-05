@@ -2,7 +2,7 @@
 //! TLS terminates at the edge; native device authentication stays inside RVP.
 mod client;
 mod server;
-pub use client::{connect, host_loop, start_client};
+pub use client::{connect, connect_with_invitation, host_loop, start_client};
 pub use server::serve;
 
 use anyhow::{Result, bail, ensure};
@@ -68,6 +68,7 @@ impl Sender {
 
 pub struct Tunnel {
     pub route: u64,
+    pub resolved_room: Option<String>,
     pub(crate) sender: Sender,
     incoming: mpsc::Receiver<Bytes>,
     task: tokio::task::JoinHandle<()>,
@@ -96,6 +97,7 @@ impl Tunnel {
         });
         Self {
             route,
+            resolved_room: None,
             sender: Sender { tx, stop },
             incoming,
             task,

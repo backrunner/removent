@@ -3,6 +3,7 @@ use tempfile::tempdir;
 
 fn request(protocol: ConnectionProtocol, host: &str, port: u16) -> ConnectionRequest {
     ConnectionRequest {
+        pairing_code: None,
         protocol,
         address: ConnectionAddress {
             host: host.into(),

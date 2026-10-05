@@ -18,6 +18,10 @@ impl HomeView {
         vnc_password_input.update(cx, |s, cx| {
             s.set_value(settings.vnc_password.clone(), window, cx);
         });
+        let auth_password_input = cx.new(|cx| InputState::new(window, cx).masked(true));
+        auth_password_input.update(cx, |s, cx| {
+            s.set_value(settings.authentication.password.clone(), window, cx)
+        });
         let focus = cx.focus_handle();
         window.focus(&focus);
 
@@ -135,6 +139,9 @@ impl HomeView {
             );
         }
 
+        subscriptions
+            .push(cx.subscribe(&auth_password_input, |_, _, _: &InputEvent, cx| cx.notify()));
+
         Self {
             my_fp_short: engine.fingerprint_short(),
             trusted: engine.trusted_short_fps(),
@@ -163,6 +170,8 @@ impl HomeView {
             admission: None,
             pin_dialog: None,
             pin_input,
+            auth_mode: Default::default(),
+            auth_password_input,
             search_input,
             connection_dialog: None,
             connection_subscription: None,

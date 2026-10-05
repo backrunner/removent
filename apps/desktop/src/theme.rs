@@ -29,9 +29,9 @@ pub struct Palette {
 pub fn palette(dark: bool) -> Palette {
     if dark {
         Palette {
-            background: c(0x1E2025),
-            surface: c(0x292C32),
-            overlay: ca(0x2D3037F5),
+            background: c(0x1E1E20),
+            surface: c(0x2A2A2C),
+            overlay: ca(0x2C2C2EF5),
             border: ca(0xFFFFFF16),
             text_primary: c(0xF5F5F7),
             text_secondary: c(0xA8ABB3),
@@ -88,8 +88,8 @@ pub fn apply(dark: bool, cx: &mut App) {
     t.muted = p.surface;
     t.muted_foreground = p.text_secondary;
     t.secondary = p.surface;
-    t.secondary_hover = if dark { c(0x41454E) } else { c(0xE8ECF2) };
-    t.secondary_active = if dark { c(0x4B505A) } else { c(0xDEE4EC) };
+    t.secondary_hover = if dark { c(0x3A3A3C) } else { c(0xE5E5E7) };
+    t.secondary_active = if dark { c(0x48484A) } else { c(0xDADADC) };
     t.secondary_foreground = p.text_primary;
     t.accent = p.accent;
     t.accent_foreground = c(0xFFFFFF);
@@ -116,22 +116,22 @@ pub fn apply(dark: bool, cx: &mut App) {
     t.info_hover = p.accent;
     t.info_active = p.accent;
     t.overlay = p.overlay;
-    t.popover = if dark { c(0x2B2E35) } else { c(0xFFFFFF) };
+    t.popover = if dark { c(0x2C2C2E) } else { c(0xFFFFFF) };
     t.popover_foreground = p.text_primary;
     t.input = p.border;
     t.caret = p.text_primary;
     t.ring = p.accent;
     t.selection = if dark { ca(0x0A84FF44) } else { ca(0x007AFF33) };
     t.list = p.background;
-    t.list_hover = if dark { c(0x3A3E47) } else { c(0xE8ECF2) };
-    t.list_active = if dark { c(0x4B505A) } else { c(0xDEE4EC) };
+    t.list_hover = if dark { c(0x323234) } else { c(0xE5E5E7) };
+    t.list_active = if dark { c(0x3C3C3E) } else { c(0xDADADC) };
     t.list_active_border = p.border;
     t.list_even = p.background;
     t.list_head = p.surface;
-    t.sidebar = if dark { c(0x23262D) } else { c(0xECEEF1) };
+    t.sidebar = if dark { c(0x252527) } else { c(0xECECEE) };
     t.sidebar_foreground = p.text_primary;
     t.sidebar_border = p.border;
-    t.sidebar_accent = if dark { c(0x41454E) } else { c(0xE8ECF2) };
+    t.sidebar_accent = if dark { c(0x3A3A3C) } else { c(0xE0E0E2) };
     t.sidebar_accent_foreground = p.text_primary;
     t.sidebar_primary = p.accent;
     t.sidebar_primary_foreground = c(0xFFFFFF);
@@ -143,7 +143,7 @@ pub fn apply(dark: bool, cx: &mut App) {
     t.tab_foreground = p.text_secondary;
     t.tab_bar = p.surface;
     t.tab_bar_segmented = p.surface;
-    t.group_box = if dark { c(0x2B2E35) } else { c(0xFFFFFF) };
+    t.group_box = if dark { c(0x2C2C2E) } else { c(0xFFFFFF) };
     t.group_box_foreground = p.text_primary;
     t.skeleton = if dark { c(0x4B505A) } else { c(0xDEE4EC) };
     t.switch = if dark { c(0x4A4D55) } else { c(0xD1D1D6) };

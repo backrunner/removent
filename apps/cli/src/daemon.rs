@@ -33,6 +33,9 @@ pub(super) async fn cmd_daemon(action: &str) -> anyhow::Result<()> {
 
     let req = match action {
         "status" => IpcRequest::Status,
+        "pairing-show" => IpcRequest::PairingShow,
+        "pairing-generate" => IpcRequest::PairingGenerate,
+        "pairing-revoke" => IpcRequest::PairingRevoke,
         "permissions" => IpcRequest::RequestPermissions,
         "enable" => IpcRequest::SetEnabled { on: true },
         "disable" => IpcRequest::SetEnabled { on: false },
@@ -54,7 +57,9 @@ pub(super) async fn cmd_daemon(action: &str) -> anyhow::Result<()> {
                 .context(t!("daemon.read_failed"))?
                 .context(t!("daemon.disconnected"))?;
             match v.get("type").and_then(serde_json::Value::as_str) {
-                Some("status" | "ok" | "error") => return Ok::<_, anyhow::Error>(v),
+                Some("status" | "ok" | "error" | "pairing_code") => {
+                    return Ok::<_, anyhow::Error>(v);
+                }
                 _ => continue,
             }
         }
@@ -73,5 +78,20 @@ pub(super) async fn cmd_daemon(action: &str) -> anyhow::Result<()> {
         "{}",
         serde_json::to_string_pretty(&resp).context(t!("daemon.serialize_failed"))?
     );
+    Ok(())
+}
+
+/// Stream pairing codes from the local private IPC socket for headless hosts.
+pub(super) async fn watch_pairing() -> anyhow::Result<()> {
+    use removent_core::ipc::{IpcRequest, read_msg, write_msg};
+    let (mut r, mut w) = removent_core::ipc::connect(&DataPaths::resolve()).await?;
+    write_msg(&mut w, &IpcRequest::PairingShow).await?;
+    while let Some(value) = read_msg::<_, serde_json::Value>(&mut r).await? {
+        if let Some("pairing_code" | "pairing_pin" | "pairing_done" | "pairing_cleared") =
+            value.get("type").and_then(serde_json::Value::as_str)
+        {
+            println!("{}", serde_json::to_string(&value)?)
+        }
+    }
     Ok(())
 }

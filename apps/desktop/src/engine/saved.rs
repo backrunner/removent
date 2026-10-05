@@ -42,6 +42,10 @@ impl Engine {
         id: Option<&str>,
     ) -> Result<SavedConnection> {
         let mut store = SavedConnections::load(&self.paths)?;
+        anyhow::ensure!(
+            request.pairing_code.is_none(),
+            "Connection codes are temporary and cannot be saved"
+        );
         let mut entry = SavedConnection::from_request(request, name);
         entry.id = id.unwrap_or_default().to_owned();
         Ok(store.save_with_password(entry, &request.password)?)

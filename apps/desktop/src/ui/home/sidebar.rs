@@ -19,7 +19,7 @@ impl HomeView {
                         Button::new("add-connection")
                             .icon(icon_16("plus"))
                             .label(t!("connection.add").to_string())
-                            .primary()
+                            .outline()
                             .small()
                             .tooltip(t!("connection.add").to_string())
                             .disabled(self.connecting.is_some())
@@ -47,6 +47,7 @@ impl HomeView {
         fp: &str,
         row: &DeviceRow,
         trusted: bool,
+        text_width: f32,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = cx.theme().colors;
@@ -81,25 +82,12 @@ impl HomeView {
                 }
             }))
             .child(saved_glyph(row.protocol, 32., &colors))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        sidebar_line()
-                            .text_size(px(13.))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .child(row.name.clone()),
-                    )
-                    .child(
-                        sidebar_line()
-                            .text_size(px(11.))
-                            .text_color(colors.muted_foreground)
-                            .child(format!("{} · {}", row.protocol.short_label(), row.addr)),
-                    ),
-            )
+            .child(sidebar_labels(
+                text_width,
+                row.name.clone(),
+                format!("{} · {}", row.protocol.short_label(), row.addr),
+                cx,
+            ))
             .when(trusted, |el| {
                 el.child(
                     icon_16("shield-check")
@@ -125,6 +113,7 @@ impl HomeView {
     pub(super) fn render_saved_row(
         &self,
         entry: &SavedConnection,
+        text_width: f32,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = cx.theme().colors;
@@ -159,29 +148,12 @@ impl HomeView {
                 }
             }))
             .child(saved_glyph(entry.protocol, 32., &colors))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        sidebar_line()
-                            .text_size(px(13.))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .child(entry.display_name()),
-                    )
-                    .child(
-                        sidebar_line()
-                            .text_size(px(11.))
-                            .text_color(colors.muted_foreground)
-                            .child(format!(
-                                "{} · {}",
-                                entry.protocol.short_label(),
-                                entry.address()
-                            )),
-                    ),
-            );
+            .child(sidebar_labels(
+                text_width,
+                entry.display_name(),
+                format!("{} · {}", entry.protocol.short_label(), entry.address()),
+                cx,
+            ));
         if selected {
             el = el
                 .bg(colors.accent.opacity(0.12))
@@ -202,7 +174,18 @@ impl HomeView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        if self.settings_open {
+            return self.render_settings_sidebar(window, cx);
+        }
         let colors = cx.theme().colors;
+        let sidebar_width = if window.viewport_size().width < px(1000.) {
+            228.
+        } else {
+            256.
+        };
+        let local_text_width = sidebar_width - 2. * SIDEBAR_INSET - 28. - 10.;
+        // Explicit widths also let GPUI remeasure one-line labels after resizing.
+        let row_text_width = sidebar_width - 2. * SIDEBAR_INSET - 32. - 12.;
         let discovery = self.engine.settings().discovery;
         let discovering = discovery.removent || discovery.vnc || discovery.rdp;
         let query = self.search_input.read(cx).value().trim().to_lowercase();
@@ -241,7 +224,7 @@ impl HomeView {
         if !saved_rows.is_empty() {
             list = list.child(list_group_label(t!("saved.section").to_string(), cx));
             for entry in saved_rows.iter().copied() {
-                list = list.child(self.render_saved_row(entry, cx));
+                list = list.child(self.render_saved_row(entry, row_text_width, cx));
             }
             if !rows.is_empty() {
                 list = list.child(list_group_label(t!("device.nearby").to_string(), cx));
@@ -300,15 +283,12 @@ impl HomeView {
             );
         }
         for (fp, row) in rows {
-            list =
-                list.child(self.render_device_row(fp, row, self.trusted.contains(fp.as_str()), cx));
+            let trusted = self.trusted.contains(fp.as_str());
+            let text_width = row_text_width - if trusted { 16. + 12. } else { 0. };
+            list = list.child(self.render_device_row(fp, row, trusted, text_width, cx));
         }
         div()
-            .w(px(if window.viewport_size().width < px(1000.) {
-                228.
-            } else {
-                256.
-            }))
+            .w(px(sidebar_width))
             .flex_shrink_0()
             .flex()
             .flex_col()
@@ -354,8 +334,10 @@ impl HomeView {
             )
             .child(
                 div()
+                    .border_t_1()
+                    .border_color(colors.border)
                     .px(px(SIDEBAR_INSET - SIDEBAR_ROW_INSET))
-                    .py_3()
+                    .py_2()
                     .child(
                         div()
                             .id("local-device")
@@ -365,48 +347,48 @@ impl HomeView {
                             .focus(|style| style.border_color(colors.ring))
                             .flex()
                             .items_center()
-                            .gap_3()
+                            .gap(px(10.))
                             .w_full()
                             .min_w_0()
                             .px(px(SIDEBAR_ROW_INSET - 1.))
-                            .py_3()
-                            .rounded(px(12.))
+                            .py_2()
+                            .rounded(px(8.))
                             .when(self.selected.is_none() && !self.settings_open, |el| {
-                                el.bg(colors.accent.opacity(0.12))
-                                    .border_color(colors.accent.opacity(0.2))
+                                el.bg(colors.sidebar_accent.opacity(0.45))
                             })
                             .hover(|el| el.bg(colors.list_hover))
+                            .active(|el| el.bg(colors.list_active))
                             .cursor_pointer()
                             .on_click(cx.listener(|this, _, _w, cx| {
                                 this.selected = None;
                                 this.settings_open = false;
                                 cx.notify();
                             }))
-                            .child(device_glyph(32., &colors))
                             .child(
                                 div()
-                                    .flex_1()
-                                    .min_w_0()
+                                    .size(px(28.))
+                                    .flex_shrink_0()
                                     .flex()
-                                    .flex_col()
-                                    .child(
-                                        sidebar_line()
-                                            .text_size(px(12.))
-                                            .font_weight(gpui::FontWeight::MEDIUM)
-                                            .child(t!("device.this_mac").to_string()),
-                                    )
-                                    .child(
-                                        sidebar_line()
-                                            .text_size(px(11.))
-                                            .text_color(colors.muted_foreground)
-                                            .child(self.engine.device_name()),
-                                    ),
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(px(8.))
+                                    .bg(colors.secondary_hover.opacity(0.45))
+                                    .child(icon_16("monitor").text_color(colors.muted_foreground)),
                             )
-                            .child(dot(if self.host_on {
-                                colors.success
-                            } else {
-                                colors.muted_foreground.opacity(0.5)
-                            })),
+                            .child(sidebar_labels(
+                                local_text_width,
+                                self.engine.device_name(),
+                                format!(
+                                    "{} · {}",
+                                    t!("device.this_mac"),
+                                    t!(if self.host_on {
+                                        "sharing.enabled"
+                                    } else {
+                                        "sharing.disabled"
+                                    })
+                                ),
+                                cx,
+                            )),
                     ),
             )
     }

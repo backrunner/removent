@@ -159,8 +159,9 @@ impl std::fmt::Display for ConnectionAddress {
 
 /// Credentials are per connection and deliberately excluded from Debug and persistence.
 /// For native relay connections `password` is the relay credential; native RVP
-/// authentication always uses the device identity and pairing grants.
+/// authentication uses the host-selected policy and device identity.
 pub struct ConnectionRequest {
+    pub pairing_code: Option<removent_core::pairing_invitation::PairingCode>,
     pub protocol: ConnectionProtocol,
     pub address: ConnectionAddress,
     pub username: String,
@@ -173,6 +174,7 @@ pub struct ConnectionRequest {
 impl ConnectionRequest {
     pub fn native(addr: SocketAddr) -> Self {
         Self {
+            pairing_code: None,
             protocol: ConnectionProtocol::Removent,
             address: ConnectionAddress::from_socket(addr),
             username: String::new(),
@@ -184,13 +186,23 @@ impl ConnectionRequest {
     }
 }
 
-/// Only public routing/trust data. Credentials belong in the Keychain.
+fn certificate_verification_enabled(exception: &bool) -> bool {
+    !*exception
+}
+
+/// Routing, optional pins and a device-local TLS exception. Credentials belong in the Keychain.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RelayRoute {
     pub endpoint: String,
     pub transport: RelayTransport,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub server_name: String,
+    #[serde(default, skip_serializing_if = "certificate_verification_enabled")]
+    pub accept_invalid_certificate: bool,
+    #[serde(default)]
     pub server_fingerprint: String,
+    #[serde(default)]
     pub host_fingerprint: String,
 }
 impl RelayRoute {
@@ -200,15 +212,30 @@ impl RelayRoute {
         server_fingerprint: &str,
         host_fingerprint: &str,
     ) -> Result<Self, &'static str> {
+        Self::parse_for_connection(
+            endpoint,
+            transport,
+            server_fingerprint,
+            host_fingerprint,
+            false,
+        )
+    }
+    pub fn parse_for_connection(
+        endpoint: &str,
+        transport: RelayTransport,
+        server_fingerprint: &str,
+        host_fingerprint: &str,
+        _invitation: bool,
+    ) -> Result<Self, &'static str> {
         let endpoint = RemoventEndpoint::parse(endpoint).map_err(|_| "connection.invalid_relay")?;
         let pin = |value: &str| value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit());
         let server_fingerprint = server_fingerprint.trim().to_lowercase();
         let host_fingerprint = host_fingerprint.trim().to_lowercase();
-        if !pin(&host_fingerprint) {
+        if !host_fingerprint.is_empty() && !pin(&host_fingerprint) {
             return Err("connection.invalid_host_fingerprint");
         }
         match transport {
-            RelayTransport::Quic if !pin(&server_fingerprint) => {
+            RelayTransport::Quic if !server_fingerprint.is_empty() && !pin(&server_fingerprint) => {
                 return Err("connection.invalid_relay_pin");
             }
             RelayTransport::WebSocket if !server_fingerprint.is_empty() => {
@@ -218,23 +245,87 @@ impl RelayRoute {
         }
         Ok(Self {
             endpoint: endpoint.uri(),
+            server_name: String::new(),
+            accept_invalid_certificate: false,
             transport,
             server_fingerprint,
             host_fingerprint,
         })
     }
-    pub fn host_pin(&self) -> [u8; 32] {
-        // Called only after parse/validate at the connection boundary.
-        hex::decode(&self.host_fingerprint)
-            .unwrap()
-            .try_into()
-            .unwrap()
+    pub fn with_tls(
+        mut self,
+        server_name: &str,
+        accept_invalid_certificate: bool,
+    ) -> Result<Self, &'static str> {
+        self.server_name = removent_core::removent_uri::normalize_server_name(server_name)
+            .map_err(|_| "connection.invalid_sni")?;
+        self.accept_invalid_certificate = accept_invalid_certificate;
+        Ok(self)
+    }
+    pub fn validated(&self, invitation: bool) -> Result<Self, &'static str> {
+        Self::parse_for_connection(
+            &self.endpoint,
+            self.transport,
+            &self.server_fingerprint,
+            &self.host_fingerprint,
+            invitation,
+        )?
+        .with_tls(&self.server_name, self.accept_invalid_certificate)
+    }
+    pub fn optional_host_pin(&self) -> Option<[u8; 32]> {
+        hex::decode(&self.host_fingerprint).ok()?.try_into().ok()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_fingerprints_sni_and_legacy_routes() {
+        let legacy: RelayRoute = serde_json::from_value(serde_json::json!({
+            "endpoint":"removent://relay.example:443", "transport":"websocket",
+            "server_fingerprint":"", "host_fingerprint":""
+        }))
+        .unwrap();
+        assert!(!legacy.accept_invalid_certificate);
+        assert!(legacy.server_name.is_empty());
+        for transport in [RelayTransport::WebSocket, RelayTransport::Quic] {
+            let route = RelayRoute::parse("removent://127.0.0.1:443", transport, "", "")
+                .unwrap()
+                .with_tls(" RELAY.example ", true)
+                .unwrap();
+            assert_eq!(route.server_name, "relay.example");
+            assert!(route.accept_invalid_certificate);
+            assert_eq!(route.validated(false).unwrap(), route);
+            assert!(route.optional_host_pin().is_none());
+            assert!(
+                route
+                    .clone()
+                    .with_tls("https://relay.example/path", false)
+                    .is_err()
+            );
+            assert!(route.with_tls("relay.example:443", false).is_err());
+        }
+        assert!(
+            RelayRoute::parse(
+                "removent://relay.example:443",
+                RelayTransport::Quic,
+                "bad",
+                ""
+            )
+            .is_err()
+        );
+        assert!(
+            RelayRoute::parse(
+                "removent://relay.example:443",
+                RelayTransport::WebSocket,
+                "",
+                "bad"
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn removent_routes_require_the_selected_carriers_trust_and_reject_old_schemes() {
@@ -248,7 +339,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(route.endpoint, "removent://relay.example:443");
-        assert_eq!(route.host_pin(), [0xaa; 32]);
+        assert_eq!(route.optional_host_pin(), Some([0xaa; 32]));
         assert!(
             RelayRoute::parse(
                 "removent://[::1]:48700",
@@ -274,7 +365,7 @@ mod tests {
                 "",
                 &host
             )
-            .is_err()
+            .is_ok()
         );
         for old in [
             "wss://relay.example:443",

@@ -126,6 +126,7 @@ impl TestServer {
 
     fn request(&self, allow_untrusted: bool, password: &str) -> ConnectionRequest {
         ConnectionRequest {
+            pairing_code: None,
             protocol: ConnectionProtocol::Rdp,
             address: ConnectionAddress::from_socket(self.addr),
             username: "testuser".into(),

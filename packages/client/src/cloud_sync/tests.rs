@@ -434,3 +434,71 @@ fn touch_is_not_a_content_edit_and_token_reset_keeps_outbox() {
         "Pending"
     );
 }
+
+#[test]
+fn relay_certificate_exception_stays_local_while_sni_syncs() {
+    let a = tempfile::tempdir().unwrap();
+    let b = tempfile::tempdir().unwrap();
+    let a = paths(&a);
+    let b = paths(&b);
+    let route = RelayRoute::parse(
+        "removent://relay.example:443",
+        removent_core::removent_uri::RelayTransport::WebSocket,
+        "",
+        "",
+    )
+    .unwrap()
+    .with_tls("tls.example", true)
+    .unwrap();
+    let entry = SavedConnections::load(&a)
+        .unwrap()
+        .upsert(SavedConnection {
+            protocol: ConnectionProtocol::Removent,
+            host: "office".into(),
+            port: 0,
+            relay: Some(route),
+            ..Default::default()
+        })
+        .unwrap();
+    activate(&a, "user");
+    activate(&b, "user");
+    let records = pending(&a, "user");
+    let wire = records[0]
+        .payload
+        .data
+        .as_ref()
+        .unwrap()
+        .relay
+        .as_ref()
+        .unwrap();
+    assert_eq!(wire.server_name, "tls.example");
+    assert!(!wire.accept_invalid_certificate);
+    receive(&b, "user", records);
+    assert!(
+        !SavedConnections::load(&b).unwrap().all()[0]
+            .relay
+            .as_ref()
+            .unwrap()
+            .accept_invalid_certificate
+    );
+    ack(&a, "user");
+    let mut remote = pending(&b, "user");
+    if remote.is_empty() {
+        remote = vec![RemoteRecord {
+            id: entry.id.clone(),
+            payload: Payload::new(Some(ConnectionData::from(&entry))),
+            system_fields: None,
+            base_revision: None,
+        }];
+    }
+    remote[0].payload.revision = revision();
+    remote[0].payload.data.as_mut().unwrap().name = "Renamed".into();
+    receive(&a, "user", remote);
+    assert!(
+        SavedConnections::load(&a).unwrap().all()[0]
+            .relay
+            .as_ref()
+            .unwrap()
+            .accept_invalid_certificate
+    );
+}

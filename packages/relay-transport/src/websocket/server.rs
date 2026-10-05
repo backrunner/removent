@@ -38,6 +38,7 @@ struct Room {
 #[derive(Default)]
 struct Routes {
     host: Option<Sender>,
+    pairing: Option<removent_core::pairing_invitation::Advertisement>,
     clients: HashMap<u64, Sender>,
 }
 struct Registration {
@@ -53,6 +54,7 @@ impl Drop for Registration {
         match self.role {
             Role::Host => {
                 routes.host = None;
+                routes.pairing = None;
                 for (_, peer) in routes.clients.drain() {
                     peer.stop.cancel();
                 }
@@ -64,17 +66,33 @@ impl Drop for Registration {
     }
 }
 
-fn register(room: Arc<Room>, role: Role, sender: Sender, limit: usize) -> Result<Registration> {
+fn register(
+    room: Arc<Room>,
+    role: Role,
+    sender: Sender,
+    limit: usize,
+    pairing: Option<removent_core::pairing_invitation::Advertisement>,
+    requested_room: &str,
+) -> Result<Registration> {
     let id = {
         let mut routes = room.routes.lock().unwrap();
         match role {
             Role::Host => {
                 ensure!(routes.host.is_none(), "Host already online");
                 routes.host = Some(sender.clone());
+                routes.pairing = pairing;
                 0
             }
             Role::Client => {
                 ensure!(routes.host.is_some(), "Host offline");
+                ensure!(
+                    !requested_room.starts_with("pair-")
+                        || routes
+                            .pairing
+                            .as_ref()
+                            .is_some_and(|ad| ad.matches_room(requested_room)),
+                    "Invitation expired"
+                );
                 ensure!(routes.clients.len() < limit, "Room full");
                 let mut id = rand::random::<u64>();
                 while id == 0 || routes.clients.contains_key(&id) {
@@ -93,12 +111,19 @@ fn register(room: Arc<Room>, role: Role, sender: Sender, limit: usize) -> Result
     })
 }
 
+struct Authenticated {
+    room: Arc<Room>,
+    role: Role,
+    key: [u8; 32],
+    requested_room: String,
+    pairing: Option<removent_core::pairing_invitation::Advertisement>,
+}
 /// HTTP upgrade credentials are checked before registering a tunnel. Tokens
 /// never appear in a URL, a response body, or a diagnostic log.
 fn authenticate<B>(
     request: &hyper::Request<B>,
     rooms: &HashMap<String, Arc<Room>>,
-) -> Option<(Arc<Room>, Role, [u8; 32])> {
+) -> Option<Authenticated> {
     if request.uri().path() != PATH
         || request.uri().query().is_some()
         || request.headers().contains_key("origin")
@@ -114,18 +139,74 @@ fn authenticate<B>(
         "client" => Role::Client,
         _ => return None,
     };
-    let room = rooms.get(header("x-removent-room")?)?.clone();
+    let requested_room = header("x-removent-room")?;
+    if requested_room.starts_with("pair-")
+        && (requested_room.len() != 11 || !requested_room[5..].bytes().all(|b| b.is_ascii_digit()))
+    {
+        return None;
+    }
     let token = match header("authorization") {
         Some(value) => value.strip_prefix("Bearer ")?,
         None => "",
     };
     let key = decode_secret(header("x-removent-key")?).ok()?;
+    let room = if role == Role::Client && requested_room.starts_with("pair-") {
+        let mut matches = rooms.values().filter(|r| {
+            let routes = r.routes.lock().unwrap();
+            routes.host.is_some()
+                && routes
+                    .pairing
+                    .as_ref()
+                    .is_some_and(|ad| ad.matches_room(requested_room))
+        });
+        let room = matches.next().cloned();
+        if matches.next().is_some() {
+            return None;
+        }
+        if let Some(room) = room {
+            room
+        } else {
+            // A scoped controller may wake a single-room container before the
+            // host reconnects. Locate its authorized room, then wait for the
+            // actual invitation after proof of possession below.
+            let mut authorized = rooms
+                .values()
+                .filter(|r| r.client_auth.authorize(token, &key).is_ok());
+            let room = authorized.next()?.clone();
+            if authorized.next().is_some() || room.routes.lock().unwrap().host.is_some() {
+                return None;
+            }
+            room
+        }
+    } else {
+        rooms.get(requested_room)?.clone()
+    };
+    let pairing = match (header("x-removent-pair"), header("x-removent-pair-exp")) {
+        (None, None) => None,
+        (Some(locator), Some(exp)) if role == Role::Host => {
+            let ad = removent_core::pairing_invitation::Advertisement {
+                locator: locator.into(),
+                expires_at_unix: exp.parse().ok()?,
+            };
+            if !ad.valid() {
+                return None;
+            }
+            Some(ad)
+        }
+        _ => return None,
+    };
     let policy = match role {
         Role::Host => &room.host_auth,
         Role::Client => &room.client_auth,
     };
     policy.authorize(token, &key).ok()?;
-    Some((room, role, key))
+    Some(Authenticated {
+        room,
+        role,
+        key,
+        requested_room: requested_room.into(),
+        pairing,
+    })
 }
 
 struct Pending(Arc<AtomicUsize>);
@@ -140,6 +221,8 @@ struct Upgrade {
     role: Role,
     socket: hyper::upgrade::OnUpgrade,
     key: [u8; 32],
+    requested_room: String,
+    pairing: Option<removent_core::pairing_invitation::Advertisement>,
 }
 
 fn response(status: StatusCode, body: &'static [u8]) -> Response<Full<Bytes>> {
@@ -168,7 +251,14 @@ async fn connection(
             let response =
                 if request.method() == "GET" && matches!(request.uri().path(), "/" | "/healthz") {
                     response(StatusCode::OK, b"ok")
-                } else if let Some((room, role, key)) = authenticate(&request, &rooms) {
+                } else if let Some(Authenticated {
+                    room,
+                    role,
+                    key,
+                    requested_room,
+                    pairing,
+                }) = authenticate(&request, &rooms)
+                {
                     let socket = hyper::upgrade::on(&mut request);
                     let request: Request = request.map(|_| ());
                     match create_response(&request) {
@@ -181,6 +271,8 @@ async fn connection(
                                 role,
                                 socket,
                                 key,
+                                requested_room,
+                                pairing,
                             });
                             response.map(|_| Full::new(Bytes::new()))
                         }
@@ -207,6 +299,8 @@ async fn connection(
         role,
         socket,
         key,
+        requested_room,
+        pairing,
     }) = upgrade.lock().unwrap().take()
     else {
         return Ok(());
@@ -230,7 +324,7 @@ async fn connection(
         };
         auth::verify(
             &key,
-            &auth::challenge_message(&room.name, role, &nonce),
+            &auth::challenge_message(&requested_room, role, &nonce),
             &proof,
         )
     })
@@ -247,8 +341,19 @@ async fn connection(
     if role == Role::Client {
         tokio::time::timeout(Duration::from_secs(40), async {
             loop {
-                if room.routes.lock().unwrap().host.is_some() {
-                    return Ok::<_, anyhow::Error>(());
+                {
+                    let routes = room.routes.lock().unwrap();
+                    if routes.host.is_some() {
+                        ensure!(
+                            !requested_room.starts_with("pair-")
+                                || routes
+                                    .pairing
+                                    .as_ref()
+                                    .is_some_and(|ad| ad.matches_room(&requested_room)),
+                            "Invitation unavailable"
+                        );
+                        return Ok::<_, anyhow::Error>(());
+                    }
                 }
                 tokio::select! {
                     _ = tunnel.sender.stop.cancelled() => anyhow::bail!("Controller disconnected"),
@@ -263,13 +368,16 @@ async fn connection(
         role,
         tunnel.sender.clone(),
         config.max_clients_per_room,
+        pairing,
+        &requested_room,
     )?;
     drop(pending_guard);
     tunnel.route = reg.id;
-    tunnel
-        .sender
-        .raw(Bytes::copy_from_slice(&reg.id.to_be_bytes()))
-        .await?;
+    let mut ack = reg.id.to_be_bytes().to_vec();
+    if role == Role::Client && requested_room.starts_with("pair-") {
+        ack.extend_from_slice(reg.room.name.as_bytes());
+    }
+    tunnel.sender.raw(Bytes::from(ack)).await?;
     let mut budget = Budget::new(config.max_bytes_per_second);
     loop {
         let packet = tunnel.receive().await?;

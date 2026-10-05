@@ -16,13 +16,8 @@ impl ConnectionDialog {
         });
         let relay_endpoint = cx
             .new(|cx| InputState::new(window, cx).placeholder("removent://relay.example.com:443"));
-        let relay_pin = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder(t!("connection.quic_pin_placeholder").to_string())
-        });
-        let host_pin = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder(t!("connection.fingerprint_placeholder").to_string())
+        let relay_server_name = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t!("connection.sni_placeholder").to_string())
         });
         let mut subscriptions = Vec::new();
         for input in [
@@ -33,8 +28,7 @@ impl ConnectionDialog {
             &password,
             &domain,
             &relay_endpoint,
-            &relay_pin,
-            &host_pin,
+            &relay_server_name,
         ] {
             subscriptions.push(
                 cx.subscribe(input, |this, _, ev: &InputEvent, cx| match ev {
@@ -48,7 +42,7 @@ impl ConnectionDialog {
             );
         }
         // A credential must never follow a changed destination or room silently.
-        for input in [&relay_endpoint, &relay_pin, &host] {
+        for input in [&relay_endpoint, &relay_server_name, &host] {
             subscriptions.push(cx.subscribe_in(
                 input,
                 window,
@@ -60,6 +54,18 @@ impl ConnectionDialog {
                             .as_ref()
                             .is_some_and(|scope| *scope != this.relay_scope(cx))
                     {
+                        let current = this.relay_scope(cx);
+                        if let Some(previous) = &this.relay_secret_scope {
+                            if previous.0 != current.0
+                                || previous.3 != current.3
+                                || previous.4 != current.4
+                            {
+                                this.relay_pin.clear();
+                                this.host_pin.clear();
+                            } else if previous.2 != current.2 {
+                                this.host_pin.clear();
+                            }
+                        }
                         this.relay_secret_task = None;
                         this.password
                             .update(cx, |s, cx| s.set_value("", window, cx));
@@ -88,8 +94,10 @@ impl ConnectionDialog {
             via_relay: false,
             relay_endpoint,
             relay_transport: RelayTransport::default(),
-            relay_pin,
-            host_pin,
+            relay_server_name,
+            verify_relay_certificate: true,
+            relay_pin: String::new(),
+            host_pin: String::new(),
             relay_choices: Vec::new(),
             relay_secret_scope: None,
             relay_secret_task: None,
@@ -225,8 +233,7 @@ impl ConnectionDialog {
                 &self.password,
                 &self.domain,
                 &self.relay_endpoint,
-                &self.relay_pin,
-                &self.host_pin,
+                &self.relay_server_name,
             ]
             .into_iter()
             .any(|input| input.focus_handle(cx).is_focused(window));
@@ -259,7 +266,19 @@ impl ConnectionDialog {
             self.port.read(cx).value().to_string()
         };
         let host = self.host.read(cx).value();
-        let address = (if via_relay {
+        let pairing_code = (protocol == ConnectionProtocol::Removent)
+            .then(|| removent_core::pairing_invitation::PairingCode::parse(&host))
+            .flatten();
+        let address = (if let Some(code) = &pairing_code {
+            Ok(ConnectionAddress {
+                host: code.room(),
+                port: if via_relay {
+                    0
+                } else {
+                    protocol.default_port()
+                },
+            })
+        } else if via_relay {
             ConnectionAddress::relay_room(&host)
         } else if protocol == ConnectionProtocol::Removent {
             ConnectionAddress::parse_native(&host, &port)
@@ -277,13 +296,25 @@ impl ConnectionDialog {
         if protocol == ConnectionProtocol::Rdp && username.is_empty() {
             return Err(t!("connection.username_required").to_string());
         }
+        let host_pin_value = &self.host_pin;
         let relay = if via_relay {
-            let route = RelayRoute::parse(
+            let route = RelayRoute::parse_for_connection(
                 &self.relay_endpoint.read(cx).value(),
                 self.relay_transport,
-                &self.relay_pin.read(cx).value(),
-                &self.host_pin.read(cx).value(),
+                &self.relay_pin,
+                if pairing_code.is_some() {
+                    ""
+                } else {
+                    host_pin_value
+                },
+                pairing_code.is_some(),
             )
+            .and_then(|route| {
+                route.with_tls(
+                    &self.relay_server_name.read(cx).value(),
+                    !self.verify_relay_certificate,
+                )
+            })
             .map_err(|key| t!(key).to_string())?;
             let token = self.password.read(cx).value();
             if !token.is_empty()
@@ -296,6 +327,7 @@ impl ConnectionDialog {
             None
         };
         Ok(ConnectionRequest {
+            pairing_code,
             protocol,
             address,
             username,
@@ -387,6 +419,15 @@ impl ConnectionDialog {
             .as_ref()
             .map(|r| r.endpoint.clone())
             .unwrap_or_default();
+        let server_name = saved
+            .relay
+            .as_ref()
+            .map(|r| r.server_name.clone())
+            .unwrap_or_default();
+        self.verify_relay_certificate = saved
+            .relay
+            .as_ref()
+            .is_none_or(|r| !r.accept_invalid_certificate);
         let relay_pin = saved
             .relay
             .as_ref()
@@ -397,6 +438,8 @@ impl ConnectionDialog {
             .as_ref()
             .map(|r| r.host_fingerprint.clone())
             .unwrap_or_default();
+        self.relay_pin = relay_pin;
+        self.host_pin = host_pin;
         for (input, value) in [
             (&self.name, &saved.name),
             (&self.host, &host),
@@ -404,8 +447,7 @@ impl ConnectionDialog {
             (&self.username, &saved.username),
             (&self.domain, &saved.domain),
             (&self.relay_endpoint, &endpoint),
-            (&self.relay_pin, &relay_pin),
-            (&self.host_pin, &host_pin),
+            (&self.relay_server_name, &server_name),
             (&self.password, &password),
         ] {
             input.update(cx, |s, cx| s.set_value(value.clone(), window, cx));
@@ -420,12 +462,17 @@ impl ConnectionDialog {
         cx.notify();
     }
 
-    pub(super) fn relay_scope(&self, cx: &gpui::App) -> (String, String, String, RelayTransport) {
+    pub(super) fn relay_scope(
+        &self,
+        cx: &gpui::App,
+    ) -> (String, String, String, RelayTransport, String, bool) {
         (
             self.relay_endpoint.read(cx).value().to_string(),
-            self.relay_pin.read(cx).value().to_string(),
+            self.relay_pin.clone(),
             self.host.read(cx).value().to_string(),
             self.relay_transport,
+            self.relay_server_name.read(cx).value().to_string(),
+            self.verify_relay_certificate,
         )
     }
 
@@ -442,8 +489,7 @@ impl ConnectionDialog {
         self.relay_secret_task = None;
         self.password
             .update(cx, |s, cx| s.set_value("", window, cx));
-        self.relay_pin
-            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.relay_pin.clear();
         self.relay_secret_scope = Some(self.relay_scope(cx));
         self.error = None;
         cx.notify();
@@ -464,13 +510,15 @@ impl ConnectionDialog {
         };
         self.relay_secret_task = None;
         self.relay_transport = route.transport;
+        self.verify_relay_certificate = !route.accept_invalid_certificate;
+        self.relay_server_name.update(cx, |s, cx| {
+            s.set_value(route.server_name.clone(), window, cx)
+        });
         self.password
             .update(cx, |s, cx| s.set_value("", window, cx));
         self.relay_endpoint
             .update(cx, |s, cx| s.set_value(route.endpoint.clone(), window, cx));
-        self.relay_pin.update(cx, |s, cx| {
-            s.set_value(route.server_fingerprint.clone(), window, cx)
-        });
+        self.relay_pin = route.server_fingerprint.clone();
         // Read Keychain off the UI thread; a late result cannot follow an edit.
         if self.host.read(cx).value().trim() == saved.host
             && let Some(account) = saved.credential_account()

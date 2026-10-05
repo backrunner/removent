@@ -63,3 +63,12 @@ mod audio;
 
 #[path = "session_loopback/cancellation.rs"]
 mod cancellation;
+
+#[path = "session_loopback/authentication.rs"]
+mod authentication;
+
+#[path = "session_loopback/invitations.rs"]
+mod invitations;
+
+#[path = "session_loopback/security.rs"]
+mod security;

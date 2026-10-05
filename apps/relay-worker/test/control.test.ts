@@ -11,12 +11,12 @@ const env: RelayConfig = {
 const admin = (action: string, token = tokens.admin, method = action === "status" ? "GET" : "POST") => new Request(`https://relay.example/admin/${action}`, { method, headers: { authorization: `Bearer ${token}` } });
 const identities = { host: generateKeyPairSync("ed25519"), client: generateKeyPairSync("ed25519") };
 const keyHex = (role: "host" | "client") => Buffer.from(identities[role].publicKey.export({ format: "der", type: "spki" }).subarray(-32)).toString("hex");
-const tunnel = (role: "host" | "client", token = tokens[role]) => {
+const tunnel = (role: "host" | "client", token = tokens[role], room = "office") => {
   const time = String(Math.floor(Date.now() / 1000)), nonce = Buffer.from(randomBytes(32)).toString("hex");
   const audience = "removent://relay.example:443";
-  const message = `removent-relay-admission-v1\n${audience}\noffice\n${role}\n${time}\n${nonce}`;
+  const message = `removent-relay-admission-v1\n${audience}\n${room}\n${role}\n${time}\n${nonce}`;
   const headers: Record<string, string> = {
-    upgrade: "websocket", "sec-websocket-protocol": protocol, "x-removent-room": "office", "x-removent-role": role,
+    upgrade: "websocket", "sec-websocket-protocol": protocol, "x-removent-room": room, "x-removent-role": role,
     "x-removent-key": keyHex(role), "x-removent-time": time, "x-removent-nonce": nonce, "x-removent-audience": audience,
     "x-removent-signature": Buffer.from(sign(null, Buffer.from(message), identities[role].privateKey)).toString("hex"),
   };
@@ -184,4 +184,14 @@ test("denied source never reaches the DO even with valid device or admin credent
   allowed.headers.set("cf-connecting-ip", "203.0.113.4");
   assert.equal((await ingress(allowed, restricted, forward)).status, 200);
   assert.equal(forwarded, 1);
+});
+
+test("code locators retain relay role credentials and bind the signed room", async () => {
+  assert.equal(await authenticate(tunnel("client", tokens.client, "pair-123456"), env), "client");
+  for (const request of [tunnel("host", tokens.host, "pair-123456"), tunnel("client", tokens.host, "pair-123456"), tunnel("client", tokens.client, "pair-12345"), tunnel("client", tokens.client, "pair-abcdef")]) {
+    assert.equal((await authenticate(request, env) as Response).status, 401);
+  }
+  const changed = tunnel("client", tokens.client, "pair-123456");
+  changed.headers.set("x-removent-room", "pair-654321");
+  assert.equal((await authenticate(changed, env) as Response).status, 401);
 });

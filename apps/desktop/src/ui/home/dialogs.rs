@@ -65,7 +65,14 @@ impl HomeView {
                     div()
                         .text_size(px(12.))
                         .text_color(colors.muted_foreground)
-                        .child(t!("pairing.display_desc").to_string()),
+                        .child(
+                            t!(if pin.len() == 12 {
+                                "pairing.invitation_hint"
+                            } else {
+                                "pairing.display_desc"
+                            })
+                            .to_string(),
+                        ),
                 )
                 .child(
                     div().flex().justify_center().py_2().child(
@@ -78,28 +85,120 @@ impl HomeView {
                     ),
                 )
                 .child(
-                    div().flex().justify_end().child(
-                        Button::new("dismiss-pin")
-                            .label(t!("action.close").to_string())
-                            .outline()
-                            .on_click(cx.listener(|this, _, _w, cx| {
-                                this.pin_dialog = None;
-                                cx.notify();
-                            })),
-                    ),
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            Button::new("copy-pairing-code")
+                                .label(t!("pairing.copy").to_string())
+                                .outline()
+                                .on_click({
+                                    let pin = pin.clone();
+                                    move |_, _, cx| {
+                                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                                            pin.clone(),
+                                        ))
+                                    }
+                                }),
+                        )
+                        .when(pin.len() == 12, |el| {
+                            el.child(
+                                Button::new("revoke-pairing-code")
+                                    .label(t!("pairing.revoke").to_string())
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.engine.revoke_pairing_code();
+                                        this.pin_dialog = None;
+                                        cx.notify();
+                                    })),
+                            )
+                        })
+                        .child(
+                            Button::new("dismiss-pin")
+                                .label(t!("action.close").to_string())
+                                .outline()
+                                .on_click(cx.listener(|this, _, _w, cx| {
+                                    this.pin_dialog = None;
+                                    cx.notify();
+                                })),
+                        ),
+                ),
+            PinDialog::Trust {
+                destination, relay, ..
+            } => card
+                .child(
+                    div()
+                        .text_size(px(15.))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child(
+                            t!(if *relay {
+                                "trust.relay_title"
+                            } else {
+                                "trust.computer_title"
+                            })
+                            .to_string(),
+                        ),
+                )
+                .child(div().text_size(px(13.)).child(destination.clone()))
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(colors.muted_foreground)
+                        .child(t!("trust.description").to_string()),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            div().debug_selector(|| "cancel-certificate".into()).child(
+                                Button::new("cancel-certificate")
+                                    .label(t!("action.cancel").to_string())
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.cancel_pin(window, cx)
+                                    })),
+                            ),
+                        )
+                        .child(
+                            div().debug_selector(|| "trust-certificate".into()).child(
+                                Button::new("trust-certificate")
+                                    .label(t!("trust.connect").to_string())
+                                    .primary()
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.confirm_certificate(window, cx)
+                                    })),
+                            ),
+                        ),
                 ),
             PinDialog::Entry(_) => card
                 .child(
                     div()
                         .text_size(px(15.))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .child(t!("pairing.entry_title").to_string()),
+                        .child(
+                            t!(match self.auth_mode {
+                                removent_core::AuthenticationMode::Password => "auth.password",
+                                removent_core::AuthenticationMode::Otp => "auth.otp",
+                                _ => "pairing.entry_title",
+                            })
+                            .to_string(),
+                        ),
                 )
                 .child(
                     div()
                         .text_size(px(12.))
                         .text_color(colors.muted_foreground)
-                        .child(t!("pairing.entry_desc").to_string()),
+                        .child(
+                            t!(match self.auth_mode {
+                                removent_core::AuthenticationMode::Password => "auth.password_desc",
+                                removent_core::AuthenticationMode::Otp => "auth.otp_desc",
+                                _ => "pairing.entry_desc",
+                            })
+                            .to_string(),
+                        ),
                 )
                 .child(form_input(&self.pin_input))
                 .child(
@@ -117,10 +216,9 @@ impl HomeView {
                             Button::new("submit-pin")
                                 .disabled({
                                     let pin = self.pin_input.read(cx).value();
-                                    let pin = pin.trim();
-                                    pin.len() != 6 || !pin.bytes().all(|b| b.is_ascii_digit())
+                                    !self.auth_mode.valid_input(&pin)
                                 })
-                                .label(t!("action.pair").to_string())
+                                .label(t!("auth.connect").to_string())
                                 .primary()
                                 .on_click(cx.listener(|this, _, w, cx| this.submit_pin(w, cx))),
                         ),

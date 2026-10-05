@@ -10,6 +10,8 @@ enum ConnectionProtocol: String, CaseIterable, Codable, Identifiable {
 struct RelayRoute: Codable, Equatable {
     var endpoint: String
     var transport: String
+    var server_name: String? = nil
+    var accept_invalid_certificate: Bool? = nil
     var server_fingerprint: String
     var host_fingerprint: String
 }
@@ -35,6 +37,9 @@ struct NearbyDevice: Identifiable {
     var host: String
     var port: Int
     var `protocol`: ConnectionProtocol
+    var pairingLocator: String? = nil
+    var pairingExpiresAt: TimeInterval? = nil
+    var pairingIdentity: String? = nil
     var endpointKey: String { "\(`protocol`.rawValue):\(host.lowercased()):\(port)" }
 }
 
@@ -52,9 +57,12 @@ struct ConnectionDraft: Identifiable {
     var useRelay = false
     var relayEndpoint = ""
     var relayTransport = "websocket"
+    var relayServerName = ""
+    var verifyRelayCertificate = true
     var relayFingerprint = ""
     var hostFingerprint = ""
     var replaceSavedPassword = false
+    var rememberAfterPairing = false
     private var original: Bookmark?
 
     init() {}
@@ -69,7 +77,13 @@ struct ConnectionDraft: Identifiable {
         if let relay = bookmark.relay {
             useRelay = true; relayEndpoint = relay.endpoint; relayTransport = relay.transport
             relayFingerprint = relay.server_fingerprint; hostFingerprint = relay.host_fingerprint
+            relayServerName = relay.server_name ?? ""
+            verifyRelayCertificate = !(relay.accept_invalid_certificate ?? false)
         }
+    }
+    var isPairingCode: Bool {
+        let code = host.filter { !$0.isWhitespace && $0 != "-" }
+        return `protocol` == .removent && code.utf8.count == 12 && code.utf8.allSatisfy { (48...57).contains($0) }
     }
     var title: String { name.isEmpty ? host : name }
     var hasSavedPassword: Bool { original?.password_hint == true }
@@ -85,20 +99,21 @@ struct ConnectionDraft: Identifiable {
         guard !useRelay || `protocol` == .removent else {
             throw MobileError.message(L("Relay requires Removent.", "中继连接需要使用 Removent 协议。"))
         }
-        guard useRelay || (Int(port).map { (1...65535).contains($0) } ?? false) else {
+        guard useRelay || isPairingCode || (Int(port).map { (1...65535).contains($0) } ?? false) else {
             throw MobileError.message(L("Port must be between 1 and 65535", "端口必须为 1–65535"))
         }
         if `protocol` == .rdp && username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw MobileError.message(L("Enter an RDP username.", "请输入 RDP 用户名。"))
         }
         var result: [String: Any] = ["protocol":`protocol`.rawValue, "host":host,
-            "port":useRelay ? 0 : Int(port)!, "username":username, "password":password,
+            "port":useRelay ? 0 : (isPairingCode ? 48688 : Int(port)!), "username":username, "password":password,
             "domain":domain, "accept_invalid_certificate":allowUntrustedCertificate,
             "audio":audio, "clipboard":clipboard]
         if useRelay {
             result["relay"] = ["endpoint":relayEndpoint, "transport":relayTransport,
+                "server_name":relayServerName, "accept_invalid_certificate":!verifyRelayCertificate,
                 "server_fingerprint":relayTransport == "quic" ? relayFingerprint : "",
-                "host_fingerprint":hostFingerprint]
+                "host_fingerprint":isPairingCode ? "" : hostFingerprint]
         }
         return result
     }

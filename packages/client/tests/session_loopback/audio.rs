@@ -38,6 +38,8 @@ async fn audio_disabled_session_uses_single_media_stream() {
             })
             .unwrap();
         let cfg = HostConfig {
+            authentication: Default::default(),
+            auth_paths: None,
             audio_available: true,
             preapproved_only: false,
             device_name: "AudioOffHost".into(),
@@ -140,6 +142,7 @@ async fn audio_disabled_session_uses_single_media_stream() {
         server_addr,
         &client_id,
         ClientConfig {
+            pairing_code: None,
             device_name: "AudioOffClient".into(),
             caps: Caps {
                 audio: false,

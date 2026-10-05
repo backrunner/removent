@@ -11,6 +11,7 @@ use tokio::sync::watch;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeviceEntry {
+    pub pairing: Option<removent_core::pairing_invitation::Advertisement>,
     pub instance: String,
     pub name: String,
     pub short_fp: String,
@@ -53,12 +54,24 @@ pub struct Advertiser {
     short_fp: String,
     port: u16,
     caps: Caps,
+    state: Mutex<(
+        bool,
+        Option<removent_core::pairing_invitation::Advertisement>,
+    )>,
 }
 
 impl Advertiser {
     pub fn start(name: &str, short_fp: &str, port: u16, caps: Caps) -> Result<Self> {
         let daemon =
             OwnedDaemon(ServiceDaemon::new().map_err(|e| NetError::Discovery(e.to_string()))?);
+        // Native Bonjour clients (including an iOS Simulator) on this computer
+        // must also receive the advertisement emitted by the Rust daemon.
+        daemon
+            .set_multicast_loop_v4(true)
+            .map_err(|e| NetError::Discovery(e.to_string()))?;
+        daemon
+            .set_multicast_loop_v6(true)
+            .map_err(|e| NetError::Discovery(e.to_string()))?;
         Self::with_daemon(daemon, name, short_fp, port, caps)
     }
 
@@ -70,7 +83,7 @@ impl Advertiser {
         caps: Caps,
     ) -> Result<Self> {
         let host = format!("removent-{}", short_fp);
-        let svc = Self::build_info(host.clone(), name, short_fp, port, caps, false)?;
+        let svc = Self::build_info(host.clone(), name, short_fp, port, caps, false, None)?;
         let fullname = svc.get_fullname().to_string();
         daemon
             .register(svc)
@@ -83,6 +96,7 @@ impl Advertiser {
             short_fp: short_fp.to_string(),
             port,
             caps,
+            state: Mutex::new((false, None)),
         })
     }
 
@@ -93,9 +107,19 @@ impl Advertiser {
         port: u16,
         caps: Caps,
         busy: bool,
+        pairing: Option<&removent_core::pairing_invitation::Advertisement>,
     ) -> Result<ServiceInfo> {
-        let instance = format!("{name}.{short_fp}");
-        let props: HashMap<String, String> = [
+        // DNS-SD instance names occupy one DNS label. mdns-sd serializes dots
+        // as label separators, which native Bonjour cannot browse.
+        let mut label = name.replace('.', " ");
+        let available = 63usize.saturating_sub(short_fp.len() + 3);
+        let mut end = label.len().min(available);
+        while !label.is_char_boundary(end) {
+            end -= 1;
+        }
+        label.truncate(end);
+        let instance = format!("{label} - {short_fp}");
+        let mut props: HashMap<String, String> = [
             ("v".to_string(), "1".to_string()),
             ("name".to_string(), name.to_string()),
             ("fp".to_string(), short_fp.to_string()),
@@ -104,6 +128,10 @@ impl Advertiser {
         ]
         .into_iter()
         .collect();
+        if let Some(ad) = pairing.filter(|ad| ad.valid()) {
+            props.insert("pair".into(), ad.locator.clone());
+            props.insert("pair-exp".into(), ad.expires_at_unix.to_string());
+        }
         ServiceInfo::new(
             MDNS_SERVICE,
             &instance,
@@ -118,6 +146,25 @@ impl Advertiser {
 
     /// Update the busy bit when a session starts/ends.
     pub fn set_busy(&self, busy: bool) -> Result<()> {
+        let mut state = self.state.lock().unwrap();
+        state.0 = busy;
+        self.announce(&state)
+    }
+    pub fn set_pairing(
+        &self,
+        pairing: Option<removent_core::pairing_invitation::Advertisement>,
+    ) -> Result<()> {
+        let mut state = self.state.lock().unwrap();
+        state.1 = pairing;
+        self.announce(&state)
+    }
+    fn announce(
+        &self,
+        state: &(
+            bool,
+            Option<removent_core::pairing_invitation::Advertisement>,
+        ),
+    ) -> Result<()> {
         // Registering the same fullname updates its TXT records. Unregistering
         // first sends goodbyes (including a delayed retry), which can remove a
         // still-running host from peer caches after it has been re-announced.
@@ -127,7 +174,8 @@ impl Advertiser {
             &self.short_fp,
             self.port,
             self.caps,
-            busy,
+            state.0,
+            state.1.as_ref(),
         )?;
         self.daemon
             .register(svc)
@@ -286,7 +334,20 @@ fn resolved_entry(protocol: DiscoveryProtocol, info: &ServiceInfo) -> Option<Dev
     } else {
         instance_name
     };
+    let pairing = native
+        .then(|| removent_core::pairing_invitation::Advertisement {
+            locator: props
+                .get_property_val_str("pair")
+                .unwrap_or_default()
+                .into(),
+            expires_at_unix: props
+                .get_property_val_str("pair-exp")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+        })
+        .filter(|ad| ad.valid());
     Some(DeviceEntry {
+        pairing,
         instance: info.get_fullname().to_string(),
         name: name.to_string(),
         short_fp: short_fp.to_ascii_lowercase(),
@@ -317,9 +378,111 @@ fn pick_addr(addrs: &std::collections::HashSet<IpAddr>, port: u16) -> Option<std
     first_v6.map(|ip| std::net::SocketAddr::new(ip, port))
 }
 
+/// Resolve the public locator only. The private PIN is verified by RVP PAKE.
+pub async fn resolve_pairing_locator(locator: &str) -> Result<std::net::SocketAddr> {
+    let browser = DiscoveryBrowser::start()?;
+    let mut rx = browser.subscribe_table();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let destinations = pairing_destinations(&rx.borrow_and_update(), locator);
+            if destinations.len() > 1 {
+                return Err(NetError::Discovery(
+                    "Ambiguous pairing code; generate a new code".into(),
+                ));
+            }
+            if !destinations.is_empty() {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                let current = pairing_destinations(&rx.borrow_and_update(), locator);
+                if current.len() > 1 {
+                    return Err(NetError::Discovery(
+                        "Ambiguous pairing code; generate a new code".into(),
+                    ));
+                }
+                if let Some(addr) = current.values().next() {
+                    return Ok(*addr);
+                }
+            }
+            rx.changed()
+                .await
+                .map_err(|_| NetError::Discovery("Discovery stopped".into()))?;
+        }
+    })
+    .await
+    .map_err(|_| NetError::Discovery("Pairing code not found on this network or expired".into()))?
+}
+
+// Bonjour may resolve the same host with interface/conflict variants. The
+// locator must identify one device identity, rather than one service record.
+fn pairing_destinations(
+    table: &HashMap<String, DeviceEntry>,
+    locator: &str,
+) -> std::collections::BTreeMap<String, std::net::SocketAddr> {
+    table
+        .values()
+        .filter(|entry| {
+            entry
+                .pairing
+                .as_ref()
+                .is_some_and(|ad| ad.valid() && ad.locator == locator)
+        })
+        .filter_map(|entry| entry.addr.map(|addr| (entry.short_fp.clone(), addr)))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_advertisement_has_one_dns_sd_instance_label() {
+        let name = "电脑.工作站".repeat(20);
+        let info = Advertiser::build_info(
+            "host".into(),
+            &name,
+            "0123456789abcdef",
+            48688,
+            Caps::all(),
+            false,
+            None,
+        )
+        .unwrap();
+        let label = info
+            .get_fullname()
+            .strip_suffix(&format!(".{MDNS_SERVICE}"))
+            .unwrap();
+        assert!(!label.contains('.'));
+        assert!(label.len() <= 63);
+        assert_eq!(info.get_property_val_str("name"), Some(name.as_str()));
+    }
+
+    #[test]
+    fn locator_counts_device_identities_across_bonjour_aliases() {
+        let ad = removent_core::pairing_invitation::Advertisement {
+            locator: "123456".into(),
+            expires_at_unix: removent_core::pairing_invitation::now() + 300,
+        };
+        let info = Advertiser::build_info(
+            "host".into(),
+            "Computer",
+            "0123456789abcdef",
+            48688,
+            Caps::all(),
+            false,
+            Some(&ad),
+        )
+        .unwrap();
+        let mut first = resolved_entry(DiscoveryProtocol::Removent, &info).unwrap();
+        first.addr = Some("127.0.0.1:48688".parse().unwrap());
+        let mut second = first.clone();
+        second.instance += " (2)";
+        let mut table = HashMap::from([
+            (first.instance.clone(), first),
+            (second.instance.clone(), second),
+        ]);
+        assert_eq!(pairing_destinations(&table, "123456").len(), 1);
+        table.values_mut().next().unwrap().short_fp = "fedcba9876543210".into();
+        assert_eq!(pairing_destinations(&table, "123456").len(), 2);
+    }
 
     #[test]
     fn compatibility_records_do_not_require_or_inherit_native_identity() {
@@ -402,7 +565,15 @@ mod tests {
                 })
                 .await
                 .expect("compatibility service must resolve");
-                assert!(native.subscribe_table().borrow().is_empty());
+                // Other native advertisers may be running on the LAN or in parallel tests.
+                // Verify only that this unique compatibility service does not leak into it.
+                assert!(
+                    !native
+                        .subscribe_table()
+                        .borrow()
+                        .values()
+                        .any(|entry| entry.name == name)
+                );
                 advertiser.unregister(&fullname).unwrap();
                 tokio::time::timeout(Duration::from_secs(5), async {
                     while rx.borrow_and_update().contains_key(&fullname) {
@@ -543,9 +714,31 @@ mod tests {
         assert_eq!(entry.addr, Some("127.0.0.1:48699".parse().unwrap()));
         assert_eq!(entry.caps, Caps::all());
 
+        let ad = removent_core::pairing_invitation::Advertisement {
+            locator: "123456".into(),
+            expires_at_unix: removent_core::pairing_invitation::now() + 300,
+        };
+        adv.set_pairing(Some(ad.clone())).unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if rx
+                    .borrow_and_update()
+                    .values()
+                    .any(|entry| entry.short_fp == fp && entry.pairing == Some(ad.clone()))
+                {
+                    break;
+                }
+                rx.changed().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
         for busy in [true, false, true, false] {
             adv.set_busy(busy).unwrap();
-            wait_for_entry(&mut rx, &fp, busy, true).await;
+            assert_eq!(
+                wait_for_entry(&mut rx, &fp, busy, true).await.pairing,
+                Some(ad.clone())
+            );
         }
         // An update must never queue an unregister/goodbye, even if a watch
         // receiver coalesces an intermediate removal and reappearance.

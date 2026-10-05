@@ -5,11 +5,15 @@ and IPv4/IPv6 source allowlists, see [quick deployment](relay-quick-deploy.md).
 
 Removent can route its native RVP connection through a self-hosted Rust relay.
 In **Add connection → Removent**, enable **Connect through relay** and enter the
-room ID, relay address (`removent://host:port`), optional credential, and target
-host certificate fingerprint. Select **Cloudflare / HTTPS** for a WebSocket carrier
+room ID, relay address (`removent://host:port`), and optional credential. Select **Cloudflare / HTTPS** for a WebSocket carrier
 (usually port 443), or **VPS / QUIC** (usually port 48700). Saved relay routes can
-be selected again. QUIC also requires the relay certificate fingerprint; HTTPS
-uses CA/hostname checks. Credentials are saved in the macOS Keychain, never in
+be selected again. SNI is optional and defaults to the relay address hostname.
+**Verify relay certificate** is enabled by default. HTTPS validates the relay's
+CA certificate and TLS name. An unknown QUIC relay asks for confirmation before
+sending its access password, then stores its exact certificate locally. The form
+has no fingerprint inputs. The destination computer also asks for confirmation on
+its first connection and is remembered after successful authentication.
+Cancelling stops the connection; later certificate changes are rejected. Credentials are saved in the macOS Keychain, never in
 bookmark JSON. CLI connections use an explicit `--relay-profile FILE`.
 LAN discovery and direct connections continue to work without a relay.
 
@@ -33,8 +37,11 @@ it cannot read the screen, keystrokes, clipboard or RVP credentials. Relay acces
 does not grant remote desktop access. Pair devices and approve their grants
 before leaving a host unattended.
 
-Outer TLS uses a mandatory SHA-256 certificate pin, with a separate relay ALPN.
-There is no certificate-verification bypass. Each room has independent host and
+Outer QUIC TLS uses a separate relay ALPN. Certificate verification uses an
+optional SHA-256 relay pin or public CA trust; `server_name` overrides the TLS name
+without changing the destination address. `accept_invalid_certificate = true`
+explicitly disables outer certificate identity checks while retaining encryption.
+This exception stays local to each device when app connections sync. Each room has independent host and
 controller tokens (256 random bits); only SHA-256 token digests are stored by the
 server. Every connection also proves possession of an Ed25519 device key by
 signing a fresh 256-bit server challenge bound to the room and role. A controller

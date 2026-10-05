@@ -74,7 +74,9 @@
 quinn 双向 TLS 1.3：
 - 服务端证书链 = 自签身份证书；
 - 客户端同样出示客户端证书（同一套身份体系，用途区分 via extended key usage）；
-- 校验规则：对端证书指纹存在于本端信任库（`peers.json`）→ 通过；否则进入配对流程。未知指纹在 TLS 完成后于应用层拒绝（TLS 层先允许完成以便展示指纹给用户裁决）。
+- 被控端通过 `peers.json` 判断设备是否已配对，未知设备进入应用层认证流程。
+- 桌面和移动控制端首次连接先探测目标证书，关闭探测连接后提示用户确认目标地址；此时尚未发送应用层认证凭据。确认后重新连接并核对同一证书，证书改变即拒绝。成功认证后才将证书写入本机信任库，取消或失败不会记住身份。已保存或同步的连接信息不能替代本机首次确认。
+- QUIC relay 同样在发送 relay 凭据前完成首次确认；证书验证默认开启，用户可在连接表单中关闭，关闭后不检查或更新 relay 信任记录。SNI 选填，默认使用 relay 域名。WSS 默认执行系统 CA 和域名验证。
 
 ### 4.3 配对流程（首次连接）
 前提：双方已建立 QUIC 连接但互不相识。
@@ -98,8 +100,67 @@ Client                                Host
 
 要点：
 - PIN 不作为长期凭据，只参与一次 SPAKE2 会话密钥推导，抗在线爆破（SPAKE2 无字典放大）。
-- UI 同时展示两侧指纹短串供肉眼比对（防中间人），见 ui-design.md 配对弹窗。
+- 控制端不要求输入证书指纹；首次连接通过目标确认弹窗建立本机信任，配对码仍在独立认证流程中输入。
 - 「始终允许」= 授予能力集写入 peers.json；「仅本次」则 peers.json 只存身份不存授权。
+
+### 4.3.1 可选的无人值守认证（2026-10-01）
+
+认证策略仅由 desktop 被控端配置：`PairingCode`（默认）、`Password`、`Otp`、`None`。
+握手结构保持不变，能力位 `AUTH_METHODS = 1 << 6` 表明新版主控端支持认证方式协商。
+`peer_known` 表示当前连接无需新的凭据证明：配对模式仅在 RememberDevice 策略下沿用已知身份判断；EveryConnection 始终为 false；口令/OTP 始终为 false；
+无认证为 true。认证方式在独立 pairing stream 的 Challenge 中声明，收到后才弹出输入界面。
+
+配对码沿用 `Begin → Challenge → Verify → Confirm`。口令/OTP 使用
+`Begin → AuthChallenge{mode, challenges} → AuthVerify{proofs} → Confirm`，每个候选仍使用
+SPAKE2、证书指纹 transcript 和 Ed25519 确认签名。口令有一个候选；OTP 为当前及相邻的三个
+30 秒周期，使用 [RFC 6238](https://www.rfc-editor.org/rfc/rfc6238) 的 HMAC-SHA-1 / 六位验证码。
+输入最多等待 300 秒，但 OTP 验证时仍检查周期有效性。成功使用的周期持久化在私有
+`otp-used.json`，重启或更换主控设备不能重用。口令/OTP 认证开始受被控端全局五秒限流，
+不能通过轮换设备身份绕过。
+
+认证帧最多 4096 字节；`challenges` 为 `{nonce_h, msg_h}` 的扁平列表，`proofs` 为
+`{msg_c, confirm_c, vk_c, sig_c}` 的扁平列表，禁止嵌套消息。
+
+无人值守模式不新增配对授权，不弹出被控端准入确认；`DenyAll` 始终拒绝。`None` 允许所有
+可到达的主控端，保留 TLS 加密和证书握手。relay 身份认证仍独立执行。
+快速恢复绑定当前认证配置；修改策略/凭据会清除恢复记录并重启监听器。LoginWindow 的
+`preapproved_only` 限制保持有效。旧主控端可继续配对；口令/OTP 被控端拒绝未声明新能力的主控端。
+
+### 4.3.2 配对策略、主动连接码与 CLI（2026-10-01）
+
+`authentication.pairing_policy` 由 desktop 配置：`remember_device` 为默认值，信任设备证书后
+后续连接不再配对；`every_connection` 要求已知设备重新配对，也拒绝所有快速恢复令牌。
+更改策略清除恢复记录、撤销主动连接码并重启监听器。
+
+原有六位配对码用于地址已知、由控制端发起的连接。主动生成的连接码为 12 位：前六位为
+公共 locator，后六位为 SPAKE2 秘密；有效期 300 秒。私有 `pairing-invitation.json` 使用 0600
+权限及进程间锁，替换/撤销旧码立即失效。CLI 经私有 UDS 提供
+`pairing show|watch|generate|revoke`。生成时要求服务开启、无会话、配对认证允许新设备。
+
+LAN Bonjour TXT 仅发布 `pair=<locator>` 和 `pair-exp=<unix-seconds>`；relay host 登记同样只
+携带 locator 与过期时间。控制端用完整连接码查找 LAN，或在同一个 relay 中以
+`pair-<locator>` 作为房间别名；公共广播及 relay 均不收到后六位秘密。
+locator 必须唯一，过期码和重复 locator 拒绝解析。iOS 使用系统 Bonjour；DNS-SD 实例名须为
+单个、至多 63 字节的 label，原始显示名称保留在 TXT。广播启用本机 multicast loop 以供本机
+原生 Bonjour 和模拟器发现。
+
+能力位 `PAIRING_INVITATION = 1 << 7` 强制进入配对；新增变体
+`BeginInvitation{nonce_c,fp_c,locator}` 追加在原有变体之后，原有编号不变。
+被控端加载当前私有连接码并使用后六位秘密完成 SPAKE2；每五秒最多开始一次主动码验证。
+验证成功后以原子消费防止并发复用，再发送 Confirm。主动码由被控端生成，因此成功验证
+授权这一次会话，跳过额外准入弹窗；`DenyAll`、LoginWindow 预授权限制仍然生效。
+失败认证不会消费连接码；失效或已消费码不能重用，即使该设备已受信任。
+
+relay 仍校验角色凭据/设备公钥、签名证明及证书。QUIC/WSS 均将别名解析为真实房间，
+签名 challenge 绑定请求别名。邀请连接的 route ack 额外携带真实房间：QUIC 为 8 字节 route
+后接 1 字节长度与房间；WebSocket 在同一 binary ack 的 8 字节 route 后接 UTF-8 房间。
+普通连接的 ack 保持 8 字节。`pair-` 为保留房间前缀。
+WSS 容器冷启动时，仅允许凭据唯一定位一个离线房间的控制端在证明身份后等待主机重连；
+主机上线后再次核对 locator 与有效期，最长等待 40 秒。
+
+控制端首次成功后绑定真实主机证书，自动重连使用真实地址/房间；保存书签时同样保存
+实际地址/房间和证书指纹，不保存一次性连接码。旧版控制端仍可使用六位交互配对；仅凭
+连接码连接须更新双方及 relay。
 
 ### 4.4 准入（每次会话）
 `SessionRequest` 携带请求能力集 {video, input, clipboard, file}。host 按准入模式（FR-06）：

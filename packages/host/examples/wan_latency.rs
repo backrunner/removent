@@ -157,6 +157,8 @@ async fn run(
             });
         }
         let cfg = TunnelConfig {
+            server_name: String::new(),
+            accept_invalid_certificate: false,
             server: format!("removent://{}", proxies[0].address),
             transport: if ws {
                 RelayTransport::WebSocket

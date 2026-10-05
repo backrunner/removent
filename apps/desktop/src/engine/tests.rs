@@ -182,6 +182,7 @@ fn cancellation_invalidates_queued_progress_ready_pin_and_failure_events() {
     events
         .send(UiEvent::ClientNeedsPin {
             generation: old.generation,
+            mode: Default::default(),
             tx,
         })
         .unwrap();

@@ -59,6 +59,9 @@ pub(super) fn handle_daemon_message(
                     IpcEvent::PairingPin { pin } => {
                         let _ = events.send(UiEvent::PairingPin(pin));
                     }
+                    IpcEvent::PairingCleared => {
+                        let _ = events.send(UiEvent::PairingCleared);
+                    }
                     IpcEvent::PairingDone { peer_name } => {
                         let _ = events.send(UiEvent::PairingDone(peer_name));
                     }

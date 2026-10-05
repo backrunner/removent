@@ -41,24 +41,44 @@ impl Request {
                 && self.domain.len() <= 256,
             "Connection field is too long"
         );
+        let pairing_code = (self.protocol == ConnectionProtocol::Removent)
+            .then(|| removent_core::pairing_invitation::PairingCode::parse(&self.host))
+            .flatten();
         let relay = if let Some(route) = &self.relay {
             ensure!(
                 self.protocol == ConnectionProtocol::Removent,
                 "Relay requires Removent"
             );
             Some(
-                RelayRoute::parse(
+                RelayRoute::parse_for_connection(
                     &route.endpoint,
                     route.transport,
                     &route.server_fingerprint,
-                    &route.host_fingerprint,
+                    if pairing_code.is_some() {
+                        ""
+                    } else {
+                        &route.host_fingerprint
+                    },
+                    pairing_code.is_some(),
                 )
+                .and_then(|parsed| {
+                    parsed.with_tls(&route.server_name, route.accept_invalid_certificate)
+                })
                 .map_err(anyhow::Error::msg)?,
             )
         } else {
             None
         };
-        let address = if relay.is_some() {
+        let address = if let Some(code) = &pairing_code {
+            ConnectionAddress {
+                host: code.room(),
+                port: if relay.is_some() {
+                    0
+                } else {
+                    self.protocol.default_port()
+                },
+            }
+        } else if relay.is_some() {
             ConnectionAddress::relay_room(&self.host)?
         } else if self.protocol == ConnectionProtocol::Removent {
             ConnectionAddress::parse_native(&self.host, &self.port.to_string())?
@@ -69,6 +89,7 @@ impl Request {
             ensure!(!self.username.trim().is_empty(), "RDP requires a username");
         }
         Ok(ConnectionRequest {
+            pairing_code,
             protocol: self.protocol,
             address,
             username: self.username.clone(),
@@ -193,6 +214,18 @@ mod tests {
         }))
         .unwrap();
         assert!(request.connection().is_err());
+    }
+    #[test]
+    fn invitation_uses_public_route_and_keeps_secret_transient() {
+        let request: Request = serde_json::from_value(
+            serde_json::json!({ "protocol":"removent", "host":"123456-654321", "port":0 }),
+        )
+        .unwrap();
+        let connection = request.connection().unwrap();
+        assert_eq!(connection.address.host, "pair-123456");
+        assert_eq!(connection.pairing_code.unwrap().secret(), "654321");
+        let request: Request = serde_json::from_value(serde_json::json!({ "protocol":"removent", "host":"123456654321", "port":0, "relay": {"endpoint":"removent://relay.example:443", "transport":"websocket", "server_fingerprint":"", "host_fingerprint":""} })).unwrap();
+        assert!(request.connection().is_ok());
     }
     #[test]
     fn pointer_geometry_precedes_clamped_input() {

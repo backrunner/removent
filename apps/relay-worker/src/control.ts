@@ -47,7 +47,7 @@ export function validateConfig(env: RelayConfig): number {
   networks(env.RELAY_ADMIN_ALLOWED_CIDRS);
   const hostKeys = deviceKeys(env.RELAY_HOST_PUBLIC_KEYS), clientKeys = deviceKeys(env.RELAY_CLIENT_PUBLIC_KEYS);
   const hashes = [env.RELAY_HOST_TOKEN_SHA256, env.RELAY_CLIENT_TOKEN_SHA256, env.RELAY_ADMIN_TOKEN_SHA256].filter(Boolean);
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(env.RELAY_ROOM) || !hex.test(env.RELAY_ADMIN_TOKEN_SHA256 ?? "") ||
+  if (env.RELAY_ROOM.startsWith("pair-") || !/^[A-Za-z0-9_-]{1,64}$/.test(env.RELAY_ROOM) || !hex.test(env.RELAY_ADMIN_TOKEN_SHA256 ?? "") ||
       (!env.RELAY_HOST_TOKEN_SHA256 && !hostKeys.length) || (!env.RELAY_CLIENT_TOKEN_SHA256 && !clientKeys.length) ||
       hashes.some(h => !hex.test(h)) || new Set(hashes.map(h => h.toLowerCase())).size !== hashes.length || hostKeys.some(k => clientKeys.includes(k))) {
     throw new Error("Configure distinct role credentials or device keys, and an admin credential");
@@ -98,7 +98,9 @@ export async function authenticate(request: Request, env: RelayConfig): Promise<
   if (url.pathname !== "/v1/tunnel") return reply("Not found", 404);
   if (request.method !== "GET" || request.headers.get("upgrade")?.toLowerCase() !== "websocket" || request.headers.get("sec-websocket-protocol") !== protocol) return reply("WebSocket upgrade required", 400);
   const role = request.headers.get("x-removent-role");
-  if ((role !== "host" && role !== "client") || request.headers.get("x-removent-room") !== env.RELAY_ROOM) return reply("Unauthorized", 401);
+  const room = request.headers.get("x-removent-room") ?? "";
+  const invitation = role === "client" && /^pair-[0-9]{6}$/.test(room);
+  if ((role !== "host" && role !== "client") || (room !== env.RELAY_ROOM && !invitation)) return reply("Unauthorized", 401);
   const hash = role === "host" ? env.RELAY_HOST_TOKEN_SHA256 : env.RELAY_CLIENT_TOKEN_SHA256;
   const keys = deviceKeys(role === "host" ? env.RELAY_HOST_PUBLIC_KEYS : env.RELAY_CLIENT_PUBLIC_KEYS);
   if (hash ? !await authorized(request, hash) : request.headers.has("authorization")) return reply("Unauthorized", 401);

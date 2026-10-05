@@ -1,12 +1,22 @@
 import SwiftUI
 import AVFoundation
 
+struct CertificatePrompt: Identifiable, Equatable {
+    let id = UUID()
+    let destination: String
+    let relay: Bool
+}
+
 @MainActor
 final class ControllerModel: ObservableObject {
     @Published var cloudSync: ConnectionSyncService?
     @Published var bookmarks: [Bookmark] = []
     @Published var presentingSession = false
     @Published var ready = false
+    @Published var authenticationMode = "pairing_code"
+    @Published var certificatePrompt: CertificatePrompt?
+    var certificateDestination: String? { certificatePrompt?.destination }
+    var confirmingRelay: Bool { certificatePrompt?.relay ?? false }
     @Published var needsPIN = false
     @Published var isConnecting = false
     @Published var status = ""
@@ -44,6 +54,7 @@ final class ControllerModel: ObservableObject {
     private var generation: UInt64 = 0
     private var timer: Timer?
     private var retryCommand: [String: Any]?
+    private var pendingInvitation: ConnectionDraft?
     private var sampleTime = CACurrentMediaTime()
     private var sampleFrames = 0
     private let audio = RemoteAudio()
@@ -145,11 +156,13 @@ final class ControllerModel: ObservableObject {
         catch { self.error = error.localizedDescription }
     }
     func connect(_ draft: ConnectionDraft) throws {
+        pendingInvitation = draft.isPairingCode && draft.rememberAfterPairing ? draft : nil
         var command: [String:Any] = ["op":"connect", "request":try draft.request(audio:audioEnabled, clipboard:clipboardEnabled)]
         if let id = draft.credentialID { command["credential_id"] = id }
         try begin(command, title:draft.title)
     }
     func connect(_ bookmark: Bookmark) {
+        pendingInvitation = nil
         do { try begin(["op":"connect_saved", "id":bookmark.id, "audio":audioEnabled,
             "clipboard":clipboardEnabled], title:bookmark.title) }
         catch { self.error = error.localizedDescription }
@@ -160,7 +173,7 @@ final class ControllerModel: ObservableObject {
         }
         generation = value.uint64Value
         retryCommand = command; sessionTitle = title; error = nil
-        ready = false; needsPIN = false; isConnecting = true; frameSize = .zero; receivedFrames = 0; fps = 0
+        ready = false; needsPIN = false; certificatePrompt = nil; isConnecting = true; frameSize = .zero; receivedFrames = 0; fps = 0
         sampleFrames = 0; sampleTime = CACurrentMediaTime()
         codec = ""; remoteClipboard = false; remoteAudio = false; canRefresh = false; audio.stop()
         status = L("Connecting…", "正在连接…"); presentingSession = true
@@ -173,16 +186,26 @@ final class ControllerModel: ObservableObject {
     func disconnect(dismiss: Bool = true) {
         let result = try? call(["op":"disconnect"]) as? [String:Any]
         generation = (result?["generation"] as? NSNumber)?.uint64Value ?? generation + 1
-        ready = false; needsPIN = false; isConnecting = false; audio.stop()
+        ready = false; needsPIN = false; certificatePrompt = nil; isConnecting = false; audio.stop()
         status = L("Disconnected", "连接已断开")
         UIApplication.shared.isIdleTimerDisabled = false
-        if dismiss { presentingSession = false; error = nil; retryCommand = nil }
+        if dismiss { presentingSession = false; error = nil; retryCommand = nil; pendingInvitation = nil }
+    }
+    func confirmCertificate(_ accept: Bool, promptID: UUID? = nil) {
+        guard let prompt = certificatePrompt, promptID == nil || promptID == prompt.id else { return }
+        do {
+            try call(["op":"confirm_certificate", "generation":generation, "accept":accept])
+            certificatePrompt = nil
+            if accept {
+                isConnecting = true; status = L("Connecting…", "正在连接…")
+            } else { disconnect(dismiss:false) }
+        } catch { self.error = error.localizedDescription; certificatePrompt = nil }
     }
     func submitPIN(_ pin: String) {
         do {
             try call(["op":"pin", "generation":generation, "pin":pin]); needsPIN = false
             isConnecting = true; error = nil
-            status = L("Waiting for the computer…", "正在等待电脑确认…")
+            status = authenticationMode == "pairing_code" ? L("Waiting for the computer…", "正在等待电脑确认…") : L("Authenticating…", "正在验证身份…")
         } catch { self.error = error.localizedDescription }
     }
     func input(_ event: [String:Any]) {
@@ -295,7 +318,33 @@ final class ControllerModel: ObservableObject {
         }
         guard (event["generation"] as? NSNumber)?.uint64Value == generation else { return }
         switch event["type"] as? String {
-        case "pin": needsPIN = true; isConnecting = false; status = L("Enter the PIN shown on the computer", "输入电脑上显示的配对码")
+        case "resolve_pairing":
+            guard let locator = event["locator"] as? String else { return }
+            let current = generation
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let device = try await BonjourDiscovery.resolvePairing(locator)
+                    guard self.generation == current else { return }
+                    try self.call(["op":"pairing_address", "generation":current, "host":device.host, "port":device.port])
+                } catch {
+                    guard self.generation == current else { return }
+                    try? self.call(["op":"pairing_address", "generation":current, "host":"", "port":0, "error":error.localizedDescription])
+                }
+            }
+        case "certificate":
+            guard let destination = event["destination"] as? String else { return }
+            certificatePrompt = CertificatePrompt(destination:destination, relay:event["relay"] as? Bool ?? false)
+            needsPIN = false; isConnecting = false
+            status = L("Confirm the first connection", "请确认首次连接")
+        case "pin":
+            authenticationMode = event["mode"] as? String ?? "pairing_code"
+            needsPIN = true; isConnecting = false
+            switch authenticationMode {
+            case "password": status = L("Enter the password configured on the computer", "输入电脑上设置的访问口令")
+            case "otp": status = L("Enter the current code from your authenticator", "输入验证器中的当前动态验证码")
+            default: status = L("Enter the PIN shown on the computer", "输入电脑上显示的配对码")
+            }
         case "progress":
             let stage = event["stage"] as? String ?? "Connecting"
             let stages = ["Resolving":L("Finding computer…", "正在查找电脑…"),
@@ -306,12 +355,21 @@ final class ControllerModel: ObservableObject {
             isConnecting = true
             if stage == "Reconnecting" { ready = false; audio.stop() }
         case "ready":
-            ready = true; needsPIN = false; isConnecting = false; error = nil; codec = event["codec"] as? String ?? ""
+            if let resolved = event["resolved"] as? [String:Any], var command = retryCommand, var request = command["request"] as? [String:Any] {
+                request["host"] = resolved["host"]; request["port"] = resolved["port"]; request["relay"] = resolved["relay"]
+                command["request"] = request; command.removeValue(forKey: "credential_id"); retryCommand = command
+            }
+            ready = true; needsPIN = false; certificatePrompt = nil; isConnecting = false; error = nil; codec = event["codec"] as? String ?? ""
             UIApplication.shared.isIdleTimerDisabled = true
             remoteClipboard = event["clipboard"] as? Bool ?? false
             remoteAudio = event["audio"] as? Bool ?? false
             canRefresh = event["refresh"] as? Bool ?? false
             status = L("Connected", "已连接")
+            if var draft = pendingInvitation, let resolved = event["resolved"] as? [String:Any], let host = resolved["host"] as? String, let port = resolved["port"] as? Int {
+                pendingInvitation = nil
+                draft.host = host; draft.port = String(port); draft.hostFingerprint = event["fingerprint"] as? String ?? ""
+                do { try save(draft) } catch { self.error = error.localizedDescription }
+            }
             if event["audio"] as? Bool == true {
                 let current = generation
                 Task { @MainActor [weak self] in
@@ -326,7 +384,7 @@ final class ControllerModel: ObservableObject {
                 }
             }
         case "closed":
-            ready = false; needsPIN = false; isConnecting = false; audio.stop(); UIApplication.shared.isIdleTimerDisabled = false
+            ready = false; needsPIN = false; certificatePrompt = nil; isConnecting = false; audio.stop(); UIApplication.shared.isIdleTimerDisabled = false
             status = L("Disconnected", "连接已断开"); error = event["error"] as? String
         default: break
         }

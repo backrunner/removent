@@ -43,6 +43,8 @@ async fn full_session_pair_negotiate_media() {
         let host_clip_for_cfg = host_clip.clone();
         *HOST_CLIP.lock().unwrap() = Some(host_clip);
         let cfg = HostConfig {
+            authentication: Default::default(),
+            auth_paths: None,
             audio_available: true,
             preapproved_only: false,
             device_name: "HostLoop".into(),
@@ -168,7 +170,7 @@ async fn full_session_pair_negotiate_media() {
     });
 
     // ---- PIN forwarding: host displays → client enters (only when pairing asks) ----
-    let pin_request: removent_client::PinRequest = Box::new(move |pin_tx| {
+    let pin_request: removent_client::PinRequest = Box::new(move |_, pin_tx| {
         tokio::spawn(async move {
             if let Ok(pin) = pin_from_host.await {
                 let _ = pin_tx.send(pin);
@@ -189,6 +191,7 @@ async fn full_session_pair_negotiate_media() {
         server_addr,
         &client_id,
         ClientConfig {
+            pairing_code: None,
             device_name: "ClientLoop".into(),
             caps: Caps::all(),
             local_clip: Some(client_clip.clone()),

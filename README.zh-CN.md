@@ -43,7 +43,43 @@ macOS 会请求两项权限 —— 共享本机时都必需：
 在「系统设置 → 隐私与安全性」中授予后，从菜单栏托盘开启被控服务。在另一台 Mac 上从设备
 列表找到本机（或手动输入 IP），输入被控端显示的配对 PIN，即可连接。
 
-### 私有 relay
+#### 无人值守连接认证
+
+在 desktop 被控端的**设置 → 安全 → 连接认证方式**中选择。iPhone/iPad app 和 desktop
+主控端会自动根据远端设置显示对应输入界面：
+
+- **配对码**（默认）：输入被控端显示的六位配对码；桌面端安全设置可选择「记住已配对设备」或「每次连接都配对」。
+- **访问口令**：先设置非空口令；每次新连接都需验证，已配对设备也不能绕过。
+- **OTP**：复制绑定密钥到验证器，使用 TOTP / SHA-1 / 6 位 / 30 秒；输入当前验证码。
+  每个验证码仅可使用一次，允许相邻时间周期的时钟偏差。
+- **无认证**：任何可连接到此电脑的人均可直接访问和控制，无需凭据。
+
+口令、OTP 和无认证通过后直接准入，无需现场确认；关闭「允许连接」可拒绝所有连接。
+修改认证配置会重启共享服务、结束现有会话并使旧的恢复凭据失效。凭据仅保存在被控端
+权限为 0600 的 `settings.toml`，不会经 iCloud 同步。relay 凭据独立，LoginWindow 受限服务仍仅接受
+预先授权的设备。口令和 OTP 需要新版主控端；配对码保持原有协议格式兼容。
+
+#### 连接码与 CLI
+
+被控端可在桌面端安全设置或 CLI 主动生成 **12 位连接码**。控制端在地址栏输入连接码，
+即可在同一局域网查找并配对，无需输入 IP。通过 relay 连接时，选择同一个 relay，按需填写中继访问密码，
+再以连接码代替房间名；主机指纹由成功配对确认。
+连接码有效期为五分钟，成功连接一次后失效；生成连接码即授权这一次连接，无需再现场确认。
+生成时需开启共享、允许新设备配对，并断开现有会话。
+
+```sh
+removent-cli pairing generate  # 主动生成连接码
+removent-cli pairing show      # 显示当前连接码或待输入的六位配对码
+removent-cli pairing watch     # 持续显示配对码事件
+removent-cli pairing revoke    # 撤销主动生成的连接码
+```
+
+CLI 通过本地 daemon 的私有 socket 读取，需与桌面端使用同一数据目录（自定义时设置
+`REMOVENT_DATA_DIR`）。记住配对以控制端设备证书为依据；「每次连接都配对」同时禁用快速恢复。
+配对成功后可保存实际电脑地址或 relay 房间，不会保存临时连接码。仅凭连接码连接需同步更新
+被控端、控制端和 relay；`pair-` 开头的 relay 房间名为保留名称。
+
+## 私有 relay
 
 Linux x86_64 / ARM64 和 macOS 13+（Apple Silicon / Intel）均可一键安装预编译 relay：
 
@@ -53,7 +89,7 @@ curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/in
 
 安装器校验版本与 SHA-256，随后运行二进制自带的设置向导。日常使用 `removent-relay start / stop / restart / status / logs` 管理，Linux 使用 systemd 247+，修改服务时加 sudo；macOS 使用当前用户的 LaunchAgent，无需 sudo，登录启动、退出登录停止。中继机器无需 Rust 或 Docker。需要正式发布中包含 relay 资产，详见[安装、升级与 Cloudflare 管理](docs/guides/relay-quick-deploy.md)。
 
-新增可在 VPS 自部署的 Rust/QUIC relay，主机与控制端使用独立凭据，固定 relay 证书指纹，保留 RVP 端到端加密和设备配对。添加 Removent 主机时启用「通过 relay 连接」，可选已有 relay 或输入 `removent://域名或IP:端口`、房间和目标主机指纹，并单独选择 Cloudflare / HTTPS 或 VPS / QUIC。当前协议为 v1。凭据保存在钥匙串；不填凭据时须预先登记设备公钥。配置步骤见[私有 relay 部署](docs/guides/private-relay.md)。
+新增可在 VPS 自部署的 Rust/QUIC relay，主机与控制端使用独立凭据，固定 relay 证书指纹，保留 RVP 端到端加密和设备配对。添加 Removent 主机时启用「通过 relay 连接」，可选已有 relay 或输入 `removent://域名或IP:端口`和房间；SNI 选填，证书验证可开关，首次连接确认目标后自动记住身份。单独选择 Cloudflare / HTTPS 或 VPS / QUIC。当前协议为 v1。凭据保存在钥匙串；不填凭据时须预先登记设备公钥。配置步骤见[私有 relay 部署](docs/guides/private-relay.md)。
 
 也支持 [Cloudflare Containers 部署](docs/guides/cloudflare-relay.md)：使用 WSS 承载加密 RVP，提供独立管理凭据保护的启动、停止、状态接口。没有控制端连接时默认 5 分钟休眠；手动停止状态会持久保存，被控端重试不会重新拉起容器。
 
@@ -138,7 +174,8 @@ Removent、VNC/Apple Remote Desktop 和 RDP 连接表单、触控与键盘输入
 保存连接、Bonjour 发现、文本剪贴板、可选远程音频和 relay 路由。构建步骤与
 模拟器验收 fixture 见 mobile README。
 
-连接后横屏画面保持比例铺满屏幕，悬浮菜单和操作栏空闲四秒后渐隐，
+手机端采用紧凑的电脑列表、自适应连接表单和原生导航控件。玻璃材质主要用于导航与操作，
+列表内容使用系统标准表面。连接后横屏画面保持比例铺满屏幕，悬浮菜单和操作栏空闲四秒后渐隐，
 轻点画面或右上角按钮可恢复。会话使用固定英文键盘，英文、数字和 ASCII 符号直接发送，
 不提供输入法语言切换或候选区；横屏弹出键盘时保留画面尺寸和缩放。
 会话操作栏字号最多放大到 XXXL，确保键盘上方仍可操作；表单和弹层保留完整的动态字体支持。

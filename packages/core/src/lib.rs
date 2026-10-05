@@ -1,5 +1,7 @@
 //! removent-core: settings, identity, storage, and logging (no UI, no protocol details).
 
+pub mod authentication;
+pub use authentication::{AuthenticationMode, AuthenticationSettings};
 pub mod adapt;
 pub mod clip;
 pub mod error;
@@ -35,3 +37,5 @@ pub use settings::{
 pub const APP_NAME: &str = "Removent";
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub mod latest;
+
+pub mod pairing_invitation;

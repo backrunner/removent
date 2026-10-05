@@ -65,6 +65,8 @@ impl HostInteractions {
 
 /// Host-side configuration.
 pub struct HostConfig {
+    pub authentication: removent_core::AuthenticationSettings,
+    pub auth_paths: Option<removent_core::DataPaths>,
     pub audio_available: bool,
     /// LoginWindow cannot display pairing or capability-expansion prompts.
     pub preapproved_only: bool,
@@ -146,6 +148,7 @@ fn spawn_clip_poller(
 }
 
 pub struct EstablishedSession {
+    pub peer_name: String,
     pub peer_fp_hex: String,
     pub ack: NegotiateAck,
     /// The quick-resume token issued for this session (or after rotation).
@@ -184,10 +187,11 @@ pub use control::{ControlPumpDeps, TokenBucket, spawn_control_pump};
 pub use handshake::serve_connection;
 #[cfg(test)]
 use resume::{PAIRING_BEGIN_MIN_INTERVAL, PairingBeginLimiter, resume_store};
+pub use resume::{clear_resume_registry, refresh_resume, validate_resume};
 use resume::{
-    invalidate_resume, now_unix, pairing_begin_limiter, remember_resume, validate_resume_full,
+    invalidate_resume, now_unix, pairing_begin_limiter, remember_resume, remember_resume_policy,
+    resume_policy_matches, validate_resume_full,
 };
-pub use resume::{refresh_resume, validate_resume};
 use video::newest_queued;
 pub use video::{MAX_CAPTURE_H, MAX_CAPTURE_W, fit_capture_dims, spawn_video_loop};
 #[cfg(test)]

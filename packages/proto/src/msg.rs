@@ -189,8 +189,8 @@ pub struct HandshakeServer {
     /// token, Some(true) when it validated (quick-resume fast path), Some(false)
     /// when it was rejected (the client falls back to full negotiation).
     pub resume_accepted: Option<bool>,
-    /// True when the client's fingerprint is already in the host's trust store:
-    /// the client skips pairing initiation and never prompts the user for a PIN.
+    /// This attempt requires no credential proof: known identity in pairing mode,
+    /// no-auth mode, or an immediate Busy rejection. Password/OTP always set false.
     pub peer_known: bool,
 }
 
@@ -330,4 +330,26 @@ pub enum ControlMsg {
         width: u32,
         height: u32,
     },
+}
+
+/// Host-selected native connection authentication. Pairing remains the legacy default.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthenticationMode {
+    #[default]
+    PairingCode,
+    Password,
+    Otp,
+    None,
+}
+impl AuthenticationMode {
+    pub fn valid_input(self, value: &str) -> bool {
+        match self {
+            Self::Password => !value.is_empty() && value.len() <= 1024,
+            Self::PairingCode | Self::Otp => {
+                value.len() == 6 && value.bytes().all(|b| b.is_ascii_digit())
+            }
+            Self::None => value.is_empty(),
+        }
+    }
 }

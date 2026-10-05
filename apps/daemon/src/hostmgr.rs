@@ -52,6 +52,7 @@ fn build_callbacks(state: &Arc<DaemonState>) -> HostCallbacks {
                 st_ev.session_started(peer_name, peer_fp16, codec);
             }
             HostEvent::SessionEnded { reason } => st_ev.session_ended(reason),
+            HostEvent::PairingCleared => st_ev.clear_reactive_pin(),
             HostEvent::PairingDone { peer_name } => st_ev.pairing_done(peer_name),
         }),
     }

@@ -1,5 +1,8 @@
 # removentd 的简体中文文案。
 _version: 1
+error.no_pairing_code: "当前没有有效配对码，请生成连接码或等待控制端连接"
+error.pairing_disabled: "请在桌面端设置中允许新设备通过配对码连接"
+error.pairing_busy: "请先启动共享并断开当前会话，再生成连接码"
 
 daemon.name: removentd
 

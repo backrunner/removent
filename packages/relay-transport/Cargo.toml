@@ -30,6 +30,7 @@ ipnet = { version = "2", features = ["serde"] }
 futures.workspace = true
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 webpki-roots = "1"
+tokio-rustls = "0.26"
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
@@ -39,4 +40,3 @@ tempfile = "3"
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 removent-proto.workspace = true
-tokio-rustls = "0.26"

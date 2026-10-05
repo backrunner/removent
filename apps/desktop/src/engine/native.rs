@@ -15,14 +15,35 @@ pub(super) fn client_bind_addr(peer: SocketAddr) -> SocketAddr {
     }
 }
 
+pub(super) struct NativeDestination {
+    pub address: SocketAddr,
+    pub expected_host: Option<[u8; 32]>,
+    pub key: Option<String>,
+    pub invitation: Option<ConnectionRequest>,
+}
+
 pub(super) async fn run_client(
     identity: DeviceIdentity,
-    addr: SocketAddr,
+    destination: NativeDestination,
     paths: DataPaths,
     settings: Settings,
     attempt: ClientAttempt,
-    expected_host: Option<[u8; 32]>,
 ) -> Result<()> {
+    let NativeDestination {
+        address: addr,
+        expected_host,
+        key: destination_key,
+        invitation,
+    } = destination;
+    let pairing_code = invitation.as_ref().and_then(|r| r.pairing_code.clone());
+    let pin_key = destination_key.unwrap_or_else(|| addr.to_string());
+    let trust = removent_client::host_pins::for_connection(
+        &paths,
+        &pin_key,
+        expected_host,
+        pairing_code.is_some(),
+    )?;
+    let expected_host = trust.expected;
     let known = known_fingerprints(&paths);
     let (ep_client, _pin) = make_client_endpoint(
         client_bind_addr(addr),
@@ -43,6 +64,7 @@ pub(super) async fn run_client(
     let audio_enabled = audio_player.is_some();
 
     let mk_cfg = || removent_client::ClientConfig {
+        pairing_code: pairing_code.clone(),
         device_name: settings.device_name.clone(),
         caps: Caps {
             audio: audio_enabled,
@@ -55,23 +77,70 @@ pub(super) async fn run_client(
     // never needs one (no popup flash on every connect).
     let pin_attempt = attempt.clone();
     attempt.progress(ConnectionStage::Negotiating);
-    let mut session = connect_session(
+    let destination = pin_key
+        .strip_prefix("relay:")
+        .and_then(|route| route.rsplit_once(':'))
+        .map(|(endpoint, room)| format!("{room} · {endpoint}"))
+        .unwrap_or_else(|| addr.to_string());
+    let confirmation = trust
+        .needs_confirmation
+        .then(|| attempt.certificate_confirmation(destination, false));
+    let mut session = removent_client::connect_session_with_confirmation(
         ep_client,
         addr,
         &identity,
         mk_cfg(),
         None,
         None,
-        Some(Box::new(move |pin_tx| {
-            pin_attempt.progress(ConnectionStage::Pairing);
+        Some(Box::new(move |mode, pin_tx| {
+            pin_attempt.progress(if mode == removent_core::AuthenticationMode::PairingCode {
+                ConnectionStage::Pairing
+            } else {
+                ConnectionStage::Authenticating
+            });
             let _ = pin_attempt.events.send(UiEvent::ClientNeedsPin {
                 generation: pin_attempt.generation,
+                mode,
                 tx: pin_tx,
             });
         })),
+        confirmation,
     )
     .await?;
 
+    let peer_pin = session
+        .conn
+        .peer_fingerprint()
+        .ok_or_else(|| anyhow::anyhow!("Host certificate missing"))?;
+    let expected_host = Some(peer_pin);
+    removent_client::host_pins::remember(&paths, &pin_key, peer_pin, pairing_code.is_some())?;
+    if let Some(mut request) = invitation {
+        request.pairing_code = None;
+        if let Some(route) = &mut request.relay {
+            route.host_fingerprint = hex::encode(peer_pin);
+        }
+        let result = SavedConnections::load(&paths).and_then(|mut s| {
+            s.save_with_password(
+                SavedConnection::from_request(&request, ""),
+                &request.password,
+            )
+        });
+        match result {
+            Ok(_) => {
+                if let Ok(saved) = SavedConnections::load(&paths) {
+                    let _ = attempt.events.send(UiEvent::PairedConnections {
+                        generation: attempt.generation,
+                        entries: saved.all().to_vec(),
+                    });
+                }
+            }
+            Err(e) => {
+                let _ = attempt.events.send(UiEvent::Notice(
+                    t!("status.connection_save_failed", err = e.to_string()).to_string(),
+                ));
+            }
+        }
+    }
     // Frame bridge: install the channel before telling the UI to open the viewer
     // (eliminates the race of not being able to take rx).
     let ftx = attempt.publish(
@@ -141,7 +210,11 @@ pub(super) async fn run_client(
                     ep,
                     addr,
                     &identity,
-                    mk_cfg(),
+                    {
+                        let mut cfg = mk_cfg();
+                        cfg.pairing_code = None;
+                        cfg
+                    },
                     token,
                     prev_ack.clone(),
                 ),

@@ -1,21 +1,18 @@
 use super::*;
 
 impl HomeView {
-    pub(super) fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_settings_sidebar(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let colors = cx.theme().colors;
-        let settings = self.engine.settings();
         let mut navigation = div()
+            .id("settings-navigation")
             .flex()
-            .flex_wrap()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
             .gap(px(2.))
-            .p(px(3.))
-            .w_auto()
-            .max_w_full()
-            .rounded(px(10.))
-            .bg(colors.sidebar)
-            .border_1()
-            .border_color(colors.border);
-        navigation.style().align_self = Some(gpui::AlignSelf::FlexStart);
+            .px_2()
+            .pb_2();
         for (index, name, key) in [
             (0, "settings", "settings.general"),
             (1, "sun", "settings.appearance"),
@@ -25,20 +22,71 @@ impl HomeView {
             (6, "cloud", "sync.title"),
             (4, "info", "settings.system"),
         ] {
-            navigation = navigation.child(
-                Button::new(("settings-tab", index))
-                    .ghost()
-                    .icon(icon_16(name))
-                    .label(t!(key).to_string())
-                    .h(px(32.))
-                    .rounded(px(7.))
-                    .tab(self.settings_section == index)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.settings_section = index;
-                        cx.notify();
-                    })),
-            );
+            let item = Button::new(("settings-tab", index))
+                .icon(icon_16(name))
+                .label(t!(key).to_string())
+                .w_full()
+                .justify_start()
+                .h(px(36.))
+                .rounded(px(8.))
+                .sidebar(self.settings_section == index)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.settings_section = index;
+                    cx.notify();
+                }));
+            #[cfg(test)]
+            let item = div()
+                .debug_selector(move || format!("settings-nav-{index}"))
+                .child(item);
+            navigation = navigation.child(item);
         }
+        let back = Button::new("close-settings")
+            .icon(icon_16("arrow-left"))
+            .label(t!("settings.back_to_devices").to_string())
+            .ghost()
+            .w_full()
+            .justify_start()
+            .h(px(32.))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.settings_open = false;
+                cx.notify();
+            }));
+        #[cfg(test)]
+        let back = div().debug_selector(|| "settings-back".into()).child(back);
+        div()
+            .w(px(if window.viewport_size().width < px(1000.) {
+                228.
+            } else {
+                256.
+            }))
+            .flex_shrink_0()
+            .flex()
+            .flex_col()
+            .bg(colors.sidebar)
+            .border_r_1()
+            .border_color(colors.border)
+            .child(
+                div()
+                    .px_4()
+                    .pt_5()
+                    .pb_3()
+                    .text_size(px(13.))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(t!("settings.title").to_string()),
+            )
+            .child(navigation)
+            .child(
+                div()
+                    .border_t_1()
+                    .border_color(colors.border)
+                    .p_2()
+                    .child(back),
+            )
+    }
+
+    pub(super) fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors;
+        let settings = self.engine.settings();
         let row = || div().flex().flex_col().gap_3().p_5().w_full().min_w_0();
         let header = |name, title, description| {
             section_header(name, t!(title).to_string(), t!(description).to_string(), cx)
@@ -232,6 +280,7 @@ impl HomeView {
                     );
             }
             2 => {
+                let mode = settings.authentication.mode;
                 content = content
                     .child(header(
                         "shield-check",
@@ -239,6 +288,144 @@ impl HomeView {
                         "settings.security_description",
                     ))
                     .child(
+                        form_group(cx).child(
+                            row()
+                                .child(setting_label(
+                                    t!("auth.title").to_string(),
+                                    t!("auth.hint").to_string(),
+                                    cx,
+                                ))
+                                .child({
+                                    let view = cx.entity();
+                                    segmented(
+                                        "authentication",
+                                        &[
+                                            t!("auth.pairing").to_string(),
+                                            t!("auth.password").to_string(),
+                                            t!("auth.otp").to_string(),
+                                            t!("auth.none").to_string(),
+                                        ],
+                                        match mode {
+                                            removent_core::AuthenticationMode::PairingCode => 0,
+                                            removent_core::AuthenticationMode::Password => 1,
+                                            removent_core::AuthenticationMode::Otp => 2,
+                                            removent_core::AuthenticationMode::None => 3,
+                                        },
+                                        Rc::new(move |i, _, _, app| {
+                                            view.update(app, |this, cx| {
+                                                let mode = match i {
+                                                    1 => removent_core::AuthenticationMode::Password,
+                                                    2 => removent_core::AuthenticationMode::Otp,
+                                                    3 => removent_core::AuthenticationMode::None,
+                                                    _ => removent_core::AuthenticationMode::PairingCode,
+                                                };
+                                                this.save_authentication(mode, cx)
+                                            })
+                                        }),
+                                        cx,
+                                    )
+                                })
+                                .child(setting_label(
+                                    t!("auth.password").to_string(),
+                                    t!("auth.password_hint").to_string(),
+                                    cx,
+                                ))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_3()
+                                        .items_center()
+                                        .child(div().flex_1().min_w_0().child(
+                                            form_input(&self.auth_password_input).mask_toggle(),
+                                        ))
+                                        .child(
+                                            Button::new("save-auth-password")
+                                                .label(t!("auth.use_password").to_string())
+                                                .primary()
+                                                .disabled(
+                                                    self.auth_password_input
+                                                        .read(cx)
+                                                        .value()
+                                                        .is_empty(),
+                                                )
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.save_authentication(
+                                                        removent_core::AuthenticationMode::Password,
+                                                        cx,
+                                                    )
+                                                })),
+                                        ),
+                                )
+                                .when(mode == removent_core::AuthenticationMode::Otp, |el| {
+                                    el.child(setting_label(
+                                        t!("auth.otp_setup").to_string(),
+                                        t!("auth.otp_setup_hint").to_string(),
+                                        cx,
+                                    ))
+                                    .child(
+                                        div()
+                                            .text_size(px(13.))
+                                            .font_family(cx.theme().mono_font_family.clone())
+                                            .child(settings.authentication.otp_secret.clone()),
+                                    )
+                                    .child(
+                                        Button::new("copy-otp-secret")
+                                            .label(t!("auth.copy_secret").to_string())
+                                            .outline()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                cx.write_to_clipboard(
+                                                    gpui::ClipboardItem::new_string(
+                                                        this.engine
+                                                            .settings()
+                                                            .authentication
+                                                            .otp_secret,
+                                                    ),
+                                                );
+                                            })),
+                                    )
+                                })
+                                .when(mode == removent_core::AuthenticationMode::None, |el| {
+                                    el.child(
+                                        div()
+                                            .text_size(px(12.))
+                                            .text_color(colors.warning)
+                                            .child(t!("auth.none_hint").to_string()),
+                                    )
+                                }),
+                        ),
+                    );
+                if mode == removent_core::AuthenticationMode::PairingCode {
+                    content = content.child(
+                        form_group(cx)
+                            .child(row()
+                                .child(setting_label(t!("pairing.policy").to_string(), t!("pairing.policy_hint").to_string(), cx))
+                                .child({
+                                    let view = cx.entity();
+                                    segmented(
+                                        "pairing-policy",
+                                        &[t!("pairing.remember").to_string(), t!("pairing.every_connection").to_string()],
+                                        usize::from(settings.authentication.pairing_policy == removent_core::authentication::PairingPolicy::EveryConnection),
+                                        Rc::new(move |i, _, _, app| {
+                                            view.update(app, |this, cx| {
+                                                this.persist_settings(|s| {
+                                                    s.authentication.pairing_policy = if i == 0 {
+                                                        removent_core::authentication::PairingPolicy::RememberDevice
+                                                    } else {
+                                                        removent_core::authentication::PairingPolicy::EveryConnection
+                                                    };
+                                                });
+                                                cx.notify();
+                                            });
+                                        }), cx,
+                                    )
+                                }))
+                            .child(row()
+                                .child(setting_label(t!("pairing.invitation").to_string(), t!("pairing.invitation_hint").to_string(), cx))
+                                .child(Button::new("generate-pairing-code")
+                                    .label(t!("pairing.generate").to_string()).outline()
+                                    .on_click(cx.listener(|this, _, _, _| this.engine.generate_pairing_code())))),
+                    );
+                    content = content.child(
                         form_group(cx).child(
                             row()
                                 .child(setting_label(
@@ -301,6 +488,33 @@ impl HomeView {
                                 ),
                         ),
                     );
+                } else {
+                    content = content.child(
+                        form_group(cx).child(
+                            row()
+                                .child(setting_label(
+                                    t!("auth.allow").to_string(),
+                                    t!("auth.allow_hint").to_string(),
+                                    cx,
+                                ))
+                                .child(
+                                    Switch::new("allow-authenticated-connections")
+                                        .checked(settings.admission != AdmissionMode::DenyAll)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.persist_settings(|s| {
+                                                s.admission =
+                                                    if s.admission == AdmissionMode::DenyAll {
+                                                        AdmissionMode::TrustedAuto
+                                                    } else {
+                                                        AdmissionMode::DenyAll
+                                                    }
+                                            });
+                                            cx.notify();
+                                        })),
+                                ),
+                        ),
+                    );
+                }
             }
             3 => {
                 content = content
@@ -545,55 +759,6 @@ impl HomeView {
             .overflow_hidden()
             .child(
                 div()
-                    .flex()
-                    .flex_col()
-                    .gap_6()
-                    .w_full()
-                    .max_w(px(760.))
-                    .mx_auto()
-                    .p_6()
-                    .child(
-                        div()
-                            .flex()
-                            .items_start()
-                            .justify_between()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .text_size(px(24.))
-                                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                                            .child(t!("settings.title").to_string()),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(px(12.))
-                                            .text_color(colors.muted_foreground)
-                                            .child(t!("settings.subtitle").to_string()),
-                                    ),
-                            )
-                            .child(
-                                Button::new("close-settings")
-                                    .icon(icon_16("x"))
-                                    .outline()
-                                    .small()
-                                    .tooltip(t!("action.back").to_string())
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.settings_open = false;
-                                        cx.notify();
-                                    })),
-                            ),
-                    )
-                    .child(navigation)
-                    .flex_shrink_0()
-                    .pb_4(),
-            )
-            .child(
-                div()
                     .id(("settings-content", self.settings_section))
                     .flex_1()
                     .min_h_0()
@@ -603,9 +768,7 @@ impl HomeView {
                             .w_full()
                             .max_w(px(760.))
                             .mx_auto()
-                            .px_6()
-                            .pb_6()
-                            .pt_2()
+                            .p_6()
                             .child(content),
                     ),
             )

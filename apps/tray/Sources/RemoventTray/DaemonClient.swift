@@ -42,6 +42,7 @@ enum DaemonMessage {
     case admissionResolved(requestId: Int, allow: Bool)
     case pairingPin(String)
     case pairingDone(peerName: String)
+    case pairingCleared
     case unknown(String)
 }
 
@@ -209,6 +210,8 @@ final class DaemonClient {
                                          allow: dict["allow"] as? Bool ?? false)
         case "pairing_pin":
             message = .pairingPin(dict["pin"] as? String ?? "")
+        case "pairing_cleared":
+            message = .pairingCleared
         case "pairing_done":
             message = .pairingDone(peerName: dict["peer_name"] as? String ?? "")
         default:

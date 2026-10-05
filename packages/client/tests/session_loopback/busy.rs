@@ -36,6 +36,8 @@ async fn second_connection_gets_busy_reject() {
             is_main: true,
         };
         let cfg = HostConfig {
+            authentication: Default::default(),
+            auth_paths: None,
             audio_available: true,
             preapproved_only: false,
             device_name: "BusyHost".into(),
@@ -80,7 +82,7 @@ async fn second_connection_gets_busy_reject() {
     });
 
     // PIN forwarding for the first (pairing) connection.
-    let pin_request: removent_client::PinRequest = Box::new(move |pin_tx| {
+    let pin_request: removent_client::PinRequest = Box::new(move |_, pin_tx| {
         tokio::spawn(async move {
             if let Ok(pin) = pin_from_host.await {
                 let _ = pin_tx.send(pin);
@@ -95,6 +97,7 @@ async fn second_connection_gets_busy_reject() {
     )
     .unwrap();
     let mk_cfg = || ClientConfig {
+        pairing_code: None,
         device_name: "BusyClient".into(),
         caps: Caps::all(),
         local_clip: None,
@@ -127,7 +130,7 @@ async fn second_connection_gets_busy_reject() {
             mk_cfg(),
             None,
             None,
-            Some(Box::new(|_: oneshot::Sender<String>| {
+            Some(Box::new(|_, _: oneshot::Sender<String>| {
                 panic!("busy-rejected trusted peer must not request a PIN");
             })),
         ),

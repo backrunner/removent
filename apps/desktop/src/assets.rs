@@ -17,6 +17,7 @@ static ICONS: &[(&str, &str)] = icons![
     "check",
     "chevron-right",
     "clipboard",
+    "cloud",
     "copy",
     "eye",
     "folder",

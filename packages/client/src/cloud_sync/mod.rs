@@ -46,7 +46,10 @@ impl From<&SavedConnection> for ConnectionData {
             port: entry.port,
             username: entry.username.clone(),
             domain: entry.domain.clone(),
-            relay: entry.relay.clone(),
+            relay: entry.relay.clone().map(|mut route| {
+                route.accept_invalid_certificate = false;
+                route
+            }),
         }
     }
 }
@@ -63,14 +66,8 @@ impl ConnectionData {
             if self.protocol != ConnectionProtocol::Removent || self.port != 0 {
                 return Err(failure("Invalid relay protocol"));
             }
-            let parsed = RelayRoute::parse(
-                &route.endpoint,
-                route.transport,
-                &route.server_fingerprint,
-                &route.host_fingerprint,
-            )
-            .map_err(failure)?;
-            if &parsed != route {
+            let parsed = route.validated(false).map_err(failure)?;
+            if route.accept_invalid_certificate || &parsed != route {
                 return Err(failure("Noncanonical relay route"));
             }
             ConnectionAddress::relay_room(&self.host)
@@ -117,6 +114,9 @@ impl ConnectionData {
                 entry.credentials_review_required = previous.credentials_review_required;
                 entry.password_key = previous.password_key.clone();
                 entry.accept_invalid_certificate = previous.accept_invalid_certificate;
+                if let (Some(route), Some(old)) = (&mut entry.relay, &previous.relay) {
+                    route.accept_invalid_certificate = old.accept_invalid_certificate;
+                }
             }
         }
         entry

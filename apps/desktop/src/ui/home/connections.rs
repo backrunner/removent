@@ -45,6 +45,33 @@ impl HomeView {
                         let Ok(request) = dialog.read(cx).request(cx) else {
                             return;
                         };
+                        if request.pairing_code.is_some() {
+                            if *event == ConnectionDialogEvent::Save {
+                                dialog.update(cx, |form, cx| {
+                                    form.set_connecting(
+                                        false,
+                                        Some(t!("pairing.temporary").to_string()),
+                                        cx,
+                                    )
+                                });
+                            } else {
+                                match this.engine.connect_request(request) {
+                                    Ok(()) => {
+                                        this.connecting =
+                                            Some(t!("pairing.invitation").to_string());
+                                        this.connection_stage = ConnectionStage::Resolving;
+                                        dialog.update(cx, |form, cx| {
+                                            form.set_connecting(true, None, cx)
+                                        });
+                                    }
+                                    Err(error) => dialog.update(cx, |form, cx| {
+                                        form.set_connecting(false, Some(error.to_string()), cx)
+                                    }),
+                                }
+                            }
+                            cx.notify();
+                            return;
+                        }
                         let memo = dialog.read(cx).memo_name(cx);
                         let id = dialog.read(cx).saved_id().map(str::to_owned);
                         let save_only = *event == ConnectionDialogEvent::Save;

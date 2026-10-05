@@ -17,16 +17,26 @@ pub const IPC_VERSION: u32 = 1;
 pub enum IpcRequest {
     /// Query the full status snapshot.
     Status,
+    PairingShow,
+    PairingGenerate,
+    PairingRevoke,
     /// Enable/disable the host service (the daemon process stays resident).
-    SetEnabled { on: bool },
+    SetEnabled {
+        on: bool,
+    },
     /// Explicit interactive setup, requested in the daemon's own TCC identity.
     RequestPermissions,
     /// Reload settings from disk (sent after the app settings page saves; takes effect on the runner's next restart).
     ReloadSettings,
     /// Admission decision reply (corresponds to the AdmissionRequest event).
-    AdmissionReply { request_id: u64, allow: bool },
+    AdmissionReply {
+        request_id: u64,
+        allow: bool,
+    },
     /// Disconnect the given session.
-    KickSession { session_id: u64 },
+    KickSession {
+        session_id: u64,
+    },
     /// Stop the daemon process.
     Shutdown,
 }
@@ -77,7 +87,13 @@ pub struct StatusReport {
 pub enum IpcResponse {
     Status(Box<StatusReport>),
     Ok,
-    Error { message: String },
+    PairingCode {
+        code: String,
+        expires_at_unix: Option<u64>,
+    },
+    Error {
+        message: String,
+    },
 }
 
 /// daemon → management client events (no request needed; broadcast to all connections).
@@ -108,6 +124,8 @@ pub enum IpcEvent {
     PairingPin {
         pin: String,
     },
+    /// A pending PIN was cancelled or revoked.
+    PairingCleared,
     PairingDone {
         peer_name: String,
     },

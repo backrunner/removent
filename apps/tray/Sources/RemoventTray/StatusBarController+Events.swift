@@ -56,13 +56,18 @@ extension StatusBarController {
             queuedAdmissionRequests.removeAll { $0.requestId == requestId }
             trayLog("admission request #\(requestId) resolved: \(allow ? "allowed" : "denied")")
         case .pairingPin(let pin):
-            trayLog("pairing PIN received: \(pin)")
+            trayLog("pairing PIN received")
             pendingPin = pin
             rebuildMenu()
             showPairingAlert(pin: pin)
+        case .pairingCleared:
+            pendingPin = nil
+            dismissPairingAlert()
+            rebuildMenu()
         case .pairingDone(let peerName):
             trayLog("pairing completed: \(peerName)")
             pendingPin = nil
+            dismissPairingAlert()
             rebuildMenu()
         case .unknown(let type):
             trayLog("ignoring unknown message type: \(type)")

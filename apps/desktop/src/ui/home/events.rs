@@ -11,6 +11,10 @@ impl HomeView {
             return;
         }
         match ev {
+            UiEvent::PairedConnections { entries, .. } => {
+                self.saved = entries;
+                cx.notify();
+            }
             UiEvent::DeviceFound {
                 fp,
                 name,
@@ -36,7 +40,10 @@ impl HomeView {
                 }
             }
             UiEvent::PairingPin(pin) => {
-                if matches!(self.pin_dialog, Some(PinDialog::Entry(_))) {
+                if matches!(
+                    self.pin_dialog,
+                    Some(PinDialog::Entry(_) | PinDialog::Trust { .. })
+                ) {
                     // The controlling side is entering a PIN: do not cover the entry dialog,
                     // just hint.
                     self.set_status(t!("status.pairing_busy").to_string(), StatusTone::Info);
@@ -59,6 +66,11 @@ impl HomeView {
                     .detach();
                     self.dialog_seq += 1;
                     self.pin_dialog = Some(PinDialog::Display(pin));
+                }
+            }
+            UiEvent::PairingCleared => {
+                if matches!(self.pin_dialog, Some(PinDialog::Display(_))) {
+                    self.pin_dialog = None;
                 }
             }
             UiEvent::PairingDone(peer_name) => {
@@ -117,9 +129,42 @@ impl HomeView {
             UiEvent::ConnectionProgress { stage, .. } => {
                 self.set_connection_stage(stage, cx);
             }
-            UiEvent::ClientNeedsPin { tx, .. } => {
+            UiEvent::ConfirmCertificate {
+                destination,
+                relay,
+                tx,
+                ..
+            } => {
+                self.dialog_seq += 1;
+                self.pin_dialog = Some(PinDialog::Trust {
+                    destination,
+                    relay,
+                    tx,
+                });
+                self.set_status(t!("trust.waiting").to_string(), StatusTone::Info);
+                window.focus(&self.focus);
+            }
+            UiEvent::ClientNeedsPin { tx, mode, .. } => {
                 self.set_connection_stage(ConnectionStage::Pairing, cx);
                 self.dialog_seq += 1;
+                self.auth_mode = mode;
+                self.pin_input.update(cx, |s, cx| {
+                    s.set_masked(
+                        mode == removent_core::AuthenticationMode::Password,
+                        window,
+                        cx,
+                    );
+                    s.set_placeholder(
+                        t!(match mode {
+                            removent_core::AuthenticationMode::Password => "auth.password",
+                            removent_core::AuthenticationMode::Otp => "auth.otp",
+                            _ => "home.pin_placeholder",
+                        })
+                        .to_string(),
+                        window,
+                        cx,
+                    );
+                });
                 self.pin_dialog = Some(PinDialog::Entry(tx));
                 // Start from an empty field and hand it the keyboard focus.
                 self.clear_pin_input(window, cx);
@@ -132,7 +177,10 @@ impl HomeView {
                 // Close only the controlling side's Entry dialog: dropping the oneshot here
                 // is safe (the client pairing task has been aborted). A Display dialog
                 // (we are showing a PIN to someone else) must survive.
-                if matches!(self.pin_dialog, Some(PinDialog::Entry(_))) {
+                if matches!(
+                    self.pin_dialog,
+                    Some(PinDialog::Entry(_) | PinDialog::Trust { .. })
+                ) {
                     self.pin_dialog = None;
                     self.clear_pin_input(window, cx);
                 }
@@ -178,7 +226,10 @@ impl HomeView {
                 self.connecting = None;
                 // A zombie Entry dialog is useless here: its oneshot peer died with the
                 // client task, so submitting would silently go nowhere.
-                if matches!(self.pin_dialog, Some(PinDialog::Entry(_))) {
+                if matches!(
+                    self.pin_dialog,
+                    Some(PinDialog::Entry(_) | PinDialog::Trust { .. })
+                ) {
                     self.pin_dialog = None;
                     self.clear_pin_input(window, cx);
                 }
@@ -197,7 +248,10 @@ impl HomeView {
                 }
                 self.connecting = None;
                 // Same zombie-Entry cleanup as ConnectFailed.
-                if matches!(self.pin_dialog, Some(PinDialog::Entry(_))) {
+                if matches!(
+                    self.pin_dialog,
+                    Some(PinDialog::Entry(_) | PinDialog::Trust { .. })
+                ) {
                     self.pin_dialog = None;
                     self.clear_pin_input(window, cx);
                 }

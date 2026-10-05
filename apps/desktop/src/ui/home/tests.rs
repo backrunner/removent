@@ -2,6 +2,75 @@ use super::*;
 use gpui::{AnyView, TestAppContext};
 
 #[gpui::test]
+fn settings_sidebar_switches_sections_and_preserves_device_selection(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let directory = tempfile::tempdir().unwrap();
+    let paths = removent_core::DataPaths {
+        root: directory.path().into(),
+    };
+    let (commands, _rx) = tokio::sync::mpsc::channel(1);
+    let engine = Engine::for_viewer_test(paths, commands);
+    let slot = Rc::new(std::cell::RefCell::new(None));
+    let out = slot.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        let view = cx.new(|cx| HomeView::new(engine, window, cx));
+        view.update(cx, |view, _| {
+            view.devices.insert(
+                "office".into(),
+                DeviceRow {
+                    name: "Office Mac".into(),
+                    addr: "192.0.2.1:48688".parse().unwrap(),
+                    protocol: ConnectionProtocol::Removent,
+                },
+            );
+            view.selected = Some(Selection::Device("office".into()));
+            view.settings_open = true;
+        });
+        *out.borrow_mut() = Some(view.clone());
+        gpui_component::Root::new(AnyView::from(view), window, cx)
+    });
+    let view = slot.borrow_mut().take().unwrap();
+    cx.simulate_resize(gpui::size(px(860.), px(600.)));
+    cx.run_until_parked();
+    for (section, selector) in [
+        (1, "settings-nav-1"),
+        (2, "settings-nav-2"),
+        (3, "settings-nav-3"),
+        (5, "settings-nav-5"),
+        (6, "settings-nav-6"),
+        (4, "settings-nav-4"),
+        (0, "settings-nav-0"),
+    ] {
+        let bounds = cx
+            .debug_bounds(selector)
+            .expect("settings category is available without scrolling");
+        assert!(bounds.left() >= px(0.) && bounds.right() <= px(228.));
+        assert!(bounds.bottom() <= px(600.));
+        cx.simulate_mouse_move(bounds.center(), None, Default::default());
+        cx.simulate_click(bounds.center(), Default::default());
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let state = view.read(cx);
+            assert_eq!(state.settings_section, section);
+            assert!(state.settings_open);
+            assert!(matches!(&state.selected, Some(Selection::Device(fp)) if fp == "office"));
+        });
+        if section == 6 {
+            assert!(cx.debug_bounds("cloud-sync-toggle").is_some());
+        }
+    }
+    let back = cx.debug_bounds("settings-back").unwrap();
+    cx.simulate_mouse_move(back.center(), None, Default::default());
+    cx.simulate_click(back.center(), Default::default());
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let state = view.read(cx);
+        assert!(!state.settings_open);
+        assert!(matches!(&state.selected, Some(Selection::Device(fp)) if fp == "office"));
+    });
+}
+
+#[gpui::test]
 fn cloud_sync_switch_persists_without_requiring_cloud_access(cx: &mut TestAppContext) {
     cx.update(gpui_component::init);
     let directory = tempfile::tempdir().unwrap();
@@ -193,4 +262,158 @@ fn discovery_switches_persist_independently_and_remove_disabled_rows(cx: &mut Te
         !settings.vnc_enabled,
         "discovery must not enable the local VNC server"
     );
+}
+
+#[gpui::test]
+fn authentication_settings_persist_each_mode_and_require_password(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let directory = tempfile::tempdir().unwrap();
+    let paths = removent_core::DataPaths {
+        root: directory.path().into(),
+    };
+    let read_paths = paths.clone();
+    let (commands, _rx) = tokio::sync::mpsc::channel(1);
+    let engine = Engine::for_viewer_test(paths, commands);
+    let slot = Rc::new(std::cell::RefCell::new(None));
+    let out = slot.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        let view = cx.new(|cx| HomeView::new(engine, window, cx));
+        view.update(cx, |view, _| {
+            view.settings_open = true;
+            view.settings_section = 2;
+        });
+        *out.borrow_mut() = Some(view.clone());
+        gpui_component::Root::new(AnyView::from(view), window, cx)
+    });
+    let view = slot.borrow_mut().take().unwrap();
+    cx.simulate_resize(gpui::size(px(860.), px(700.)));
+    cx.run_until_parked();
+    let password = cx.debug_bounds("authentication-1").unwrap();
+    cx.simulate_mouse_move(password.center(), None, Default::default());
+    cx.simulate_click(password.center(), Default::default());
+    cx.run_until_parked();
+    assert_eq!(
+        removent_core::Settings::load(&read_paths)
+            .unwrap()
+            .authentication
+            .mode,
+        removent_core::AuthenticationMode::PairingCode
+    );
+    view.update_in(cx, |view, window, cx| {
+        view.auth_password_input.update(cx, |input, cx| {
+            input.set_value("synthetic-host-password", window, cx)
+        });
+        view.save_authentication(removent_core::AuthenticationMode::Password, cx);
+    });
+    assert_eq!(
+        removent_core::Settings::load(&read_paths)
+            .unwrap()
+            .authentication
+            .mode,
+        removent_core::AuthenticationMode::Password
+    );
+    for (selector, mode) in [
+        ("authentication-2", removent_core::AuthenticationMode::Otp),
+        ("authentication-3", removent_core::AuthenticationMode::None),
+        (
+            "authentication-0",
+            removent_core::AuthenticationMode::PairingCode,
+        ),
+    ] {
+        cx.run_until_parked();
+        let bounds = cx.debug_bounds(selector).unwrap();
+        assert!(bounds.right() <= px(860.));
+        cx.simulate_mouse_move(bounds.center(), None, Default::default());
+        cx.simulate_click(bounds.center(), Default::default());
+        cx.run_until_parked();
+        let settings = removent_core::Settings::load(&read_paths).unwrap();
+        assert_eq!(settings.authentication.mode, mode);
+        if mode == removent_core::AuthenticationMode::Otp {
+            assert!(settings.authentication.totp().is_ok());
+        }
+    }
+}
+
+#[gpui::test]
+fn certificate_confirmation_requires_a_click_and_rejects_stale_events(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let directory = tempfile::tempdir().unwrap();
+    let paths = removent_core::DataPaths {
+        root: directory.path().into(),
+    };
+    let (commands, _rx) = tokio::sync::mpsc::channel(1);
+    let engine = Engine::for_viewer_test(paths, commands);
+    let slot = Rc::new(std::cell::RefCell::new(None));
+    let out = slot.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        let view = cx.new(|cx| HomeView::new(engine, window, cx));
+        *out.borrow_mut() = Some(view.clone());
+        gpui_component::Root::new(AnyView::from(view), window, cx)
+    });
+    let view = slot.borrow_mut().take().unwrap();
+    cx.simulate_resize(gpui::size(px(860.), px(650.)));
+    let (tx, mut stale) = oneshot::channel();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.handle_event(
+                UiEvent::ConfirmCertificate {
+                    generation: view.engine.client_generation() + 1,
+                    destination: "stale".into(),
+                    relay: false,
+                    tx,
+                },
+                window,
+                cx,
+            );
+            assert!(view.pin_dialog.is_none());
+        })
+    });
+    assert!(matches!(
+        stale.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    let (tx, mut answer) = oneshot::channel();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.handle_event(
+                UiEvent::ConfirmCertificate {
+                    generation: view.engine.client_generation(),
+                    destination: "Office Mac".into(),
+                    relay: false,
+                    tx,
+                },
+                window,
+                cx,
+            );
+        })
+    });
+    cx.run_until_parked();
+    assert!(matches!(
+        answer.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    let button = cx.debug_bounds("trust-certificate").unwrap();
+    cx.simulate_click(button.center(), Default::default());
+    cx.run_until_parked();
+    assert!(answer.try_recv().unwrap());
+    let (tx, mut cancel) = oneshot::channel();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.handle_event(
+                UiEvent::ConfirmCertificate {
+                    generation: view.engine.client_generation(),
+                    destination: "relay.example".into(),
+                    relay: true,
+                    tx,
+                },
+                window,
+                cx,
+            );
+        })
+    });
+    cx.run_until_parked();
+    let button = cx.debug_bounds("cancel-certificate").unwrap();
+    cx.simulate_click(button.center(), Default::default());
+    cx.run_until_parked();
+    assert!(!cancel.try_recv().unwrap());
 }

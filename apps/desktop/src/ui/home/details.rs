@@ -36,8 +36,11 @@ impl HomeView {
                         Button::new(ElementId::Name(format!("perm-{}", kind.slug()).into()))
                             .label(t!("permissions.open_settings").to_string())
                             .tooltip(kind.purpose())
-                            .ghost()
+                            .outline()
                             .small()
+                            .h(px(28.))
+                            .rounded(px(8.))
+                            .bg(colors.secondary_hover.opacity(0.45))
                             .on_click(move |_, _, _| kind.request_and_open_settings()),
                     )
                 })
@@ -66,28 +69,24 @@ impl HomeView {
                     .flex_col()
                     .gap_5()
                     .child(
-                        form_group(cx)
-                            .p_6()
-                            .bg(gpui::linear_gradient(
-                                135.,
-                                gpui::linear_color_stop(colors.secondary_active, 0.),
-                                gpui::linear_color_stop(colors.group_box, 1.),
-                            ))
-                            .gap_5()
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_4()
                             .child(
                                 div()
                                     .flex()
                                     .items_center()
                                     .gap_2()
                                     .text_size(px(11.))
-                                    .text_color(colors.accent)
+                                    .text_color(colors.muted_foreground)
                                     .child(icon_16("wifi"))
                                     .child(t!("connection.lan_badge").to_string()),
                             )
                             .child(
                                 div().flex().flex_col().gap_2().child(
                                     div()
-                                        .text_size(px(28.))
+                                        .text_size(px(22.))
                                         .font_weight(gpui::FontWeight::SEMIBOLD)
                                         .child(t!("connection.welcome").to_string()),
                                 ),

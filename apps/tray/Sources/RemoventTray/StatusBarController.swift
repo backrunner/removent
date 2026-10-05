@@ -29,6 +29,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     var pendingAdmissionIds = Set<Int>()
     /// Admission requests arriving while an alert is shown are queued and
     /// processed one by one after the current alert closes.
+    var pairingAlert: NSAlert?
     var alertActive = false
     var queuedAdmissionRequests: [(requestId: Int, peerName: String, peerFp16: String)] = []
     /// No rebuilds while the menu is open; mark dirty and rebuild on close.
@@ -63,6 +64,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             if !isConnected {
                 self.status = nil
                 self.pendingPin = nil
+                self.dismissPairingAlert()
                 if changed { trayLog("daemon not running") }
             }
             // Rebuild only when the connection state actually changes; the 1s

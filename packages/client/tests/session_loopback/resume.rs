@@ -39,6 +39,8 @@ async fn quick_resume_reconnects_and_rotates_token() {
             is_main: true,
         };
         let mk_cfg = || HostConfig {
+            authentication: Default::default(),
+            auth_paths: None,
             audio_available: true,
             preapproved_only: false,
             device_name: "ResumeHost".into(),
@@ -106,7 +108,7 @@ async fn quick_resume_reconnects_and_rotates_token() {
     });
 
     // PIN forwarding (only when pairing actually asks for it).
-    let pin_request: removent_client::PinRequest = Box::new(move |pin_tx| {
+    let pin_request: removent_client::PinRequest = Box::new(move |_, pin_tx| {
         tokio::spawn(async move {
             if let Ok(pin) = pin_from_host.await {
                 let _ = pin_tx.send(pin);
@@ -121,6 +123,7 @@ async fn quick_resume_reconnects_and_rotates_token() {
     )
     .unwrap();
     let mk_cfg = || ClientConfig {
+        pairing_code: None,
         device_name: "ResumeClient".into(),
         caps: Caps::all(),
         local_clip: None,

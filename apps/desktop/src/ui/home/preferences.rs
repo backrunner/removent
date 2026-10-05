@@ -80,3 +80,31 @@ impl HomeView {
         cx.notify();
     }
 }
+
+impl HomeView {
+    pub(super) fn save_authentication(
+        &mut self,
+        mode: removent_core::AuthenticationMode,
+        cx: &mut Context<Self>,
+    ) {
+        let mut auth = self.engine.settings().authentication;
+        auth.mode = mode;
+        if mode == removent_core::AuthenticationMode::Password {
+            auth.password = self.auth_password_input.read(cx).value().to_string();
+        }
+        if mode == removent_core::AuthenticationMode::Otp && auth.otp_secret.is_empty() {
+            auth.otp_secret = removent_core::AuthenticationSettings::generate_otp_secret();
+        }
+        if auth.validate().is_err() {
+            self.set_status(t!("auth.password_required").to_string(), StatusTone::Warn);
+        } else if self.persist_settings(|s| {
+            s.authentication = auth;
+            if mode != removent_core::AuthenticationMode::PairingCode {
+                s.paired_only = false;
+            }
+        }) {
+            self.set_status(t!("status.settings_saved").to_string(), StatusTone::Ok);
+        }
+        cx.notify();
+    }
+}

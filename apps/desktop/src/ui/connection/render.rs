@@ -106,7 +106,9 @@ impl Render for ConnectionDialog {
                         .child(
                             field(
                                 t!(if self.via_relay {
-                                    "connection.relay_room"
+                                    "pairing.room_or_code"
+                                } else if protocol == ConnectionProtocol::Removent {
+                                    "pairing.address_or_code"
                                 } else {
                                     "connection.address"
                                 })
@@ -115,13 +117,21 @@ impl Render for ConnectionDialog {
                             )
                             .flex_1(),
                         )
-                        .when(!self.via_relay, |el| {
-                            el.child(
-                                field(t!("connection.port").to_string(), &self.port)
-                                    .w(px(88.))
-                                    .flex_shrink_0(),
-                            )
-                        }),
+                        .when(
+                            !self.via_relay
+                                && !(protocol == ConnectionProtocol::Removent
+                                    && removent_core::pairing_invitation::PairingCode::parse(
+                                        &self.host.read(cx).value(),
+                                    )
+                                    .is_some()),
+                            |el| {
+                                el.child(
+                                    field(t!("connection.port").to_string(), &self.port)
+                                        .w(px(88.))
+                                        .flex_shrink_0(),
+                                )
+                            },
+                        ),
                 );
                 if protocol != ConnectionProtocol::Removent {
                     body = body
@@ -198,13 +208,43 @@ impl Render for ConnectionDialog {
                             &self.relay_endpoint,
                         ))
                         .child(field(
-                            t!("connection.relay_pin").to_string(),
-                            &self.relay_pin,
+                            t!("connection.sni").to_string(),
+                            &self.relay_server_name,
                         ))
-                        .child(field(
-                            t!("connection.host_fingerprint").to_string(),
-                            &self.host_pin,
-                        ))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_3()
+                                .child(
+                                    div().flex_1().text_size(px(12.)).child(
+                                        t!("connection.verify_relay_certificate").to_string(),
+                                    ),
+                                )
+                                .child(
+                                    Switch::new("verify-relay-certificate")
+                                        .small()
+                                        .checked(self.verify_relay_certificate)
+                                        .disabled(busy)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.verify_relay_certificate =
+                                                !this.verify_relay_certificate;
+                                            this.relay_secret_task = None;
+                                            this.password
+                                                .update(cx, |s, cx| s.set_value("", window, cx));
+                                            this.relay_secret_scope = Some(this.relay_scope(cx));
+                                            cx.notify();
+                                        })),
+                                ),
+                        )
+                        .when(!self.verify_relay_certificate, |el| {
+                            el.child(
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(colors.muted_foreground)
+                                    .child(t!("connection.unverified_relay_hint").to_string()),
+                            )
+                        })
                         .child(
                             div()
                                 .flex()

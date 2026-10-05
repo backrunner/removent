@@ -9,6 +9,7 @@ pub(super) struct ResumeEntry {
     pub(super) prev_token: Option<[u8; 16]>,
     pub(super) ack: NegotiateAck,
     pub(super) caps: Caps,
+    policy: Option<[u8; 32]>,
 }
 
 /// fp → resume entry.
@@ -42,6 +43,7 @@ pub(super) fn remember_resume(
             prev_token,
             ack: ack.clone(),
             caps,
+            policy: None,
         },
     );
 }
@@ -135,3 +137,28 @@ pub(super) fn pairing_begin_limiter() -> &'static std::sync::Mutex<PairingBeginL
 }
 
 // ---------------- main flow ----------------
+
+pub(super) fn remember_resume_policy(fp: &str, auth: &removent_core::AuthenticationSettings) {
+    if let Some(entry) = resume_store().lock().unwrap().get_mut(fp) {
+        entry.policy = Some(auth.policy_fingerprint());
+    }
+}
+pub(super) fn resume_policy_matches(
+    fp: &str,
+    auth: &removent_core::AuthenticationSettings,
+) -> bool {
+    if auth.mode == removent_core::AuthenticationMode::PairingCode
+        && auth.pairing_policy == removent_core::authentication::PairingPolicy::EveryConnection
+    {
+        return false;
+    }
+    resume_store().lock().unwrap().get(fp).is_some_and(|entry| {
+        entry.policy.unwrap_or_else(|| {
+            removent_core::AuthenticationSettings::default().policy_fingerprint()
+        }) == auth.policy_fingerprint()
+    })
+}
+
+pub fn clear_resume_registry() {
+    resume_store().lock().unwrap().clear();
+}

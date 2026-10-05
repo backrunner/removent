@@ -17,6 +17,7 @@ enum Tone {
     Ghost,
     Surface,
     Tab(bool),
+    Sidebar(bool),
     Segment(bool),
     Destructive,
 }
@@ -78,6 +79,10 @@ impl Button {
         self.tone = Tone::Tab(selected);
         self
     }
+    pub fn sidebar(mut self, selected: bool) -> Self {
+        self.tone = Tone::Sidebar(selected);
+        self
+    }
     pub fn segment(mut self, selected: bool) -> Self {
         self.tone = Tone::Segment(selected);
         self
@@ -133,7 +138,7 @@ impl RenderOnce for Button {
                 t.secondary_active,
                 t.foreground,
                 t.border,
-                true,
+                false,
             ),
             Tone::Surface => (
                 t.group_box,
@@ -141,7 +146,7 @@ impl RenderOnce for Button {
                 t.secondary_active,
                 t.foreground,
                 t.border,
-                true,
+                false,
             ),
             Tone::Ghost | Tone::Tab(false) | Tone::Segment(false) => (
                 clear,
@@ -158,6 +163,14 @@ impl RenderOnce for Button {
                 t.foreground,
                 t.border,
                 true,
+            ),
+            Tone::Sidebar(selected) => (
+                if selected { t.sidebar_accent } else { clear },
+                t.list_hover,
+                t.list_active,
+                t.sidebar_foreground,
+                clear,
+                false,
             ),
             Tone::Segment(true) => (
                 t.group_box,

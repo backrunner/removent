@@ -75,9 +75,11 @@ fn switching_carrier_clears_credentials_and_requires_its_trust(cx: &mut TestAppC
         dialog.update(cx, |form, cx| {
             form.choose_relay_transport(RelayTransport::Quic, window, cx);
             assert!(form.password.read(cx).value().is_empty());
-            assert!(form.request(cx).is_err(), "QUIC needs its own relay pin");
-            form.relay_pin
-                .update(cx, |s, cx| s.set_value("bb".repeat(32), window, cx));
+            assert!(
+                form.request(cx).is_ok(),
+                "QUIC can verify certificates without a pin"
+            );
+            form.relay_pin = "bb".repeat(32);
             let request = form.request(cx).unwrap();
             assert_eq!(request.relay.unwrap().transport, RelayTransport::Quic);
             form.password
@@ -454,6 +456,64 @@ fn covered_form_does_not_receive_keys_or_submit_and_restores_focus(cx: &mut Test
             form.set_obscured(false, &fallback, window, cx);
             assert!(form.host.focus_handle(cx).is_focused(window));
             assert_eq!(form.host.read(cx).value().as_str(), "localhost");
+        })
+    });
+}
+
+#[gpui::test]
+fn invitation_code_skips_hidden_port_and_host_pin_but_preserves_relay_trust(
+    cx: &mut TestAppContext,
+) {
+    let (dialog, cx) = setup(cx);
+    cx.update(|window, cx| {
+        dialog.update(cx, |form, cx| {
+            form.choose(ConnectionProtocol::Removent, window, cx);
+            form.host
+                .update(cx, |s, cx| s.set_value("123456-654321", window, cx));
+            form.port
+                .update(cx, |s, cx| s.set_value("invalid", window, cx));
+            let request = form.request(cx).unwrap();
+            assert_eq!(request.address.host, "pair-123456");
+            assert_eq!(request.pairing_code.unwrap().secret(), "654321");
+            form.via_relay = true;
+            form.relay_endpoint.update(cx, |s, cx| {
+                s.set_value("removent://relay.example:443", window, cx)
+            });
+            let request = form.request(cx).unwrap();
+            assert!(request.relay.unwrap().host_fingerprint.is_empty());
+            form.relay_transport = RelayTransport::Quic;
+            assert!(
+                form.request(cx).is_ok(),
+                "QUIC can verify certificates without a pin"
+            );
+        });
+    });
+}
+
+#[gpui::test]
+fn relay_tls_settings_are_optional_and_survive_editing(cx: &mut TestAppContext) {
+    let (dialog, cx) = setup(cx);
+    cx.update(|window, cx| {
+        dialog.update(cx, |form, cx| {
+            form.choose(ConnectionProtocol::Removent, window, cx);
+            form.via_relay = true;
+            form.host
+                .update(cx, |s, cx| s.set_value("office", window, cx));
+            form.relay_endpoint.update(cx, |s, cx| {
+                s.set_value("removent://127.0.0.1:443", window, cx)
+            });
+            let route = form.request(cx).unwrap().relay.unwrap();
+            assert!(route.host_fingerprint.is_empty());
+            assert!(!route.accept_invalid_certificate);
+            form.relay_server_name
+                .update(cx, |s, cx| s.set_value("relay.example", window, cx));
+            form.verify_relay_certificate = false;
+            let request = form.request(cx).unwrap();
+            let saved = SavedConnection::from_request(&request, "office");
+            form.prefill(&saved, None, window, cx);
+            let restored = form.request(cx).unwrap().relay.unwrap();
+            assert_eq!(restored.server_name, "relay.example");
+            assert!(restored.accept_invalid_certificate);
         })
     });
 }

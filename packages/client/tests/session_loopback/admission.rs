@@ -34,6 +34,8 @@ async fn login_window_admission_uses_available_caps_and_never_prompts() {
                 })
                 .unwrap();
             let cfg = HostConfig {
+                authentication: Default::default(),
+                auth_paths: None,
                 audio_available: false,
                 preapproved_only: true,
                 device_name: "LoginHost".into(),
@@ -121,6 +123,7 @@ async fn login_window_admission_uses_available_caps_and_never_prompts() {
                 addr,
                 &client_id,
                 ClientConfig {
+                    pairing_code: None,
                     device_name: "LoginController".into(),
                     caps: Caps {
                         video: video_requested,
@@ -148,6 +151,7 @@ async fn login_window_admission_uses_available_caps_and_never_prompts() {
                     addr,
                     &client_id,
                     ClientConfig {
+                        pairing_code: None,
                         device_name: "LoginController".into(),
                         caps: Caps::all(),
                         local_clip: None,

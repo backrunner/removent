@@ -15,6 +15,7 @@ pub struct Settings {
     pub discovery: DiscoverySettings,
     /// Controlled-side admission mode (FR-06).
     pub admission: AdmissionMode,
+    pub authentication: crate::authentication::AuthenticationSettings,
     /// Service master switch (toggleable from the menu bar).
     pub host_enabled: bool,
     pub host_port: u16,
@@ -108,6 +109,7 @@ impl Default for Settings {
             theme: Theme::System,
             discovery: DiscoverySettings::default(),
             admission: AdmissionMode::AlwaysAsk,
+            authentication: Default::default(),
             host_enabled: true,
             host_port: removent_proto::DEFAULT_PORT,
             window_server_capture: false,
@@ -182,6 +184,9 @@ impl Settings {
     }
 
     pub fn save(&self, paths: &DataPaths) -> Result<()> {
+        self.authentication
+            .validate()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
         paths.ensure_layout()?;
         let file = paths.settings_file();
         let txt = toml::to_string_pretty(self)?;

@@ -50,7 +50,8 @@ pub(super) fn spawn_pairing_initiator(
     identity: &DeviceIdentity,
     fp_self_full: String,
     fp_peer_full: String,
-    pin_rx: PinInput,
+    pin_request: PinRequest,
+    invitation: Option<removent_core::pairing_invitation::PairingCode>,
 ) -> (
     tokio::task::JoinHandle<()>,
     oneshot::Receiver<Result<(), String>>,
@@ -58,7 +59,15 @@ pub(super) fn spawn_pairing_initiator(
     let identity = identity.clone();
     let (tx, rx) = oneshot::channel();
     let handle = tokio::spawn(async move {
-        let result = run_pairing(conn, &identity, &fp_self_full, &fp_peer_full, pin_rx).await;
+        let result = run_pairing(
+            conn,
+            &identity,
+            &fp_self_full,
+            &fp_peer_full,
+            pin_request,
+            invitation,
+        )
+        .await;
         match &result {
             Ok(()) => tracing::info!("pairing completed"),
             Err(e) => tracing::warn!(err=%e, "pairing failed"),
@@ -73,11 +82,21 @@ pub(super) async fn run_pairing(
     identity: &DeviceIdentity,
     fp_self_full: &str,
     fp_peer_full: &str,
-    pin_rx: PinInput,
+    pin_request: PinRequest,
+    invitation: Option<removent_core::pairing_invitation::PairingCode>,
 ) -> Result<(), ConnectError> {
     let (mut psink, mut psource) = conn.open_pairing().await?;
 
     let (begin_msg, nonce_c) = client_begin(fp_self_full);
+    let begin_msg = if let Some(code) = &invitation {
+        PairingMsg::BeginInvitation {
+            nonce_c,
+            fp_c: fp_self_full.into(),
+            locator: code.locator().into(),
+        }
+    } else {
+        begin_msg
+    };
     psink.send(begin_msg).await.map_err(ConnectError::Net)?;
 
     let challenge = tokio::time::timeout(Duration::from_secs(15), psource.next())
@@ -86,31 +105,89 @@ pub(super) async fn run_pairing(
         .transpose()
         .map_err(ConnectError::Net)?
         .ok_or(ConnectError::Timeout("pairing challenge"))?;
-    let PairingMsg::Challenge {
-        ref nonce_h,
-        ref msg_h,
-    } = challenge
-    else {
-        return Err(ConnectError::Pairing("expected Challenge".into()));
+    let (mode, challenges) = match &challenge {
+        PairingMsg::Challenge { .. } => (
+            removent_proto::AuthenticationMode::PairingCode,
+            vec![challenge.clone()],
+        ),
+        PairingMsg::AuthChallenge { mode, challenges }
+            if matches!(
+                mode,
+                removent_proto::AuthenticationMode::Password
+                    | removent_proto::AuthenticationMode::Otp
+            ) && !challenges.is_empty()
+                && challenges.len() <= 3 =>
+        {
+            (
+                *mode,
+                challenges.iter().cloned().map(PairingMsg::from).collect(),
+            )
+        }
+        _ => {
+            return Err(ConnectError::Pairing(
+                "expected authentication challenge".into(),
+            ));
+        }
     };
-
-    // The PIN is valid for 300s (protocol.md §4.3); the input wait is aligned with it.
+    let (pin_tx, pin_rx) = oneshot::channel();
+    if let Some(code) = invitation {
+        if mode != removent_proto::AuthenticationMode::PairingCode {
+            return Err(ConnectError::Pairing(
+                "Host no longer accepts pairing invitations".into(),
+            ));
+        }
+        let _ = pin_tx.send(code.secret().into());
+    } else {
+        pin_request(mode, pin_tx);
+    }
     let pin = tokio::time::timeout(Duration::from_secs(300), pin_rx)
         .await
-        .map_err(|_| ConnectError::Timeout("pin input"))?
-        .map_err(|_| ConnectError::Pairing("pin channel dropped".into()))?;
-
-    let (verify_msg, shared) = client_verify(
-        &nonce_c,
-        &challenge,
-        fp_self_full,
-        fp_peer_full,
-        &pin,
-        identity,
-    )
-    .map_err(ConnectError::Net)?;
-    psink.send(verify_msg).await.map_err(ConnectError::Net)?;
-    let _ = msg_h;
+        .map_err(|_| ConnectError::Timeout("authentication input"))?
+        .map_err(|_| ConnectError::Pairing("authentication cancelled".into()))?;
+    if !mode.valid_input(&pin) {
+        return Err(ConnectError::Pairing("invalid authentication input".into()));
+    }
+    let mut proofs = Vec::new();
+    let mut shared_keys = Vec::new();
+    for challenge in &challenges {
+        let (proof, shared) = client_verify(
+            &nonce_c,
+            challenge,
+            fp_self_full,
+            fp_peer_full,
+            &pin,
+            identity,
+        )?;
+        proofs.push(proof);
+        shared_keys.push(shared);
+    }
+    let verify = if mode == removent_proto::AuthenticationMode::PairingCode {
+        proofs.remove(0)
+    } else {
+        PairingMsg::AuthVerify {
+            proofs: proofs
+                .into_iter()
+                .map(|proof| {
+                    let PairingMsg::Verify {
+                        msg_c,
+                        confirm_c,
+                        vk_c,
+                        sig_c,
+                    } = proof
+                    else {
+                        unreachable!()
+                    };
+                    removent_net::PairingProof {
+                        msg_c,
+                        confirm_c,
+                        vk_c,
+                        sig_c,
+                    }
+                })
+                .collect(),
+        }
+    };
+    psink.send(verify).await.map_err(ConnectError::Net)?;
 
     let confirm = tokio::time::timeout(Duration::from_secs(15), psource.next())
         .await
@@ -120,16 +197,29 @@ pub(super) async fn run_pairing(
         .ok_or(ConnectError::Timeout("pairing confirm"))?;
     let peer_vk = peer_verifying_key(&conn)
         .ok_or_else(|| ConnectError::Pairing("peer certificate key extract failed".into()))?;
-    client_confirm_check(
-        &shared,
-        &nonce_c,
-        nonce_h,
-        fp_self_full,
-        fp_peer_full,
-        &confirm,
-        &peer_vk,
-    )
-    .map_err(ConnectError::Net)?;
+    let valid = challenges
+        .iter()
+        .zip(shared_keys)
+        .any(|(challenge, shared)| {
+            let PairingMsg::Challenge { nonce_h, .. } = challenge else {
+                return false;
+            };
+            client_confirm_check(
+                &shared,
+                &nonce_c,
+                nonce_h,
+                fp_self_full,
+                fp_peer_full,
+                &confirm,
+                &peer_vk,
+            )
+            .is_ok()
+        });
+    if !valid {
+        return Err(ConnectError::Pairing(
+            "authentication failed; check password or code".into(),
+        ));
+    }
     Ok(())
 }
 

@@ -23,6 +23,10 @@ pub struct TunnelConfig {
     pub insecure_loopback: bool,
     #[serde(default)]
     pub server_fingerprint: String,
+    #[serde(default)]
+    pub server_name: String,
+    #[serde(default)]
+    pub accept_invalid_certificate: bool,
     /// Target RVP certificate pin used by desktop/CLI, never sent to the relay.
     #[serde(default)]
     pub host_fingerprint: String,
@@ -56,18 +60,29 @@ impl TunnelConfig {
             !self.insecure_loopback || (self.is_websocket() && endpoint.is_loopback()),
             "Plaintext test transport requires loopback"
         );
+        removent_core::removent_uri::normalize_server_name(&self.server_name)
+            .map_err(anyhow::Error::msg)?;
         if self.is_websocket() {
             ensure!(
                 self.server_fingerprint.is_empty(),
                 "WebSocket uses WebPKI; omit the QUIC server fingerprint"
             );
-        } else {
+        } else if !self.server_fingerprint.is_empty() {
             decode_secret(&self.server_fingerprint)?;
         }
         Ok(())
     }
     pub fn endpoint(&self) -> Result<RemoventEndpoint> {
         RemoventEndpoint::parse(&self.server).map_err(anyhow::Error::msg)
+    }
+    pub fn tls_server_name(&self) -> Result<String> {
+        let name = removent_core::removent_uri::normalize_server_name(&self.server_name)
+            .map_err(anyhow::Error::msg)?;
+        Ok(if name.is_empty() {
+            self.endpoint()?.host
+        } else {
+            name
+        })
     }
     pub fn websocket_url(&self) -> Result<String> {
         self.validate()?;
@@ -180,7 +195,9 @@ impl ServerConfig {
         let mut names = HashSet::new();
         for room in &self.rooms {
             ensure!(
-                valid_room(&room.name) && names.insert(&room.name),
+                valid_room(&room.name)
+                    && !room.name.starts_with("pair-")
+                    && names.insert(&room.name),
                 "Invalid or duplicate room"
             );
             crate::auth::Policy::new(&room.host_token_sha256, &room.host_public_keys)?;

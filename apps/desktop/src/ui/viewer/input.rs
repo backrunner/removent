@@ -22,7 +22,10 @@ impl ViewerView {
         let vp = window.viewport_size();
         let title = f32::from(TITLE_BAR_HEIGHT);
         let content_w = f32::from(vp.width);
-        let content_h = f32::from(vp.height) - title;
+        // BUG FIX: viewport_size() actually returns the content area size (not including titlebar),
+        // even though the toolbar.rs code suggests otherwise. The original code was double-subtracting
+        // the titlebar height, causing incorrect mouse coordinates.
+        let content_h = f32::from(vp.height);
         if content_w <= 0. || content_h <= 0. {
             return None;
         }

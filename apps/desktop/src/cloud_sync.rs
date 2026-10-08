@@ -46,6 +46,8 @@ pub fn start(engine: &Engine) {
     engine.rt.spawn(async move {
         let mut previous: Option<(Value, Vec<removent_client::saved::SavedConnection>)> = None;
         let mut last_launch = std::time::Instant::now() - Duration::from_secs(60);
+        // The first iteration runs immediately, publishes persisted state and
+        // starts an enabled helper. Later iterations also recover a lost owner.
         loop {
             let paths = paths.clone();
             let result =
@@ -105,5 +107,50 @@ impl Engine {
             .map_err(|e| e.to_string())?;
         }
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_publishes_persisted_state_and_respects_existing_owner() {
+        for (enabled, owned, expected_code) in [
+            (false, false, "off"),
+            (true, false, "configuration"),
+            (true, true, "waiting"),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let paths = DataPaths {
+                root: directory.path().into(),
+            };
+            dispatch(&paths, Command::Enable { enabled }).unwrap();
+            let _owner = owned.then(|| {
+                removent_core::DataDirLock::acquire_at(&paths.root.join(".cloud-sync-owner.lock"))
+                    .unwrap()
+            });
+            let (commands, _rx) = tokio::sync::mpsc::channel(1);
+            let engine = Engine::for_viewer_test(paths, commands);
+            let events = engine.events_rx.lock().unwrap().take().unwrap();
+            start(&engine);
+            let event = engine.rt.block_on(async {
+                tokio::time::timeout(Duration::from_secs(1), async {
+                    loop {
+                        if let Ok(event) = events.try_recv() {
+                            break event;
+                        }
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                })
+                .await
+                .expect("startup publishes without waiting for the polling interval")
+            });
+            let UiEvent::CloudSync { status, .. } = event else {
+                panic!("expected sync status")
+            };
+            assert_eq!(status["enabled"], enabled);
+            assert_eq!(status["code"], expected_code);
+        }
     }
 }

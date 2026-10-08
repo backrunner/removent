@@ -1,6 +1,24 @@
 use super::*;
 
 impl Engine {
+    pub fn refresh_host_status(&self) {
+        if let Some(tx) = self.daemon_req.lock().unwrap().as_ref() {
+            let _ = tx.send(IpcRequest::Status);
+        }
+    }
+
+    pub fn request_host_permission(&self, permission: removent_core::ipc::HostPermission) {
+        let sent = self.daemon_req.lock().unwrap().as_ref().is_some_and(|tx| {
+            tx.send(IpcRequest::RequestPermission { permission })
+                .is_ok()
+        });
+        if !sent {
+            let _ = self
+                .events_tx
+                .send(UiEvent::Notice(t!("status.daemon_offline").to_string()));
+        }
+    }
+
     pub fn generate_pairing_code(&self) {
         if let Some(tx) = self.daemon_req.lock().unwrap().as_ref() {
             let _ = tx.send(IpcRequest::PairingGenerate);

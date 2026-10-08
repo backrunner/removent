@@ -162,21 +162,17 @@ fn handle_request(state: &Arc<DaemonState>, req: IpcRequest) -> IpcResponse {
                 },
             }
         }
-        IpcRequest::RequestPermissions => {
-            // Login startup never prompts. An explicit setup action runs in
-            // the actual launchd process, keeping TCC attribution consistent.
-            tokio::task::spawn_blocking(|| {
-                if !crate::tcc::screen_recording_granted() {
-                    crate::tcc::request_screen_recording();
-                }
-                if !crate::tcc::accessibility_granted() {
-                    crate::tcc::request_accessibility();
-                }
-            });
-            IpcResponse::Ok
+        IpcRequest::RequestPermissions => crate::tcc::request_interactive_permissions(state, None),
+        IpcRequest::RequestPermission { permission } => {
+            crate::tcc::request_interactive_permissions(state, Some(permission))
         }
         IpcRequest::SetEnabled { on } => match state.set_enabled(on) {
-            Ok(()) => IpcResponse::Ok,
+            Ok(()) => {
+                if on {
+                    crate::tcc::request_initial_permissions(state);
+                }
+                IpcResponse::Ok
+            }
             Err(e) => IpcResponse::Error {
                 message: e.to_string(),
             },

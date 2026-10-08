@@ -16,7 +16,7 @@
 "menu.pairing_pin" = "配对 PIN：%@";
 "menu.enable_service" = "启用服务";
 "menu.disable_service" = "停用服务";
-"menu.launch_at_login" = "登录时启动服务器";
+"menu.launch_at_login" = "登录时启动后台服务";
 "menu.open_data_directory" = "打开数据目录";
 "menu.quit" = "退出菜单栏";
 
@@ -50,3 +50,23 @@
 "menu.relay_online" = "Relay 已连接";
 "menu.relay_offline" = "Relay 未连接";
 "menu.loginwindow_managed" = "登录窗口访问由管理员独立管理";
+"panel.permissions_needed" = "待授权";
+"panel.share_mac" = "共享此 Mac";
+"panel.share_detail" = "允许你批准的设备查看和控制本机。";
+"panel.permissions" = "屏幕共享权限";
+"panel.screen_recording" = "屏幕录制";
+"panel.accessibility" = "辅助功能";
+"panel.allowed" = "已授权";
+"panel.unavailable" = "服务未连接";
+"panel.request" = "申请";
+"panel.system_settings" = "打开系统设置…";
+"panel.permission_detail" = "请在系统设置允许 Removent 和 RemoventHost（屏幕共享服务）。若系统要求重新启动，可在选项中重启服务。";
+"panel.connections" = "已连接设备";
+"panel.disconnect" = "断开";
+"panel.pairing_code" = "配对码";
+"panel.options" = "选项";
+"menu.section.service" = "后台服务";
+"menu.section.login" = "登录时";
+"menu.section.app" = "应用";
+"options.start_service" = "自动启动后台服务";
+"options.show_tray" = "显示菜单栏图标";

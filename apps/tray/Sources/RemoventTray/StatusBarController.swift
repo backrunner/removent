@@ -1,25 +1,33 @@
 import AppKit
 import Foundation
+import SwiftUI
 
 /// Menu bar controller: owns the NSStatusItem, rebuilds the menu, and handles
 /// daemon events and user actions.
-final class StatusBarController: NSObject, NSMenuDelegate {
+final class StatusBarController: NSObject, NSMenuDelegate, NSPopoverDelegate, ObservableObject {
     // Internal state is shared by responsibility-specific extensions in this target.
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     let menu = NSMenu()
     let client = DaemonClient()
+    let popover = NSPopover()
+    var popoverScreen: NSScreen?
+    var popoverObservers: [NSObjectProtocol] = []
+    var confiningPopover = false
+    var lastPopoverGeometry: Data?
+    @Published var panelWidth: CGFloat = 360
+    @Published var panelMaximumHeight: CGFloat = 600
 
-    var connected = false
-    var status: StatusResponse?
-    var pendingPin: String?
+    @Published var connected = false
+    @Published var status: StatusResponse?
+    @Published var pendingPin: String?
     var pollTimer: Timer?
-    var serviceBusy = false
+    @Published var serviceBusy = false
     var serviceQueryBusy = false
     var serviceGeneration = 0
-    var loginEnabled = false
+    @Published var loginEnabled = false
     var enableOnConnect = false
-    var stoppedByUser = false
-    var recoveryError: String?
+    @Published var stoppedByUser = false
+    @Published var recoveryError: String?
     var nextRecovery = Date.distantPast
     var recoveryDelay: TimeInterval = 2
 
@@ -44,8 +52,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     override init() {
         super.init()
         menu.delegate = self
-        // Assign the menu once, then rebuild its contents in place to avoid flicker.
-        statusItem.menu = menu
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(togglePopover)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        popover.behavior = .transient
+        configurePopover()
 
         client.onMessage = { [weak self] message in self?.handle(message) }
         client.onConnectionChange = { [weak self] isConnected in
@@ -88,6 +99,44 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     // MARK: - Icon
+    @objc func togglePopover() {
+        guard let button = statusItem.button else { return }
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            popover.performClose(nil)
+            rebuildMenu()
+            statusItem.menu = menu
+            button.performClick(nil)
+            statusItem.menu = nil
+        } else if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            showPanel()
+        }
+    }
 
+    func showPanel() {
+        guard let button = statusItem.button, button.window != nil else { return }
+        refreshServiceStatus()
+        client.requestStatus()
+        updatePopoverLimits()
+        if !popover.isShown {
+            popover.show(relativeTo: button.bounds, of: button,
+                         preferredEdge: button.isFlipped ? .maxY : .minY)
+        }
+        confinePopover()
+        popover.contentViewController?.view.window?.makeKey()
+    }
+
+    func introducePermissionsIfNeeded(_ status: StatusResponse) {
+        guard !suppressAlerts, status.running,
+              !status.screen_recording_granted || !status.accessibility_granted else { return }
+        let marker = DaemonClient.dataDirectory().appendingPathComponent("permissions/tray-introduced")
+        guard !FileManager.default.fileExists(atPath: marker.path) else { return }
+        do {
+            try FileManager.default.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data().write(to: marker, options: .atomic)
+            showPanel()
+        } catch { trayLog("could not record permission introduction: \(error.localizedDescription)") }
+    }
 
 }

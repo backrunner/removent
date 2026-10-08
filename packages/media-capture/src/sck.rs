@@ -34,6 +34,15 @@ pub enum CaptureError {
     DisplayNotFound(u32),
 }
 
+/// Enter ScreenCaptureKit's native consent flow without creating a stream or
+/// retaining screen/window metadata. Recent macOS versions can suppress the
+/// legacy CoreGraphics prompt while still requiring this framework request.
+pub fn request_screen_capture_access() -> Result<(), CaptureError> {
+    SCShareableContent::get()
+        .map(|_| ())
+        .map_err(|error| CaptureError::Sc(error.to_string()))
+}
+
 impl From<CFError> for CaptureError {
     fn from(e: CFError) -> Self {
         CaptureError::Sc(e.to_string())

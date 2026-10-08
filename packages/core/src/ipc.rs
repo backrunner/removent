@@ -11,6 +11,13 @@ use tokio::net::UnixStream;
 /// Protocol version (bump on incompatible changes).
 pub const IPC_VERSION: u32 = 1;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostPermission {
+    ScreenRecording,
+    Accessibility,
+}
+
 /// Management client → daemon requests.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -26,6 +33,9 @@ pub enum IpcRequest {
     },
     /// Explicit interactive setup, requested in the daemon's own TCC identity.
     RequestPermissions,
+    RequestPermission {
+        permission: HostPermission,
+    },
     /// Reload settings from disk (sent after the app settings page saves; takes effect on the runner's next restart).
     ReloadSettings,
     /// Admission decision reply (corresponds to the AdmissionRequest event).
@@ -342,4 +352,28 @@ mod tests {
         drop(ar);
         writer.await.unwrap();
     }
+}
+#[test]
+fn permission_requests_remain_compatible_and_can_target_one_grant() {
+    assert!(matches!(
+        serde_json::from_str::<IpcRequest>(r#"{"type":"request_permissions"}"#).unwrap(),
+        IpcRequest::RequestPermissions
+    ));
+    for permission in [
+        HostPermission::ScreenRecording,
+        HostPermission::Accessibility,
+    ] {
+        let request = IpcRequest::RequestPermission { permission };
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(matches!(
+            serde_json::from_str::<IpcRequest>(&json).unwrap(),
+            IpcRequest::RequestPermission { .. }
+        ));
+    }
+    assert!(
+        serde_json::from_str::<IpcRequest>(
+            r#"{"type":"request_permission","permission":"camera"}"#
+        )
+        .is_err()
+    );
 }

@@ -7,6 +7,11 @@ func trayLog(_ message: String) {
 
 // MARK: - Protocol models
 
+enum HostPermission: String, CaseIterable {
+    case screenRecording = "screen_recording"
+    case accessibility
+}
+
 struct Session: Codable, Equatable {
     let id: Int
     let peer_name: String
@@ -95,6 +100,9 @@ final class DaemonClient {
     func requestStatus() { send(["type": "status"]) }
     func setEnabled(_ on: Bool) { send(["type": "set_enabled", "on": on]) }
     func requestPermissions() { send(["type": "request_permissions"]) }
+    func requestPermission(_ permission: HostPermission) {
+        send(["type": "request_permission", "permission": permission.rawValue])
+    }
     func admissionReply(requestId: Int, allow: Bool) {
         send(["type": "admission_reply", "request_id": requestId, "allow": allow])
     }

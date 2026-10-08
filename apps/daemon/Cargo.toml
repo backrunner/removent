@@ -16,6 +16,7 @@ path = "src/lib.rs"
 removent-core = { workspace = true }
 removent-host = { workspace = true }
 removent-input = { workspace = true }
+removent-media-capture = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 anyhow = { workspace = true }

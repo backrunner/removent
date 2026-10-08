@@ -43,11 +43,20 @@ def main():
         (data / 'settings.toml').write_text('host_enabled = false\n')
         bundle = root / 'Removent.app'
         macos = bundle / 'Contents/MacOS'
-        macos.mkdir(parents=True)
-        for name in ('removent-cli', 'removentd'):
-            shutil.copy2(binaries / name, macos / name)
+        source_bundle = binaries.parent.parent
+        packaged = binaries.name == 'MacOS' and (source_bundle / 'Contents/Info.plist').is_file()
+        if packaged:
+            # A signed host binary must retain its nested .app and Info.plist.
+            # Flattening the removentd symlink into a loose executable makes
+            # launchd reject it and no longer tests the installable artifact.
+            shutil.copytree(source_bundle, bundle, symlinks=True)
+        else:
+            macos.mkdir(parents=True)
+            for name in ('removent-cli', 'removentd'):
+                shutil.copy2(binaries / name, macos / name)
         tray = bundle / 'Contents/Helpers/RemoventTray.app'
-        shutil.copytree(args.tray, tray)
+        if not packaged:
+            shutil.copytree(args.tray, tray)
         tray_bin = tray / 'Contents/MacOS/RemoventTray'
         env = dict(os.environ, REMOVENT_DATA_DIR=str(data), REMOVENT_TRAY_NO_ALERTS='1')
         env.pop('REMOVENT_DEV_SUPERVISED', None)
@@ -139,13 +148,14 @@ def main():
             # The desktop must launch the embedded tray with the same data root.
             # Test from a relocated .app so source-tree fallbacks cannot help.
             assert cli('stop')['stopped_by_user']
-            shutil.copy2(binaries / 'removent', macos / 'removent')
-            import plistlib
-            (bundle / 'Contents/Info.plist').write_bytes(plistlib.dumps({
-                'CFBundleExecutable': 'removent', 'CFBundleName': 'Removent Test',
-                'CFBundleIdentifier': 'com.alkinum.removent.lifecycle-test',
-                'CFBundlePackageType': 'APPL', 'NSHighResolutionCapable': True,
-            }))
+            if not packaged:
+                shutil.copy2(binaries / 'removent', macos / 'removent')
+                import plistlib
+                (bundle / 'Contents/Info.plist').write_bytes(plistlib.dumps({
+                    'CFBundleExecutable': 'removent', 'CFBundleName': 'Removent Test',
+                    'CFBundleIdentifier': 'com.alkinum.removent.lifecycle-test',
+                    'CFBundlePackageType': 'APPL', 'NSHighResolutionCapable': True,
+                }))
             app_env = dict(env, REMOVENT_NO_UPDATE_CHECK='1')
             app_env.pop('REMOVENT_NO_TRAY', None)
             app = subprocess.Popen([macos / 'removent'], env=app_env, stdout=log, stderr=log)

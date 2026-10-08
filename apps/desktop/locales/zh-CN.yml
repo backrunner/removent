@@ -79,7 +79,7 @@ permissions.accessibility: 辅助功能
 permissions.screen_capture_purpose: 采集本机画面共享给对端
 permissions.accessibility_purpose: 接收对端键鼠控制
 permissions.open_settings: 打开系统设置
-permissions.daemon_restart_hint: 守护进程（removentd）尚未获得该权限——请关闭再开启主机服务以重启它
+permissions.daemon_setup_hint: 请在系统设置允许 Removent 和 RemoventHost（屏幕共享服务）。若系统要求重新启动，请在托盘选项中重启后台服务。
 
 settings.title: 设置
 settings.back_to_devices: 返回设备
@@ -378,3 +378,4 @@ trust.description: "这是首次连接，请确认这是您要连接的目标。
 trust.waiting: "请确认首次连接"
 
 trust.connect: "信任并连接"
+permissions.request: 申请权限

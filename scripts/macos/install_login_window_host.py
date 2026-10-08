@@ -42,6 +42,16 @@ def trusted_snapshot(data):
     return json.dumps(peers, indent=2).encode()
 
 
+def validate_host_link(bundle, item):
+    """Only the signed, in-bundle compatibility entry point may be a symlink."""
+    relative = '../Helpers/RemoventHost.app/Contents/MacOS/removentd'
+    target = bundle / 'Contents/Helpers/RemoventHost.app/Contents/MacOS/removentd'
+    if (item != bundle / 'Contents/MacOS/removentd' or os.readlink(item) != relative
+            or target.is_symlink() or not target.is_file()
+            or item.resolve() != bundle.resolve() / target.relative_to(bundle)):
+        raise ValueError('System host bundle contains an unsupported symlink')
+
+
 def safe_parents(path):
     library = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
     library.acl_get_file.argtypes = [ctypes.c_char_p, ctypes.c_int]
@@ -129,7 +139,9 @@ def main():
         for base, dirs, names in os.walk(bundle):
             for item in [Path(base), *(Path(base) / n for n in names)]:
                 if item.is_symlink():
-                    raise ValueError('System host bundle must not contain symlinks')
+                    validate_host_link(bundle, item)
+                    os.lchown(item, 0, 0)
+                    continue
                 st = item.stat()
                 os.chown(item, 0, 0)
                 os.chmod(item, st.st_mode & ~0o022)

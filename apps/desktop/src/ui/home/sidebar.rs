@@ -69,8 +69,8 @@ impl HomeView {
             .gap_3()
             .px(px(SIDEBAR_ROW_INSET - 1.))
             .py_2()
-            .rounded(px(12.))
-            .cursor_default()
+            .rounded(px(8.))
+            .cursor_pointer()
             // Single-click selects; double-click connects directly.
             .on_click(cx.listener(move |this, ev: &gpui::ClickEvent, window, cx| {
                 if ev.click_count() >= 2 {
@@ -97,15 +97,26 @@ impl HomeView {
             });
         if selected {
             el = el
-                .bg(colors.accent.opacity(0.12))
-                .border_color(colors.accent.opacity(0.25))
-                .shadow_sm()
-                .hover(|s| s.bg(colors.accent.opacity(0.20)))
-                .active(|s| s.bg(colors.accent.opacity(0.28)));
+                .bg(colors.accent.opacity(0.15))
+                .border_color(colors.accent.opacity(0.3))
+                .hover(|s| {
+                    s.bg(colors.accent.opacity(0.22))
+                        .border_color(colors.accent.opacity(0.35))
+                })
+                .active(|s| {
+                    s.bg(colors.accent.opacity(0.28))
+                        .border_color(colors.accent.opacity(0.4))
+                });
         } else {
             el = el
-                .hover(|s| s.bg(colors.list_hover))
-                .active(|s| s.bg(colors.list_active));
+                .hover(|s| {
+                    s.bg(colors.list_hover)
+                        .border_color(colors.border.opacity(0.5))
+                })
+                .active(|s| {
+                    s.bg(colors.list_active)
+                        .border_color(colors.border.opacity(0.8))
+                });
         }
         el
     }
@@ -136,7 +147,7 @@ impl HomeView {
             .px(px(SIDEBAR_ROW_INSET - 1.))
             .py_2()
             .rounded(px(12.))
-            .cursor_default()
+            .cursor_pointer()
             // Same interaction as discovered devices: click selects, double-click connects.
             .on_click(cx.listener(move |this, ev: &gpui::ClickEvent, window, cx| {
                 if ev.click_count() >= 2 {
@@ -156,15 +167,26 @@ impl HomeView {
             ));
         if selected {
             el = el
-                .bg(colors.accent.opacity(0.12))
-                .border_color(colors.accent.opacity(0.25))
-                .shadow_sm()
-                .hover(|s| s.bg(colors.accent.opacity(0.20)))
-                .active(|s| s.bg(colors.accent.opacity(0.28)));
+                .bg(colors.accent.opacity(0.15))
+                .border_color(colors.accent.opacity(0.3))
+                .hover(|s| {
+                    s.bg(colors.accent.opacity(0.22))
+                        .border_color(colors.accent.opacity(0.35))
+                })
+                .active(|s| {
+                    s.bg(colors.accent.opacity(0.28))
+                        .border_color(colors.accent.opacity(0.4))
+                });
         } else {
             el = el
-                .hover(|s| s.bg(colors.list_hover))
-                .active(|s| s.bg(colors.list_active));
+                .hover(|s| {
+                    s.bg(colors.list_hover)
+                        .border_color(colors.border.opacity(0.5))
+                })
+                .active(|s| {
+                    s.bg(colors.list_active)
+                        .border_color(colors.border.opacity(0.8))
+                });
         }
         el
     }
@@ -354,10 +376,27 @@ impl HomeView {
                             .py_2()
                             .rounded(px(8.))
                             .when(self.selected.is_none() && !self.settings_open, |el| {
-                                el.bg(colors.sidebar_accent.opacity(0.45))
+                                el.bg(colors.accent.opacity(0.15))
+                                    .border_color(colors.accent.opacity(0.3))
                             })
-                            .hover(|el| el.bg(colors.list_hover))
-                            .active(|el| el.bg(colors.list_active))
+                            .hover(|el| {
+                                if self.selected.is_none() && !self.settings_open {
+                                    el.bg(colors.accent.opacity(0.22))
+                                        .border_color(colors.accent.opacity(0.35))
+                                } else {
+                                    el.bg(colors.list_hover)
+                                        .border_color(colors.border.opacity(0.5))
+                                }
+                            })
+                            .active(|el| {
+                                if self.selected.is_none() && !self.settings_open {
+                                    el.bg(colors.accent.opacity(0.28))
+                                        .border_color(colors.accent.opacity(0.4))
+                                } else {
+                                    el.bg(colors.list_active)
+                                        .border_color(colors.border.opacity(0.8))
+                                }
+                            })
                             .cursor_pointer()
                             .on_click(cx.listener(|this, _, _w, cx| {
                                 this.selected = None;

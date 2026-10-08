@@ -79,7 +79,7 @@ check() {
 check "connected to daemon" "connected to UDS socket"
 check "status: running, port 7999" "status response fields parsed correctly"
 check "sessions 1" "session list parsed correctly"
-check "pairing PIN received: 482913" "pairing_pin event handled"
+check "pairing PIN received" "pairing_pin event handled without logging secrets"
 check "admission request received: 客厅 iPad" "admission_request event handled"
 check "admission request #42 resolved: denied" "admission_resolved event handled"
 

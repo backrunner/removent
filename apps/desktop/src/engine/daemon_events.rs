@@ -37,9 +37,7 @@ pub(super) fn handle_daemon_message(
                         });
                     }
                     IpcEvent::SessionEnded { reason, .. } => {
-                        let _ = sessions.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
-                            Some(n.saturating_sub(1))
-                        });
+                        decrement_session_count(sessions);
                         let _ = events.send(UiEvent::HostSessionEnded(reason));
                     }
                     IpcEvent::AdmissionRequest {
@@ -67,6 +65,22 @@ pub(super) fn handle_daemon_message(
                     }
                 }
             }
+        }
+    }
+}
+
+fn decrement_session_count(sessions: &AtomicUsize) {
+    // Keep the saturating update atomic without requiring Rust 1.95's try_update.
+    let mut count = sessions.load(Ordering::SeqCst);
+    loop {
+        match sessions.compare_exchange_weak(
+            count,
+            count.saturating_sub(1),
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) => return,
+            Err(current) => count = current,
         }
     }
 }
@@ -101,3 +115,6 @@ pub(super) fn apply_status(
         });
     }
 }
+
+#[cfg(test)]
+mod tests;

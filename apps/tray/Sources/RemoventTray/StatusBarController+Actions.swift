@@ -21,6 +21,7 @@ extension StatusBarController {
     }
 
     @objc func openMainApp() {
+        popover.performClose(nil)
         if let path = ProcessInfo.processInfo.environment["REMOVENT_DEV_APP"] {
             if let app = NSWorkspace.shared.runningApplications.first(where: { $0.executableURL?.path == path }) {
                 app.activate(options: [.activateAllWindows])
@@ -49,6 +50,7 @@ extension StatusBarController {
                            informativeText: String(localized: "alert.main_app_not_found_detail", bundle: .trayResources, comment: "Error alert body: main app not installed"))
             return
         }
+        trayLog("opening desktop bundle: \(url.path)")
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.environment = [
             "REMOVENT_DATA_DIR": DaemonClient.dataDirectory().path,
@@ -77,6 +79,18 @@ extension StatusBarController {
         trayLog("quitting menu bar app (daemon unaffected)")
         client.stop()
         NSApp.terminate(nil)
+    }
+
+    func requestPermission(_ permission: HostPermission) {
+        guard connected else { return }
+        client.requestPermission(permission)
+    }
+
+    func openPermissionSettings(_ permission: HostPermission) {
+        let pane = permission == .screenRecording ? "Privacy_ScreenCapture" : "Privacy_Accessibility"
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     // MARK: - Background service (shared with the app and CLI)

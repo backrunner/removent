@@ -10,6 +10,7 @@ let package = Package(
             name: "RemoventTray",
             path: "Sources/RemoventTray",
             resources: [.process("Resources")]
-        )
+        ),
+        .testTarget(name: "RemoventTrayTests", dependencies: ["RemoventTray"], path: "Tests/Unit")
     ]
 )

@@ -11,6 +11,27 @@ spec.loader.exec_module(installer)
 
 
 class InstallerTests(unittest.TestCase):
+    def test_only_exact_internal_host_link_is_allowed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / 'Removent.app'
+            link = bundle / 'Contents/MacOS/removentd'
+            target = bundle / 'Contents/Helpers/RemoventHost.app/Contents/MacOS/removentd'
+            link.parent.mkdir(parents=True)
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b'host')
+            link.symlink_to('../Helpers/RemoventHost.app/Contents/MacOS/removentd')
+            installer.validate_host_link(bundle, link)
+            link.unlink()
+            link.symlink_to('/tmp/external-host')
+            with self.assertRaises(ValueError):
+                installer.validate_host_link(bundle, link)
+            link.unlink()
+            link.symlink_to('../Helpers/RemoventHost.app/Contents/MacOS/removentd')
+            target.unlink()
+            target.symlink_to('/tmp/external-host')
+            with self.assertRaises(ValueError):
+                installer.validate_host_link(bundle, link)
+
     def test_publish_is_complete_and_collision_rolls_back_only_new_bundle(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)

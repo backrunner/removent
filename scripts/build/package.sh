@@ -11,13 +11,23 @@ umask 022
 cd "$(dirname "$0")/../.."
 
 source scripts/build/macos_env.sh
+SOURCE_SNAPSHOT=$(python3 scripts/build/build_stamp.py snapshot)
 VERSION=$(python3 scripts/release/release_meta.py version)
 BASE_VERSION=$(python3 scripts/release/release_meta.py base)
 BUILD_VERSION=$(python3 scripts/release/release_meta.py build)
 APP_NAME="Removent"
-BUNDLE="dist/${APP_NAME}.app"
+mkdir -p dist
+BUILD_ROOT=$(mktemp -d "$PWD/dist/.removent-package.XXXXXX")
+trap 'rm -rf "$BUILD_ROOT"' EXIT
+BUNDLE="$BUILD_ROOT/${APP_NAME}.app"
 ZIP="dist/${APP_NAME}-${VERSION}-macos-arm64.zip"
 IDENTITY="${APPLE_SIGNING_IDENTITY:-}"
+LOCAL_IDENTITY="${REMOVENT_LOCAL_SIGNING_IDENTITY:-}"
+LOCAL_HOST_IDENTITY="${REMOVENT_LOCAL_HOST_SIGNING_IDENTITY:-$LOCAL_IDENTITY}"
+if [ -n "$LOCAL_HOST_IDENTITY" ] && [ -z "$LOCAL_IDENTITY" ] && [ -z "$IDENTITY" ]; then
+    echo 'REMOVENT_LOCAL_HOST_SIGNING_IDENTITY requires REMOVENT_LOCAL_SIGNING_IDENTITY' >&2
+    exit 1
+fi
 CLOUD_ENVIRONMENT="${REMOVENT_CLOUDKIT_ENVIRONMENT:-Production}"
 case "$CLOUD_ENVIRONMENT" in
     Development|Production) ;;
@@ -30,13 +40,13 @@ fi
 
 echo "==> build release"
 cargo build --locked --release -p removent-app -p removent-daemon -p removent-cli
+TARGET_DIR=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
 
 echo "==> build tray"
 "$(dirname "$0")/build_tray.sh"
 bash "$(dirname "$0")/build_cloud_sync.sh"
 
 echo "==> bundle ${BUNDLE}"
-rm -rf "$BUNDLE" "$ZIP"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources/zh-Hans.lproj"
 cat > "$BUNDLE/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -84,18 +94,19 @@ cat > "$BUNDLE/Contents/Resources/zh-Hans.lproj/InfoPlist.strings" <<'STRINGS'
 "NSLocalNetworkUsageDescription" = "Removent 需要访问本地网络以发现远程桌面服务，并连接您选择的设备。";
 STRINGS
 
-cp target/release/removent "$BUNDLE/Contents/MacOS/removent"
+cp "$TARGET_DIR/release/removent" "$BUNDLE/Contents/MacOS/removent"
 xcrun swiftc -O -target arm64-apple-macosx26.0 apps/installer/main.swift \
     -o "$BUNDLE/Contents/MacOS/removent-launcher"
 cp assets/branding/AppIcon.icns "$BUNDLE/Contents/Resources/AppIcon.icns"
-# The daemon ships inside the bundle: the app locates removentd next to its own executable.
-cp target/release/removentd "$BUNDLE/Contents/MacOS/removentd"
-cp target/release/removent-cli "$BUNDLE/Contents/MacOS/removent-cli"
+# TCC needs a stable app identity for the actual process performing capture.
+python3 scripts/build/package_host.py "$BUNDLE" "$TARGET_DIR/release/removentd" "$BASE_VERSION" "$BUILD_VERSION"
+cp "$TARGET_DIR/release/removent-cli" "$BUNDLE/Contents/MacOS/removent-cli"
 
 # Embed the tray: the main app auto-launches it on startup (main.rs autostart_tray looks in Contents/Helpers).
 mkdir -p "$BUNDLE/Contents/Helpers"
 cp -R "dist/RemoventTray.app" "$BUNDLE/Contents/Helpers/"
 cp -R "dist/RemoventSync.app" "$BUNDLE/Contents/Helpers/"
+python3 scripts/build/build_stamp.py write --app "$BUNDLE" --expected "$SOURCE_SNAPSHOT"
 
 if [ -n "$IDENTITY" ]; then
     echo "==> Signing: $IDENTITY ($CLOUD_ENVIRONMENT CloudKit)"
@@ -110,19 +121,33 @@ if [ -n "$IDENTITY" ]; then
     codesign --force --options runtime --timestamp --sign "$IDENTITY" \
         "$BUNDLE/Contents/Helpers/RemoventTray.app"
     codesign --force --options runtime --timestamp --sign "$IDENTITY" \
-        "$BUNDLE/Contents/MacOS/removentd"
+        "$BUNDLE/Contents/Helpers/RemoventHost.app"
     codesign --force --options runtime --timestamp --sign "$IDENTITY" \
-        "$BUNDLE/Contents/MacOS/removent-cli"
+        --identifier com.alkinum.removent.cli "$BUNDLE/Contents/MacOS/removent-cli"
     codesign --force --options runtime --timestamp --sign "$IDENTITY" \
-        "$BUNDLE/Contents/MacOS/removent"
+        --identifier com.alkinum.removent.desktop "$BUNDLE/Contents/MacOS/removent"
     codesign --force --options runtime --timestamp --sign "$IDENTITY" "$BUNDLE"
     echo "==> verify signature"
+    codesign --verify --deep --strict --verbose=2 "$BUNDLE"
+elif [ -n "$LOCAL_IDENTITY" ]; then
+    echo "==> Local signing with a stable identity: $LOCAL_IDENTITY"
+    for helper in RemoventSync RemoventTray; do
+        codesign --force --timestamp=none --sign "$LOCAL_IDENTITY" "$BUNDLE/Contents/Helpers/$helper.app"
+    done
+    codesign --force --timestamp=none --sign "$LOCAL_HOST_IDENTITY" "$BUNDLE/Contents/Helpers/RemoventHost.app"
+    codesign --force --timestamp=none --sign "$LOCAL_IDENTITY" --identifier com.alkinum.removent.cli "$BUNDLE/Contents/MacOS/removent-cli"
+    codesign --force --timestamp=none --sign "$LOCAL_IDENTITY" --identifier com.alkinum.removent.desktop "$BUNDLE/Contents/MacOS/removent"
+    codesign --force --timestamp=none --sign "$LOCAL_IDENTITY" "$BUNDLE"
     codesign --verify --deep --strict --verbose=2 "$BUNDLE"
 else
     echo "==> WARNING: APPLE_SIGNING_IDENTITY not set; ad-hoc signing (local testing only)"
     codesign --force --deep -s - "$BUNDLE"
 fi
 
+# Publish only the fully built and signed bundle. A failed build must leave
+# the previously runnable dist app intact.
+rm -rf "dist/${APP_NAME}.app"
+mv "$BUNDLE" "dist/${APP_NAME}.app"
 echo "==> zip"
 cd dist
 ditto -c -k --keepParent "${APP_NAME}.app" "$(basename "$ZIP")"

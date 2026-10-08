@@ -3,14 +3,8 @@ import Foundation
 
 extension StatusBarController {
     func updateIcon() {
-        let hasSessions = connected && !(status?.sessions.isEmpty ?? true)
-        let symbol = hasSessions ? "display.trianglebadge.exclamationmark" : "display"
-        if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Removent") {
-            image.isTemplate = true
-            statusItem.button?.image = image
-        } else {
-            statusItem.button?.title = "Removent"
-        }
+        statusItem.button?.image = BrandIcon.menuBar
+        statusItem.button?.toolTip = "Removent"
     }
 
     // MARK: - Event handling
@@ -122,6 +116,7 @@ extension StatusBarController {
         }
 
         // 4. Enable/disable service
+        menu.addItem(.sectionHeader(title: trayText("menu.section.service")))
         let toggleTitle = (status?.running == true)
             ? String(localized: "menu.disable_service", bundle: .trayResources, comment: "Menu item: disable service")
             : String(localized: "menu.enable_service", bundle: .trayResources, comment: "Menu item: enable service")
@@ -130,14 +125,6 @@ extension StatusBarController {
         toggleItem.isEnabled = !serviceBusy
         toggleItem.image = symbolImage("power")
         menu.addItem(toggleItem)
-
-        // 5. Launch at login
-        let loginItem = NSMenuItem(title: String(localized: "menu.launch_at_login", bundle: .trayResources, comment: "Menu item: launch at login"), action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
-        loginItem.target = self
-        loginItem.state = loginEnabled ? .on : .off
-        loginItem.isEnabled = !serviceBusy && serviceCLI != nil
-        loginItem.image = symbolImage("arrow.up.circle")
-        menu.addItem(loginItem)
 
         let restartItem = NSMenuItem(title: String(localized: "menu.restart_service", bundle: .trayResources), action: #selector(restartService), keyEquivalent: "")
         restartItem.target = self
@@ -154,7 +141,15 @@ extension StatusBarController {
         permissionsItem.isEnabled = connected
         menu.addItem(permissionsItem)
 
-        let trayLogin = NSMenuItem(title: String(localized: "menu.tray_at_login", bundle: .trayResources), action: #selector(toggleTrayAtLogin), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(.sectionHeader(title: trayText("menu.section.login")))
+        let loginItem = NSMenuItem(title: trayText("options.start_service"), action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        loginItem.target = self
+        loginItem.state = loginEnabled ? .on : .off
+        loginItem.isEnabled = !serviceBusy && serviceCLI != nil
+        menu.addItem(loginItem)
+
+        let trayLogin = NSMenuItem(title: trayText("options.show_tray"), action: #selector(toggleTrayAtLogin), keyEquivalent: "")
         trayLogin.target = self
         trayLogin.state = ownsTrayLoginItem && FileManager.default.fileExists(atPath: trayLoginURL.path) ? .on : .off
         trayLogin.isEnabled = ownsTrayLoginItem
@@ -168,6 +163,7 @@ extension StatusBarController {
         menu.addItem(.separator())
 
         // 6. Open data directory
+        menu.addItem(.sectionHeader(title: trayText("menu.section.app")))
         let openItem = NSMenuItem(title: String(localized: "menu.open_data_directory", bundle: .trayResources, comment: "Menu item: open data directory"), action: #selector(openDataDirectory), keyEquivalent: "")
         openItem.target = self
         openItem.image = symbolImage("folder")

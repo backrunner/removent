@@ -1,7 +1,10 @@
-.PHONY: dev check test website-check relay-worker-check tray-test apple-test mobile-projects
+.PHONY: dev install-local check test website-check relay-worker-check tray-test apple-test mobile-projects
 
 dev:
 	bash scripts/dev.sh
+
+install-local:
+	python3 scripts/install_local.py
 
 check:
 	bash scripts/check.sh

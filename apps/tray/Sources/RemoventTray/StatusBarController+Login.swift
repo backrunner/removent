@@ -46,6 +46,7 @@ extension StatusBarController {
 
     @objc func toggleTrayAtLogin() {
         guard ownsTrayLoginItem else { return }
+        objectWillChange.send()
         do {
             if FileManager.default.fileExists(atPath: trayLoginURL.path) {
                 try FileManager.default.removeItem(at: trayLoginURL)

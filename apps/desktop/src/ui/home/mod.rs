@@ -99,7 +99,6 @@ pub struct HomeView {
     /// daemon-reported TCC permissions (screen_recording, accessibility); None until
     /// the first StatusReport arrives.
     daemon_perms: Option<(bool, bool)>,
-    local_perms: (bool, bool),
     /// Controlling in progress: waiting for SessionReady to open the viewer (stores the peer name).
     connecting: Option<String>,
     connection_stage: ConnectionStage,
@@ -149,14 +148,14 @@ fn icon_tile(name: &'static str, size: f32, colors: &gpui_component::ThemeColor)
     div()
         .w(px(size))
         .h(px(size))
-        .rounded(px(12.))
+        .rounded(px(size * 0.3))
         .flex_shrink_0()
         .flex()
         .items_center()
         .justify_center()
         .bg(colors.accent.opacity(0.12))
         .border_1()
-        .border_color(colors.accent.opacity(0.18))
+        .border_color(colors.accent.opacity(0.2))
         .child(icon(name).size(px(size * 0.5)).text_color(colors.accent))
 }
 

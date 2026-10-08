@@ -26,7 +26,7 @@ def run(*args):
 
 
 def verify_platform(bundle):
-    helpers = [bundle / 'Contents/Helpers' / name for name in ('RemoventTray.app', 'RemoventSync.app')]
+    helpers = [bundle / 'Contents/Helpers' / name for name in ('RemoventTray.app', 'RemoventSync.app', 'RemoventHost.app')]
     for app in [bundle, *helpers]:
         metadata = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
         assert metadata['LSMinimumSystemVersion'] == '26.0', f'Wrong macOS minimum: {app}'
@@ -44,6 +44,11 @@ def verify_bundle(bundle):
     assert p['CFBundleIconFile'] == 'AppIcon'
     assert (bundle / 'Contents/Resources/AppIcon.icns').stat().st_size > 1000
     assert (bundle / 'Contents/MacOS/removent-cli').is_file()
+    host = bundle / 'Contents/Helpers/RemoventHost.app'
+    host_info = plistlib.loads((host / 'Contents/Info.plist').read_bytes())
+    assert host_info['CFBundleIdentifier'] == 'com.alkinum.removent.host'
+    assert host_info['CFBundleExecutable'] == 'removentd'
+    assert (bundle / 'Contents/MacOS/removentd').resolve() == (host / 'Contents/MacOS/removentd').resolve()
     # The CI shell protects its private-key files with umask 077; those modes
     # must not leak into the public app installed for multiple Mac accounts.
     for path in [bundle, *bundle.rglob('*')]:

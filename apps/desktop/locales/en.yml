@@ -79,7 +79,7 @@ permissions.accessibility: Accessibility
 permissions.screen_capture_purpose: Capture this screen to share with peers
 permissions.accessibility_purpose: Receive keyboard and mouse control from peers
 permissions.open_settings: Open System Settings
-permissions.daemon_restart_hint: The daemon (removentd) has not picked up the permission yet — toggle the host service off and on to restart it
+permissions.daemon_setup_hint: Allow Removent and RemoventHost in System Settings. If macOS asks for a restart, use Restart Background Service in the menu bar app.
 
 settings.title: Settings
 settings.back_to_devices: Back to Devices
@@ -378,3 +378,4 @@ trust.description: "This is your first connection. Confirm this is the destinati
 trust.waiting: "Confirm the first connection"
 
 trust.connect: "Trust and connect"
+permissions.request: Request permission

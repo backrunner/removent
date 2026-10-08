@@ -14,3 +14,5 @@ error.kick_unimplemented: "Not implemented (session_id=%{id})"
 error.no_pairing_code: "No active pairing code; generate one or wait for a controller"
 error.pairing_disabled: "Enable pairing-code access for new devices in desktop settings"
 error.pairing_busy: "Start sharing and disconnect the active session before generating a code"
+error.permission_login_required: Sign in to macOS to configure screen sharing permissions.
+error.permission_request_active: A permission request is already open. Complete it in System Settings.

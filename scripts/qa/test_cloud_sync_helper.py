@@ -8,8 +8,12 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 import tempfile
 import time
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'release'))
+from verify_release import verify_platform
 
 
 def wait_for(predicate, message, timeout=20):
@@ -28,7 +32,6 @@ def main():
     bundle = args.bundle.resolve()
     helper = bundle / 'Contents/Helpers/RemoventSync.app'
     assert not (helper / 'Contents/embedded.provisionprofile').exists(), 'Use an ad-hoc development bundle'
-    from verify_release import verify_platform
     verify_platform(bundle)
     print('PASS: app, tray, sync helper and bundled binaries require macOS 26', flush=True)
     cli = bundle / 'Contents/MacOS/removent-cli'

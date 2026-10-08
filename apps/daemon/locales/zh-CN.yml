@@ -14,3 +14,5 @@ error.register_sigterm: "注册 SIGTERM 失败"
 error.reload_settings: "设置重载失败：%{err}"
 error.unknown_request_id: "未知或已超时的 request_id: %{id}"
 error.kick_unimplemented: "未实现（session_id=%{id}）"
+error.permission_login_required: 请先登录 macOS，再配置屏幕共享权限。
+error.permission_request_active: 权限申请已打开，请先在系统设置中完成当前操作。

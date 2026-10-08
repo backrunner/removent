@@ -20,6 +20,19 @@ async fn spawn_daemon_with(admission_timeout: Option<Duration>) -> TestDaemon {
         root: tmp.path().to_path_buf(),
     };
     paths.ensure_layout().unwrap();
+    // These tests exercise IPC, never system consent. Simulate a user who
+    // already completed the first-request flow (including a possible denial).
+    std::fs::create_dir_all(paths.root.join("permissions/host-v1")).unwrap();
+    for permission in ["screen-recording", "accessibility"] {
+        std::fs::write(
+            paths
+                .root
+                .join("permissions/host-v1")
+                .join(format!("{permission}-requested")),
+            "",
+        )
+        .unwrap();
+    }
     let settings = Settings {
         host_enabled: true,
         ..Settings::default()

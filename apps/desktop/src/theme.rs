@@ -29,31 +29,31 @@ pub struct Palette {
 pub fn palette(dark: bool) -> Palette {
     if dark {
         Palette {
-            background: c(0x1E1E20),
-            surface: c(0x2A2A2C),
-            overlay: ca(0x2C2C2EF5),
-            border: ca(0xFFFFFF16),
-            text_primary: c(0xF5F5F7),
-            text_secondary: c(0xA8ABB3),
-            accent: c(0x82B5FF),
-            success: c(0x30D158),
+            background: c(0x0F1117),
+            surface: c(0x1A1D28),
+            overlay: ca(0x1A1D28F5),
+            border: ca(0xFFFFFF0F),
+            text_primary: c(0xFFFFFF),
+            text_secondary: c(0x9BA2B8),
+            accent: c(0x7094F1),
+            success: c(0x47C9DA),
             warning: c(0xFF9F0A),
-            danger: c(0xFF453A),
+            danger: c(0xFF6961),
         }
     } else {
         Palette {
-            background: c(0xF5F5F7),
-            surface: c(0xF5F5F7),
-            overlay: ca(0xFFFFFFF2),
-            border: ca(0x1C213014),
-            text_primary: c(0x202127),
-            text_secondary: c(0x686B74),
-            accent: c(0x0865DB),
+            background: c(0xFFFFFF),
+            surface: c(0xF6F8FC),
+            overlay: ca(0xFFFFFFF5),
+            border: ca(0x0000000F),
+            text_primary: c(0x1A1D28),
+            text_secondary: c(0x5E6A88),
+            accent: c(0x3D61CF),
             // In light mode status colors also serve as small text (status bar/tags); the stock
             // system colors lack contrast (2.2:1), so use darkened shades to reach ≥4.5:1 (WCAG AA).
-            success: c(0x1F7A38),
-            warning: c(0xC93400),
-            danger: c(0xD70015),
+            success: c(0x286FB0),
+            warning: c(0xA85B00),
+            danger: c(0xD92D24),
         }
     }
 }
@@ -87,54 +87,54 @@ pub fn apply(dark: bool, cx: &mut App) {
     t.border = p.border;
     t.muted = p.surface;
     t.muted_foreground = p.text_secondary;
-    t.secondary = p.surface;
-    t.secondary_hover = if dark { c(0x3A3A3C) } else { c(0xE5E5E7) };
-    t.secondary_active = if dark { c(0x48484A) } else { c(0xDADADC) };
+    t.secondary = if dark { c(0x252837) } else { c(0xF6F8FC) };
+    t.secondary_hover = if dark { c(0x2D3142) } else { c(0xE8ECF5) };
+    t.secondary_active = if dark { c(0x353A50) } else { c(0xD5DCEB) };
     t.secondary_foreground = p.text_primary;
     t.accent = p.accent;
     t.accent_foreground = c(0xFFFFFF);
     // Filled buttons need stronger contrast for their small white labels than
     // the accent used by focus rings and switches.
-    t.primary = if dark { c(0x306ACE) } else { p.accent };
-    t.primary_hover = if dark { c(0x3871D6) } else { c(0x2D6DE4) };
-    t.primary_active = if dark { c(0x2354A6) } else { c(0x194BA9) };
+    t.primary = if dark { c(0x3F63CF) } else { p.accent };
+    t.primary_hover = if dark { c(0x486FDA) } else { c(0x3B5DD9) };
+    t.primary_active = if dark { c(0x4866D9) } else { c(0x2F4DB8) };
     t.primary_foreground = c(0xFFFFFF);
     t.danger = p.danger;
-    t.danger_hover = p.danger;
-    t.danger_active = p.danger;
-    t.danger_foreground = c(0xFFFFFF);
+    t.danger_hover = if dark { c(0xFF827A) } else { c(0xD92D24) };
+    t.danger_active = if dark { c(0xFF1F0F) } else { c(0xC9372C) };
+    t.danger_foreground = if dark { p.background } else { c(0xFFFFFF) };
     t.success = p.success;
-    t.success_foreground = c(0xFFFFFF);
-    t.success_hover = p.success;
-    t.success_active = p.success;
+    t.success_foreground = if dark { p.background } else { c(0xFFFFFF) };
+    t.success_hover = if dark { c(0x5CD4E5) } else { c(0x286FB0) };
+    t.success_active = if dark { c(0x3BB5D1) } else { c(0x2570B0) };
     t.warning = p.warning;
-    t.warning_foreground = c(0xFFFFFF);
-    t.warning_hover = p.warning;
-    t.warning_active = p.warning;
+    t.warning_foreground = if dark { p.background } else { c(0xFFFFFF) };
+    t.warning_hover = if dark { c(0xFFAA1C) } else { c(0xA85B00) };
+    t.warning_active = if dark { c(0xFF9500) } else { c(0x975200) };
     t.info = p.accent;
-    t.info_foreground = c(0xFFFFFF);
+    t.info_foreground = if dark { p.background } else { c(0xFFFFFF) };
     t.info_hover = p.accent;
     t.info_active = p.accent;
     t.overlay = p.overlay;
-    t.popover = if dark { c(0x2C2C2E) } else { c(0xFFFFFF) };
+    t.popover = if dark { c(0x1A1D28) } else { c(0xFFFFFF) };
     t.popover_foreground = p.text_primary;
     t.input = p.border;
     t.caret = p.text_primary;
     t.ring = p.accent;
-    t.selection = if dark { ca(0x0A84FF44) } else { ca(0x007AFF33) };
+    t.selection = if dark { ca(0x5B7FED55) } else { ca(0x476EED44) };
     t.list = p.background;
-    t.list_hover = if dark { c(0x323234) } else { c(0xE5E5E7) };
-    t.list_active = if dark { c(0x3C3C3E) } else { c(0xDADADC) };
+    t.list_hover = if dark { ca(0xFFFFFF0A) } else { ca(0x0000000A) };
+    t.list_active = if dark { ca(0xFFFFFF10) } else { ca(0x00000014) };
     t.list_active_border = p.border;
     t.list_even = p.background;
     t.list_head = p.surface;
-    t.sidebar = if dark { c(0x252527) } else { c(0xECECEE) };
+    t.sidebar = if dark { c(0x0F1117) } else { c(0xF6F8FC) };
     t.sidebar_foreground = p.text_primary;
     t.sidebar_border = p.border;
-    t.sidebar_accent = if dark { c(0x3A3A3C) } else { c(0xE0E0E2) };
+    t.sidebar_accent = if dark { ca(0x5B7FED15) } else { ca(0x476EED12) };
     t.sidebar_accent_foreground = p.text_primary;
     t.sidebar_primary = p.accent;
-    t.sidebar_primary_foreground = c(0xFFFFFF);
+    t.sidebar_primary_foreground = t.info_foreground;
     t.title_bar = t.sidebar;
     t.title_bar_border = p.border;
     t.tab = p.surface;
@@ -143,23 +143,23 @@ pub fn apply(dark: bool, cx: &mut App) {
     t.tab_foreground = p.text_secondary;
     t.tab_bar = p.surface;
     t.tab_bar_segmented = p.surface;
-    t.group_box = if dark { c(0x2C2C2E) } else { c(0xFFFFFF) };
+    t.group_box = if dark { c(0x1A1D28) } else { c(0xFFFFFF) };
     t.group_box_foreground = p.text_primary;
-    t.skeleton = if dark { c(0x4B505A) } else { c(0xDEE4EC) };
-    t.switch = if dark { c(0x4A4D55) } else { c(0xD1D1D6) };
+    t.skeleton = if dark { c(0x252837) } else { c(0xE8ECF5) };
+    t.switch = if dark { c(0x252837) } else { c(0xE8ECF5) };
     t.switch_thumb = c(0xFFFFFF);
-    t.slider_bar = if dark { c(0x4A4D55) } else { c(0xD1D1D6) };
+    t.slider_bar = if dark { c(0x48484A) } else { c(0xE5E5E7) };
     t.slider_thumb = p.accent;
     t.progress_bar = p.accent;
     t.scrollbar = p.background;
-    t.scrollbar_thumb = if dark { ca(0x5A5A5ECC) } else { ca(0xC1C1C6CC) };
-    t.scrollbar_thumb_hover = if dark { c(0x6A6A70) } else { c(0xAEAEB4) };
+    t.scrollbar_thumb = if dark { ca(0xFFFFFF26) } else { ca(0x00000026) };
+    t.scrollbar_thumb_hover = if dark { ca(0xFFFFFF33) } else { ca(0x00000033) };
     t.window_border = p.border;
     t.drag_border = p.accent;
     t.drop_target = if dark { ca(0x0A84FF22) } else { ca(0x007AFF18) };
     t.link = p.accent;
-    t.link_hover = p.accent;
-    t.link_active = p.accent;
+    t.link_hover = if dark { c(0x409CFF) } else { c(0x3B5DD9) };
+    t.link_active = if dark { p.accent } else { c(0x0062D1) };
     t.description_list_label = p.surface;
     t.description_list_label_foreground = p.text_secondary;
     t.table = p.background;
@@ -177,7 +177,82 @@ pub fn apply(dark: bool, cx: &mut App) {
     t.bearish = p.danger;
 
     theme.shadow = true;
-    theme.radius = px(9.);
-    theme.radius_lg = px(16.);
+    theme.radius = px(8.);
+    theme.radius_lg = px(12.);
     theme.font_size = px(13.);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::TestAppContext;
+    use gpui_component::ActiveTheme;
+
+    fn contrast(a: Hsla, b: Hsla) -> f32 {
+        let luminance = |color: Hsla| {
+            let rgb = color.to_rgb();
+            let linear = |value: f32| {
+                if value <= 0.04045 {
+                    value / 12.92
+                } else {
+                    ((value + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * linear(rgb.r) + 0.7152 * linear(rgb.g) + 0.0722 * linear(rgb.b)
+        };
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    #[gpui::test]
+    fn small_status_and_button_labels_remain_readable(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        for dark in [false, true] {
+            cx.update(|cx| {
+                apply(dark, cx);
+                let t = &cx.theme().colors;
+                for background in [t.background, t.group_box, t.secondary] {
+                    for foreground in [
+                        t.foreground,
+                        t.muted_foreground,
+                        t.success,
+                        t.warning,
+                        t.danger,
+                        t.link,
+                    ] {
+                        assert!(
+                            contrast(foreground, background) >= 4.5,
+                            "text contrast in dark={dark}: {foreground:?} on {background:?}"
+                        );
+                    }
+                }
+                for (foreground, backgrounds) in [
+                    (
+                        t.primary_foreground,
+                        [t.primary, t.primary_hover, t.primary_active],
+                    ),
+                    (
+                        t.success_foreground,
+                        [t.success, t.success_hover, t.success_active],
+                    ),
+                    (
+                        t.warning_foreground,
+                        [t.warning, t.warning_hover, t.warning_active],
+                    ),
+                    (
+                        t.danger_foreground,
+                        [t.danger, t.danger_hover, t.danger_active],
+                    ),
+                    (t.info_foreground, [t.info, t.info_hover, t.info_active]),
+                ] {
+                    for background in backgrounds {
+                        assert!(
+                            contrast(foreground, background) >= 4.5,
+                            "button contrast in dark={dark}: {foreground:?} on {background:?}"
+                        );
+                    }
+                }
+            });
+        }
+    }
 }

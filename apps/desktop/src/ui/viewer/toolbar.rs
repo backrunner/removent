@@ -143,8 +143,7 @@ impl ViewerView {
                 ),
             ]);
         }
-        let max_height =
-            (f32::from(window.viewport_size().height) - 32.).max(100.);
+        let max_height = (f32::from(window.viewport_size().height) - 32.).max(100.);
         div()
             .id("viewer-info")
             .debug_selector(|| "viewer-info".into())

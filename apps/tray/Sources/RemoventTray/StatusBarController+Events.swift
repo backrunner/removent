@@ -11,6 +11,7 @@ extension StatusBarController {
             trayLog("status: \(s.running ? "running" : "stopped"), port \(s.port), device \(s.device_name), fingerprint \(s.fp_short), sessions \(s.sessions.count)")
             rebuildMenu()
             updateIcon()
+            introducePermissionsIfNeeded(s)
         case .ok:
             trayLog("request acknowledged")
             client.requestStatus()

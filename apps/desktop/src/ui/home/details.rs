@@ -6,9 +6,10 @@ impl HomeView {
         let colors = cx.theme().colors;
         let connecting = self.connecting.is_some();
         let permissions = |kind: PermissionKind| {
+            let (screen_recording, accessibility) = self.daemon_perms.unwrap_or((false, false));
             let granted = match kind {
-                PermissionKind::ScreenCapture => self.local_perms.0,
-                PermissionKind::Accessibility => self.local_perms.1,
+                PermissionKind::ScreenCapture => screen_recording,
+                PermissionKind::Accessibility => accessibility,
             };
             div()
                 .flex()
@@ -34,21 +35,21 @@ impl HomeView {
                 .when(!granted, |el| {
                     el.child(
                         Button::new(ElementId::Name(format!("perm-{}", kind.slug()).into()))
-                            .label(t!("permissions.open_settings").to_string())
+                            .label(t!("permissions.request").to_string())
+                            .disabled(!self.daemon_online)
                             .tooltip(kind.purpose())
                             .outline()
                             .small()
                             .h(px(28.))
-                            .rounded(px(8.))
-                            .bg(colors.secondary_hover.opacity(0.45))
-                            .on_click(move |_, _, _| kind.request_and_open_settings()),
+                            .rounded(px(6.))
+                            .on_click(cx.listener(move |this, _, _, _| {
+                                this.engine.request_host_permission(kind.host_permission());
+                            })),
                     )
                 })
         };
-        let daemon_stale = self.daemon_online
-            && self
-                .daemon_perms
-                .is_some_and(|(sr, ax)| (self.local_perms.0 && !sr) || (self.local_perms.1 && !ax));
+        let daemon_needs_permissions =
+            self.daemon_online && self.daemon_perms.is_some_and(|(sr, ax)| !sr || !ax);
         div()
             .id("quick-start-scroll")
             .size_full()
@@ -165,12 +166,12 @@ impl HomeView {
                                     .child(permissions(PermissionKind::ScreenCapture))
                                     .child(permissions(PermissionKind::Accessibility)),
                             )
-                            .when(daemon_stale, |el| {
+                            .when(daemon_needs_permissions, |el| {
                                 el.child(
                                     div()
                                         .text_size(px(12.))
                                         .text_color(colors.warning)
-                                        .child(t!("permissions.daemon_restart_hint").to_string()),
+                                        .child(t!("permissions.daemon_setup_hint").to_string()),
                                 )
                             })
                             .child(

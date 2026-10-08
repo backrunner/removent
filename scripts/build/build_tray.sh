@@ -22,6 +22,7 @@ echo "==> packaging $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/RemoventTray"
+cp assets/branding/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 # SwiftPM resource bundle (Localizable.strings) — without it the tray UI loses localization.
 if [ -d "$RES_BUNDLE" ]; then
@@ -51,6 +52,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     </array>
     <key>CFBundleName</key>
     <string>RemoventTray</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

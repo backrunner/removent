@@ -123,6 +123,7 @@ impl RenderOnce for Button {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let t = cx.theme();
         let clear = t.transparent;
+        let _dark = t.is_dark();
         let (normal, hover, pressed, foreground, border, raised) = match self.tone {
             Tone::Primary => (
                 t.primary,
@@ -189,10 +190,15 @@ impl RenderOnce for Button {
                 false,
             ),
         };
-        let foreground = if self.disabled {
-            t.muted_foreground
+        let (foreground, hover_fg) = if self.disabled {
+            (t.muted_foreground, t.muted_foreground)
         } else {
-            foreground
+            let hover_fg = match self.tone {
+                Tone::Ghost | Tone::Tab(false) | Tone::Segment(false) => t.foreground,
+                Tone::Primary => t.primary_foreground,
+                _ => foreground,
+            };
+            (foreground, hover_fg)
         };
         let style = ButtonCustomVariant::new(cx)
             .color(normal)
@@ -205,7 +211,14 @@ impl RenderOnce for Button {
             .custom(style)
             .when(!self.disabled, |b| b.cursor_pointer())
             .when(self.disabled, |b| b.cursor_default())
-            .when_some(self.icon, |b, icon| b.icon(icon.text_color(foreground)))
+            .when_some(self.icon.clone(), |b, icon| {
+                b.child(
+                    div()
+                        .flex_none()
+                        .child(icon.text_color(foreground))
+                        .when(!self.disabled, |d| d.hover(|s| s.text_color(hover_fg))),
+                )
+            })
             // Explicit child colors also avoid gpui-component 0.5's hard-coded
             // red hover label. Only the interaction surface changes color.
             .when_some(self.label, |b, label| {
@@ -214,6 +227,7 @@ impl RenderOnce for Button {
                         .flex_none()
                         .line_height(relative(1.))
                         .text_color(foreground)
+                        .when(!self.disabled, |d| d.hover(|s| s.text_color(hover_fg)))
                         .child(label),
                 )
             })
@@ -222,6 +236,7 @@ impl RenderOnce for Button {
                     div()
                         .min_w_0()
                         .text_color(foreground)
+                        .when(!self.disabled, |d| d.hover(|s| s.text_color(hover_fg)))
                         .children(self.children),
                 )
             })

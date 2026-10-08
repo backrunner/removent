@@ -49,12 +49,6 @@ fn start(paths: DataPaths) -> anyhow::Result<()> {
         }
     };
 
-    // Automatic launch must reach IPC readiness without waiting on a consent
-    // dialog. Status exposes missing grants; initial setup is interactive.
-    if !std::env::args().any(|arg| arg == "--background" || arg == "--login-window") {
-        ensure_host_permissions(settings.host_enabled);
-    }
-
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -77,6 +71,10 @@ async fn run(paths: DataPaths) -> anyhow::Result<()> {
     let mut ipc = tokio::spawn(server::serve(state.clone()));
     let mgr = tokio::spawn(hostmgr::run(state.clone()));
 
+    // Prompt from the actual hosting process, including LaunchAgent startup.
+    // A detached worker keeps consent dialogs from delaying IPC or shutdown.
+    removent_daemon::tcc::request_initial_permissions(&state);
+
     // SIGTERM / SIGINT / IPC Shutdown all trigger graceful shutdown.
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context(t!("error.register_sigterm"))?;
@@ -97,40 +95,3 @@ async fn run(paths: DataPaths) -> anyhow::Result<()> {
     let _ = mgr.await;
     Ok(())
 }
-
-/// Screen Recording + Accessibility TCC checks for the hosting path.
-///
-/// When the app spawns the daemon, the app is the TCC responsible process and its grant
-/// covers us. But a launchd-started daemon (LaunchAgent, launch at login) is its own
-/// responsible process with its own TCC identity, so the app's grant does NOT apply —
-/// preflight here and trigger the consent prompts (attributed to `removentd`) when the
-/// host service is enabled. Without this, capture and input injection silently fail
-/// for headless autostart.
-#[cfg(target_os = "macos")]
-fn ensure_host_permissions(host_enabled: bool) {
-    use removent_daemon::tcc;
-    if !host_enabled {
-        return;
-    }
-    if !tcc::screen_recording_granted() {
-        tracing::warn!("screen recording not granted to removentd; requesting");
-        let granted = tcc::request_screen_recording();
-        if !granted {
-            tracing::warn!(
-                "screen recording still not granted; capture will fail until removentd is allowed under System Settings > Privacy & Security > Screen Recording (the daemon must restart afterwards)"
-            );
-        }
-    }
-    if !tcc::accessibility_granted() {
-        tracing::warn!("accessibility not granted to removentd; requesting");
-        let granted = tcc::request_accessibility();
-        if !granted {
-            tracing::warn!(
-                "accessibility still not granted; input injection will fail until removentd is allowed under System Settings > Privacy & Security > Accessibility"
-            );
-        }
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn ensure_host_permissions(_host_enabled: bool) {}

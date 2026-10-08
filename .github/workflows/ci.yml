@@ -69,6 +69,7 @@ jobs:
       - run: cargo test --locked --workspace -- --test-threads=1
       - run: python3 scripts/release/gen_latest.py --self-test
       - run: bash scripts/check.sh
+      - run: xcrun swift test --package-path apps/tray
       - run: bash apps/tray/Tests/run_integration_test.sh
       - run: xcrun swift test --package-path packages/apple-cloud-sync
       - run: bash scripts/build/build_cloud_sync.sh

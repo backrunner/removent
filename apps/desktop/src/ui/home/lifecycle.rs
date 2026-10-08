@@ -75,14 +75,10 @@ impl HomeView {
         })
         .detach();
 
-        // Re-render on window activation: re-check TCC permission state (the user may have
-        // just granted access in System Settings).
+        // Ask the hosting process for fresh grants after returning from System Settings.
         let sub_activation = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
-                this.local_perms = (
-                    PermissionKind::ScreenCapture.granted(),
-                    PermissionKind::Accessibility.granted(),
-                );
+                this.engine.refresh_host_status();
                 cx.notify();
             }
         });
@@ -146,9 +142,9 @@ impl HomeView {
             my_fp_short: engine.fingerprint_short(),
             trusted: engine.trusted_short_fps(),
             update_status: engine.update_status(),
-            cloud_sync_status: engine
-                .cloud_sync_command(removent_client::cloud_sync::Command::Status)
-                .unwrap_or_default(),
+            // CloudSync status will be populated by the first UiEvent::CloudSync from the
+            // async task; attempting to read it synchronously here races with startup.
+            cloud_sync_status: serde_json::json!({"enabled": false}),
             saved: engine.saved_connections(),
             engine,
             _subscriptions: subscriptions,
@@ -160,10 +156,6 @@ impl HomeView {
             host_on: false,
             daemon_online: false,
             daemon_perms: None,
-            local_perms: (
-                PermissionKind::ScreenCapture.granted(),
-                PermissionKind::Accessibility.granted(),
-            ),
             connecting: None,
             connection_stage: ConnectionStage::Resolving,
             cancelled_generation: None,

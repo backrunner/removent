@@ -90,7 +90,7 @@ pub fn segmented_with_disabled(
         .p(px(2.))
         .border_1()
         .border_color(t.border)
-        .rounded(px(8.))
+        .rounded(px(7.))
         .bg(track);
     row.style().align_self = Some(gpui::AlignSelf::FlexStart);
     for (i, label) in options.iter().enumerate() {
@@ -122,7 +122,7 @@ pub fn form_input(state: &Entity<InputState>) -> Input {
     Styled::h(Input::new(state), px(36.))
         .w_full()
         .min_w_0()
-        .rounded(px(9.))
+        .rounded(px(8.))
         .shadow_none()
 }
 
@@ -149,11 +149,11 @@ pub fn form_group(cx: &App) -> Div {
         .w_full()
         .min_w_0()
         .flex_shrink_0()
-        .rounded(px(10.))
+        .rounded(px(12.))
         .bg(cx.theme().group_box)
         .border_1()
         .border_color(cx.theme().border)
-        .shadow_none()
+        .shadow_sm()
 }
 
 /// Form section heading, shared by device metadata and settings.

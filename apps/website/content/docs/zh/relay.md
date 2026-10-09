@@ -22,19 +22,19 @@ curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/in
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install_relay.sh -o install_relay.sh
-sh install_relay.sh --version v0.1.2 --no-setup
+sh install_relay.sh --version v0.1.3 --no-setup
 sudo removent-relay setup --address removent://relay.example.com:48700
 ```
 
-## 试用 beta
+## 正式版更新
 
-自动更新、`check-update` 和 relay 本地日志轮转从 **v0.1.3-beta.1** 开始提供。安装器默认选择正式版，试用这些功能时需要显式选择 beta：
+**v0.1.3** 正式版包含自动更新、`check-update` 和 relay 本地日志轮转。安装器默认选择最新正式版，也可显式安装此版本：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/backrunner/removent/v0.1.3-beta.1/scripts/install_relay.sh | sh -s -- --version v0.1.3-beta.1
+curl -fsSL https://raw.githubusercontent.com/backrunner/removent/v0.1.3/scripts/install_relay.sh | sh -s -- --version v0.1.3
 ```
 
-[查看 beta 版本说明和下载](https://github.com/backrunner/removent/releases/tag/v0.1.3-beta.1)。已有服务安装后需要重启。后续 beta 也须手动安装；自动更新只跟随正式版，包括从 beta 升级到更高版本的正式版。
+[查看正式版说明和下载](https://github.com/backrunner/removent/releases/tag/v0.1.3)。已有服务安装后需要重启。自动更新默认关闭，开启后只跟随正式版，也可将此前的 beta 升级到本次正式版。
 
 ## 在 Mac 上托管中继
 

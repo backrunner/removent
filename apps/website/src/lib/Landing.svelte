@@ -19,7 +19,7 @@
 <div class="rv-landing">
   <section class="rv-hero" aria-labelledby="hero-title">
     <div class="rv-hero-copy">
-      <a class="rv-announcement" href="https://github.com/backrunner/removent/releases/tag/v0.1.3-beta.1"><span>0.1.3 BETA</span>{t('hero.release')}<Icon name="arrow" size={14} /></a>
+      <a class="rv-announcement" href="https://github.com/backrunner/removent/releases/tag/v0.1.3"><span>0.1.3</span>{t('hero.release')}<Icon name="arrow" size={14} /></a>
       <p class="rv-eyebrow"><span class="rv-blue-line" aria-hidden="true"></span>{t('hero.eyebrow')}</p>
       <h1 id="hero-title">{t('hero.line1')}<br /><span>{t('hero.line2')}</span></h1>
       <p class="rv-hero-description">{t('hero.description')}</p>

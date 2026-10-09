@@ -47,7 +47,7 @@ SITE_URL=https://your-domain.example pnpm build
 
 Use the same origin when generating and serving the site. Both `/` and `/zh` are prerendered, documentation lives at `/docs` and `/docs/zh`, and standalone pages include `/download`, `/privacy`, and their Chinese equivalents. The build also includes Open Graph images, sitemap, robots.txt, markdown twins, and the `llms.txt` interface. There are no runtime search endpoints: the search index loads in the browser on demand.
 
-The main download button resolves the latest stable DMG through GitHub's release API, with a Releases-page fallback when lookup fails. Beta announcements in the homepage, docs sidebar, and download pages use separate, explicit release-notes links. Keep all three surfaces in sync when publishing the next beta. Publish the referenced beta before deploying its download-page announcement; prereleases must not replace the stable button or automatic-update feed.
+The main download button resolves the latest stable DMG through GitHub's release API, with a Releases-page fallback when lookup fails. Release announcements in the homepage, docs sidebar, and download pages use separate, explicit release-notes links. Keep all three surfaces and both languages in sync when publishing a release. Publish the referenced release before deploying its announcement; prereleases must not replace the stable button or automatic-update feed.
 
 ## Theme and content
 

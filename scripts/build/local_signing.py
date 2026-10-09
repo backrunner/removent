@@ -48,4 +48,8 @@ def configure_local_signing(environment, destination):
         host = host or environment.get('REMOVENT_LOCAL_SIGNING_IDENTITY')
         if host:
             environment['REMOVENT_LOCAL_HOST_SIGNING_IDENTITY'] = host
+    if not environment.get('REMOVENT_CLOUDKIT_PROFILE'):
+        profile = destination / 'Contents/Helpers/RemoventSync.app/Contents/embedded.provisionprofile'
+        if profile.is_file():
+            environment['REMOVENT_CLOUDKIT_PROFILE'] = str(profile)
     return environment

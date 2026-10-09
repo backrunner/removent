@@ -54,6 +54,19 @@ class LocalSigningTests(unittest.TestCase):
         self.assertEqual(result['REMOVENT_LOCAL_SIGNING_IDENTITY'], DEVELOPER_ID)
         self.assertEqual(result['REMOVENT_LOCAL_HOST_SIGNING_IDENTITY'], DEVELOPER_ID)
 
+    @patch.object(local_signing.subprocess, 'check_output', return_value=IDENTITIES)
+    @patch.object(local_signing, 'signing_authority', return_value=DEVELOPER_ID_NAME)
+    def test_installed_cloud_profile_is_preserved_unless_overridden(self, authority, output):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = Path(tmp) / 'Removent.app'
+            profile = app / 'Contents/Helpers/RemoventSync.app/Contents/embedded.provisionprofile'
+            profile.parent.mkdir(parents=True)
+            profile.write_bytes(b'profile fixture')
+            result = local_signing.configure_local_signing({}, app)
+            self.assertEqual(result['REMOVENT_CLOUDKIT_PROFILE'], str(profile))
+            result = local_signing.configure_local_signing({'REMOVENT_CLOUDKIT_PROFILE': '/explicit/profile'}, app)
+            self.assertEqual(result['REMOVENT_CLOUDKIT_PROFILE'], '/explicit/profile')
+
     @patch.object(local_signing.subprocess, 'check_output')
     def test_release_signing_is_independent_of_local_certificate_selection(self, output):
         environment = {'APPLE_SIGNING_IDENTITY': 'Release identity'}

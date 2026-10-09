@@ -37,6 +37,13 @@ if [ -n "$IDENTITY" ]; then
     : "${REMOVENT_CLOUDKIT_PROFILE:?set the provisioning profile for com.alkinum.removent.sync}"
     test -f "$REMOVENT_CLOUDKIT_PROFILE"
 fi
+if [ -n "${REMOVENT_CLOUDKIT_PROFILE:-}" ]; then
+    test -f "$REMOVENT_CLOUDKIT_PROFILE"
+    if [ -z "$IDENTITY$LOCAL_IDENTITY" ]; then
+        echo 'CloudKit provisioning requires a signing identity' >&2
+        exit 1
+    fi
+fi
 
 echo "==> build release"
 cargo build --locked --release -p removent-app -p removent-daemon -p removent-cli
@@ -131,9 +138,17 @@ if [ -n "$IDENTITY" ]; then
     codesign --verify --deep --strict --verbose=2 "$BUNDLE"
 elif [ -n "$LOCAL_IDENTITY" ]; then
     echo "==> Local signing with a stable identity: $LOCAL_IDENTITY"
-    for helper in RemoventSync RemoventTray; do
-        codesign --force --timestamp=none --sign "$LOCAL_IDENTITY" "$BUNDLE/Contents/Helpers/$helper.app"
-    done
+    if [ -n "${REMOVENT_CLOUDKIT_PROFILE:-}" ]; then
+        python3 scripts/build/configure_cloud_sync.py "$BUNDLE/Contents/Helpers/RemoventSync.app" --profile "$REMOVENT_CLOUDKIT_PROFILE" --environment "$CLOUD_ENVIRONMENT"
+        codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" \
+            --entitlements "$BUNDLE/Contents/Helpers/removent-sync.entitlements" \
+            "$BUNDLE/Contents/Helpers/RemoventSync.app"
+        rm "$BUNDLE/Contents/Helpers/removent-sync.entitlements"
+        python3 scripts/build/configure_cloud_sync.py "$BUNDLE/Contents/Helpers/RemoventSync.app" --verify --environment "$CLOUD_ENVIRONMENT"
+    else
+        codesign --force --timestamp=none --sign "$LOCAL_IDENTITY" "$BUNDLE/Contents/Helpers/RemoventSync.app"
+    fi
+    codesign --force --timestamp=none --sign "$LOCAL_IDENTITY" "$BUNDLE/Contents/Helpers/RemoventTray.app"
     codesign --force --timestamp=none --sign "$LOCAL_HOST_IDENTITY" "$BUNDLE/Contents/Helpers/RemoventHost.app"
     codesign --force --timestamp=none --sign "$LOCAL_IDENTITY" --identifier com.alkinum.removent.cli "$BUNDLE/Contents/MacOS/removent-cli"
     codesign --force --timestamp=none --sign "$LOCAL_IDENTITY" --identifier com.alkinum.removent.desktop "$BUNDLE/Contents/MacOS/removent"

@@ -7,6 +7,7 @@ import pathlib
 import plistlib
 import shutil
 import subprocess
+import tempfile
 
 CONTAINER = 'iCloud.com.alkinum.removent'
 BUNDLE_ID = 'com.alkinum.removent.sync'
@@ -18,7 +19,10 @@ def profile_entitlements(profile, team, environment):
     assert profile['ExpirationDate'].replace(tzinfo=datetime.timezone.utc) > datetime.datetime.now(datetime.timezone.utc), 'CloudKit profile expired'
     assert entitlements['com.apple.application-identifier'] == f'{team}.{BUNDLE_ID}', 'Wrong CloudKit helper App ID'
     assert CONTAINER in entitlements['com.apple.developer.icloud-container-identifiers'], 'Shared CloudKit container is not authorized'
-    assert 'CloudKit' in entitlements['com.apple.developer.icloud-services'], 'CloudKit service is not authorized'
+    services = entitlements['com.apple.developer.icloud-services']
+    # Apple's profile allowlist can authorize all iCloud services with '*'.
+    # The signed helper still claims only the concrete CloudKit service.
+    assert services == '*' or (isinstance(services, list) and 'CloudKit' in services), 'CloudKit service is not authorized'
     allowed = entitlements['com.apple.developer.icloud-container-environment']
     assert environment in (allowed if isinstance(allowed, list) else [allowed]), 'CloudKit environment not authorized'
     if environment == 'Production':
@@ -40,7 +44,8 @@ def decode_profile(path):
 
 
 def verify(bundle, team, environment='Production'):
-    expected = profile_entitlements(decode_profile(bundle / 'Contents/embedded.provisionprofile'), team, environment)
+    profile = decode_profile(bundle / 'Contents/embedded.provisionprofile')
+    expected = profile_entitlements(profile, team, environment)
     actual = plistlib.loads(subprocess.check_output(['codesign', '-d', '--entitlements', ':-', str(bundle)], stderr=subprocess.DEVNULL))
     for key, value in expected.items():
         assert actual.get(key) == value, f'CloudKit entitlement mismatch: {key}'
@@ -48,6 +53,10 @@ def verify(bundle, team, environment='Production'):
     if environment == 'Production':
         requirement += ' and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
     subprocess.run(['codesign', '--verify', '--strict', '-R', requirement, str(bundle)], check=True)
+    with tempfile.TemporaryDirectory(prefix='removent-sync-cert-') as directory:
+        prefix = pathlib.Path(directory) / 'certificate'
+        subprocess.run(['codesign', '-d', f'--extract-certificates={prefix}', str(bundle)], check=True, stderr=subprocess.DEVNULL)
+        assert pathlib.Path(str(prefix) + '0').read_bytes() in profile['DeveloperCertificates'], 'Signing certificate is not authorized by the CloudKit profile'
 
 
 def main():

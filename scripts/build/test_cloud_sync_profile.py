@@ -46,6 +46,17 @@ class CloudSyncProfileTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             profile_entitlements(self.profile, 'TESTTEAM', 'Production')
 
+    def test_apple_wildcard_allowlist_claims_only_cloudkit(self):
+        self.profile['Entitlements']['com.apple.developer.icloud-services'] = '*'
+        result = profile_entitlements(self.profile, 'TESTTEAM', 'Production')
+        self.assertEqual(result['com.apple.developer.icloud-services'], ['CloudKit'])
+
+    def test_service_substrings_and_other_services_are_rejected(self):
+        for services in ['CloudKitUnexpected', ['CloudDocuments'], [], None]:
+            self.profile['Entitlements']['com.apple.developer.icloud-services'] = services
+            with self.assertRaises(AssertionError):
+                profile_entitlements(self.profile, 'TESTTEAM', 'Production')
+
 
 if __name__ == '__main__':
     unittest.main()

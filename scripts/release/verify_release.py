@@ -13,6 +13,9 @@ from gen_latest import OPENSSL, signing_payload, verify_payload
 from release_meta import VERSION, BASE
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'scripts/build'))
+from configure_cloud_sync import verify as verify_cloud_sync
+
 DIST = ROOT / 'dist'
 TEAM = 'PB8H83VL3Z'
 REQUIREMENT = f'=anchor apple generic and identifier "com.alkinum.removent" and certificate leaf[subject.OU] = "{TEAM}" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
@@ -59,7 +62,6 @@ def verify_bundle(bundle):
     run('codesign', '--verify', '--deep', '--strict', '-R', REQUIREMENT, str(bundle))
     run('xcrun', 'stapler', 'validate', str(bundle))
     run('spctl', '--assess', '--type', 'execute', str(bundle))
-    from configure_cloud_sync import verify as verify_cloud_sync
     verify_cloud_sync(bundle / 'Contents/Helpers/RemoventSync.app', TEAM)
     for binary in list((bundle / 'Contents/MacOS').iterdir()) + [bundle / 'Contents/Helpers/RemoventTray.app/Contents/MacOS/RemoventTray', bundle / 'Contents/Helpers/RemoventSync.app/Contents/MacOS/RemoventSync']:
         assert binary.stat().st_mode & 0o111 == 0o111, binary

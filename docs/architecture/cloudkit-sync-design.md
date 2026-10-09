@@ -1,8 +1,10 @@
 # Shared CloudKit connection storage
 
-Implemented on 2026-09-30. The local implementation and build integration are in
-place; signed CloudKit access and a real Mac/iPhone exchange still require Apple
-account provisioning and live acceptance. Local tests do not establish either.
+Implemented on 2026-09-30. On 2026-10-09, the provisioned Developer ID helper
+completed real Production upload, download, reverse updates and logical deletion
+using two isolated local replicas on one Mac. The encrypted schema is deployed
+in the existing shared container. A physical Mac/iPhone exchange remains unverified;
+see [Production validation](../validation/cloudkit-production-2026-10-09.md).
 The apps require macOS 26 and iOS/iPadOS 26 or newer.
 
 ## User behavior
@@ -76,9 +78,13 @@ future schema additions need an explicit compatibility/migration policy.
 ## Apple setup and release
 
 The common team must authorize both App IDs for the same container. Container
-registration is not performed by writing an entitlement file. The current machine
-reported **No Accounts** from Xcode and has no matching Removent provisioning
-profiles; the developer portal also required sign-in during this implementation.
+registration is not performed by writing an entitlement file. The initial
+2026-09-30 implementation encountered Xcode's **No Accounts** error and lacked
+matching provisioning profiles. On 2026-10-09, desktop CloudKit/push authorization
+and a Developer ID profile were configured for `com.alkinum.removent.sync`, reusing
+`iCloud.com.alkinum.removent`. The encrypted payload schema was deployed to
+Production with user authorization. The container identity and mobile App ID
+configuration were preserved; physical mobile distribution acceptance is pending.
 
 1. Sign into the appropriate developer account in Xcode (the release team in this
    repository is `PB8H83VL3Z`). Register/confirm `iCloud.com.alkinum.removent` once.
@@ -129,9 +135,11 @@ acknowledgements, sign-out/account switching and journal crash recovery. UI test
 exercise the mobile settings toggle/configuration status and local opt-out. See
 [`cloudkit-sync-validation.md`](../validation/cloudkit-sync-validation.md) for actual run results.
 
-Live acceptance is still required with correctly signed builds: create/rename/edit/
-delete in both directions; offline concurrent edits; quota/network failures;
-notifications; account switching; schema deployment; and Mac/iPhone convergence.
+The [2026-10-09 Production check](../validation/cloudkit-production-2026-10-09.md)
+verified schema deployment and create/rename/logical-delete propagation using the
+installed beta.3 helper and two independent local replicas. Live acceptance is
+still required for physical Mac/iPhone convergence, endpoint changes, offline
+concurrent edits, quota/network failures, notifications and account switching.
 Password synchronization via iCloud Keychain and
 cross-platform preference sync remain follow-ups, as scoped in the original plan.
 

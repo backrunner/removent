@@ -1,5 +1,10 @@
 # CloudKit connection sync validation — 2026-09-30
 
+This is the historical implementation check. For the subsequently provisioned
+Developer ID helper, Production schema deployment and real CloudKit round trip,
+see [Production validation — 2026-10-09](cloudkit-production-2026-10-09.md).
+The limitations below describe the 2026-09-30 environment.
+
 The local implementation is built and tested. **No real CloudKit exchange has
 been verified.** This machine's device build stopped at Xcode's `No Accounts`
 error, and the available wildcard iOS profile lacks iCloud and Push Notifications.

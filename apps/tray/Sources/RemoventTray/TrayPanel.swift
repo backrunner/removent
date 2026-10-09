@@ -48,8 +48,10 @@ struct TrayPanel: View {
                 }
             }
             Divider()
-            permissionSection
-            Divider()
+            if status == nil || permissionsMissing {
+                permissionSection
+                Divider()
+            }
             sessionsSection
             if let pin = controller.pendingPin, !pin.isEmpty {
                 HStack {

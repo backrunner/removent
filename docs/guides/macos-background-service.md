@@ -113,6 +113,11 @@ system feature does not make this user-session RVP daemon available at preboot.
 
 ## Server-only operation
 
+The desktop clears its permission snapshot while
+the daemon is disconnected and refreshes from the new daemon, including when its
+grants are unchanged. Actual daemon IPC grants, rather than the switch alone,
+determine whether control is available.
+
 The CLI is included inside the installed bundle; no Rust installation is needed.
 Replace `/Applications` with `~/Applications` for a per-user installation.
 

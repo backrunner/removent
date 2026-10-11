@@ -12,7 +12,8 @@ class ReleaseImportsTests(unittest.TestCase):
         directory = Path(__file__).resolve().parent
         program = ('import runpy, sys; sys.path.insert(0, sys.argv[1]); '
                    'module = runpy.run_path(sys.argv[2]); '
-                   'assert callable(module["verify_cloud_sync"])')
+                   'assert callable(module["verify_cloud_sync"]); '
+                   'assert callable(module["verify_component_signatures"])')
         environment = dict(os.environ)
         environment.pop('PYTHONPATH', None)
         with tempfile.TemporaryDirectory() as working_directory:

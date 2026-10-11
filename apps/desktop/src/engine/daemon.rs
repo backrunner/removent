@@ -198,6 +198,10 @@ impl Engine {
                         online.store(false, Ordering::SeqCst);
                         running.store(false, Ordering::SeqCst);
                         sessions.store(0, Ordering::SeqCst);
+                        // HomeView clears its snapshot on disconnect. Reset the
+                        // producer's change cache too, so identical grants in
+                        // the replacement daemon's first status are republished.
+                        *perms.lock().unwrap() = None;
                         let _ = events.send(UiEvent::DaemonOnline(false));
                     }
                     Err(_) => {

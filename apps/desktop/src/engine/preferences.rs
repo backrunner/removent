@@ -108,9 +108,9 @@ impl Engine {
         let generation = self.update.lock().unwrap().generation();
         let shared = self.update.clone();
         let events = self.events_tx.clone();
-        let daemon_req = self.daemon_req.clone();
+        let paths = self.paths.clone();
         self.rt
-            .spawn_blocking(move || updater::run_install(generation, shared, events, daemon_req));
+            .spawn_blocking(move || updater::run_install(generation, shared, events, paths));
         Ok(())
     }
 

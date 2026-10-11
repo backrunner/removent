@@ -165,6 +165,8 @@ fn set_status(
 
 // ---- pure logic (unit-tested) ----
 
+#[cfg(all(test, target_os = "macos"))]
+mod background_tests;
 mod check;
 mod download;
 mod fetch;
@@ -173,13 +175,15 @@ mod install;
 mod manifest;
 #[cfg(test)]
 mod tests;
+#[cfg(target_os = "macos")]
+mod tray;
 mod verify;
 
 pub use check::run_check;
 #[cfg(test)]
 use check::{GithubRelease, fetch_update, release_candidate};
+use download::bundle_version;
 pub use download::run_download;
-use download::{DaemonReq, bundle_version};
 use fetch::curl_get;
 #[cfg(test)]
 use fetch::{decode_fetch_output, fetch_with_retry};
@@ -190,6 +194,8 @@ use install::replace_bundle;
 pub use install::run_install;
 use manifest::eligible_upgrade;
 pub use manifest::{is_newer, parse_version, release_verifying_key, verify_manifest_signature};
+#[cfg(target_os = "macos")]
+pub use tray::refresh_stale_tray;
 #[cfg(test)]
 use verify::release_codesign_requirement;
 use verify::{codesign_verify, curl_download, find_app_bundle, sha256_file};

@@ -71,6 +71,8 @@ bash scripts/release/publish_release.sh
 
 公证 API key 可替换为 Apple ID 那组三个 secrets。私钥只在当前 job 临时文件中出现，退出时清除。不要导出整个钥匙串，只导出用于 Removent 发布的身份。签名 Team ID 固定为 `PB8H83VL3Z`，变更身份需要同时审查更新器和发布验收代码。
 
+打包及发布验收逐一检查主程序、Desktop、CLI、RemoventHost、托盘和 CloudKit helper 的签名，要求各组件使用同一个 Developer ID 身份、固定的组件标识、hardened runtime 和安全时间戳。任何组件身份不一致都会阻止发布；外层 bundle 验签不能替代嵌套组件检查。
+
 CI 使用 `macos-26` arm64 runner、锁定的 Cargo.lock、串行测试、失败即停止。发布任务要求同一提交在 main 的 CI 和 Relay 两个工作流中完整通过检查、开发打包、官网构建及浏览器测试、跨平台 relay 和真实服务验收，再复用构建缓存进行签名构建；不会使用其他提交的检查结果。普通 CI 的 ZIP 明确标记 development/not-notarized，不能替代公开安装包。官网静态文件以 `Removent-website` artifact 保存，托管发布单独进行。
 
 ## 自动更新

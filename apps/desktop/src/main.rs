@@ -176,6 +176,13 @@ fn autostart_tray(paths: DataPaths) {
         return;
     };
     let Some(exe_dir) = exe.parent() else { return };
+    #[cfg(target_os = "macos")]
+    if let Err(error) = updater::refresh_stale_tray(&DataPaths {
+        root: data_root.clone(),
+    }) {
+        tracing::warn!(%error, "could not refresh tray left by an earlier updater");
+        return;
+    }
 
     // .app candidates: Helpers inside the main app bundle (release form), then the
     // bundle's sibling directory (running from dist/ directly).

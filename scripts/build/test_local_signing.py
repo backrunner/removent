@@ -17,12 +17,11 @@ IDENTITIES = (f'  1) {DEVELOPMENT} "{DEVELOPMENT_NAME}"\n'
 class LocalSigningTests(unittest.TestCase):
     @patch.object(local_signing.subprocess, 'check_output', return_value=IDENTITIES)
     @patch.object(local_signing, 'signing_authority', side_effect=[DEVELOPER_ID_NAME, DEVELOPMENT_NAME])
-    def test_installed_app_and_host_keep_independent_certificates(self, authority, output):
+    def test_installed_app_identity_is_shared_by_host(self, authority, output):
         result = local_signing.configure_local_signing({}, Path('/Applications/Removent.app'))
         self.assertEqual(result['REMOVENT_LOCAL_SIGNING_IDENTITY'], DEVELOPER_ID)
-        self.assertEqual(result['REMOVENT_LOCAL_HOST_SIGNING_IDENTITY'], DEVELOPMENT)
-        self.assertEqual(authority.call_args.args[0],
-                         Path('/Applications/Removent.app/Contents/Helpers/RemoventHost.app'))
+        self.assertEqual(result['REMOVENT_LOCAL_HOST_SIGNING_IDENTITY'], DEVELOPER_ID)
+        authority.assert_called_once_with(Path('/Applications/Removent.app'))
 
     @patch.object(local_signing.subprocess, 'check_output', return_value=IDENTITIES)
     @patch.object(local_signing, 'signing_authority', return_value='Apple Development: Unavailable (OTHER)')
@@ -32,12 +31,18 @@ class LocalSigningTests(unittest.TestCase):
 
     @patch.object(local_signing.subprocess, 'check_output', return_value=IDENTITIES)
     @patch.object(local_signing, 'signing_authority', return_value=DEVELOPER_ID_NAME)
-    def test_explicit_host_repair_keeps_outer_app_identity(self, authority, output):
+    def test_explicit_different_host_certificate_is_rejected_before_building(self, authority, output):
         environment = {'REMOVENT_LOCAL_HOST_SIGNING_IDENTITY': DEVELOPMENT}
-        result = local_signing.configure_local_signing(environment, Path('/Applications/Removent.app'))
-        self.assertEqual(result['REMOVENT_LOCAL_SIGNING_IDENTITY'], DEVELOPER_ID)
-        self.assertEqual(result['REMOVENT_LOCAL_HOST_SIGNING_IDENTITY'], DEVELOPMENT)
+        with self.assertRaisesRegex(RuntimeError, 'same signing identity'):
+            local_signing.configure_local_signing(environment, Path('/Applications/Removent.app'))
         self.assertNotIn('REMOVENT_LOCAL_SIGNING_IDENTITY', environment)
+
+    @patch.object(local_signing.subprocess, 'check_output', return_value=IDENTITIES)
+    @patch.object(local_signing, 'signing_authority', return_value=DEVELOPER_ID_NAME)
+    def test_certificate_name_and_hash_can_select_the_same_identity(self, authority, output):
+        result = local_signing.configure_local_signing(
+            {'REMOVENT_LOCAL_HOST_SIGNING_IDENTITY': DEVELOPER_ID_NAME}, Path('/Applications/Removent.app'))
+        self.assertEqual(result['REMOVENT_LOCAL_SIGNING_IDENTITY'], DEVELOPER_ID)
 
     @patch.object(local_signing.subprocess, 'check_output', return_value=IDENTITIES)
     @patch.object(local_signing, 'signing_authority')

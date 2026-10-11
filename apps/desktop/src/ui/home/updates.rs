@@ -45,30 +45,42 @@ impl HomeView {
             }
             UpdateStatus::Available { version, notes } => {
                 state_block = state_block
-                    .child(status_line(
-                        t!("update.available", version = version).to_string(),
-                        colors.accent,
-                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_3()
+                            .child(status_line(
+                                t!("update.available", version = version).to_string(),
+                                colors.accent,
+                            ))
+                            .child(
+                                div()
+                                    .debug_selector(|| "update-download".into())
+                                    .flex_shrink_0()
+                                    .child(
+                                        Button::new("update-download")
+                                            .label(t!("update.download_install").to_string())
+                                            .primary()
+                                            .compact()
+                                            .on_click(cx.listener(|this, _, _w, cx| {
+                                                this.engine.download_update();
+                                                cx.notify();
+                                            })),
+                                    ),
+                            ),
+                    )
                     .when(!notes.is_empty(), |el| {
                         el.child(
                             div()
+                                .id("update-release-notes")
+                                .debug_selector(|| "update-release-notes".into())
                                 .text_size(px(11.))
                                 .text_color(colors.muted_foreground)
                                 .child(notes.clone()),
                         )
-                    })
-                    .child(
-                        div().flex().justify_end().child(
-                            Button::new("update-download")
-                                .label(t!("update.download_install").to_string())
-                                .primary()
-                                .compact()
-                                .on_click(cx.listener(|this, _, _w, cx| {
-                                    this.engine.download_update();
-                                    cx.notify();
-                                })),
-                        ),
-                    );
+                    });
             }
             UpdateStatus::Downloading { version } => {
                 state_block = state_block.child(spinner_line(

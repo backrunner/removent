@@ -15,10 +15,9 @@ from release_meta import VERSION, BASE
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts/build'))
 from configure_cloud_sync import verify as verify_cloud_sync
+from verify_signing import TEAM, verify as verify_component_signatures
 
 DIST = ROOT / 'dist'
-TEAM = 'PB8H83VL3Z'
-REQUIREMENT = f'=anchor apple generic and identifier "com.alkinum.removent" and certificate leaf[subject.OU] = "{TEAM}" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
 
 def run(*args):
     result = subprocess.run(args, capture_output=True)
@@ -59,7 +58,7 @@ def verify_bundle(bundle):
             continue
         required = 0o555 if path.is_dir() else 0o444
         assert path.stat().st_mode & required == required, f'App permissions too restrictive: {path}'
-    run('codesign', '--verify', '--deep', '--strict', '-R', REQUIREMENT, str(bundle))
+    verify_component_signatures(bundle, release=True)
     run('xcrun', 'stapler', 'validate', str(bundle))
     run('spctl', '--assess', '--type', 'execute', str(bundle))
     verify_cloud_sync(bundle / 'Contents/Helpers/RemoventSync.app', TEAM)

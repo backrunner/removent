@@ -79,7 +79,11 @@ permissions.accessibility: Accessibility
 permissions.screen_capture_purpose: Capture this screen to share with peers
 permissions.accessibility_purpose: Receive keyboard and mouse control from peers
 permissions.open_settings: Open System Settings
-permissions.daemon_setup_hint: Allow Removent and RemoventHost in System Settings. If macOS asks for a restart, use Restart Background Service in the menu bar app.
+permissions.daemon_setup_hint: Allow Removent to record the screen and RemoventHost to control this Mac in System Settings. If macOS asks for a restart, use Restart Background Service in the menu bar app.
+permissions.accessibility_setup_hint: Allow RemoventHost to control this Mac in System Settings. If macOS asks for a restart, use Restart Background Service in the menu bar app.
+permissions.screen_capture_setup_hint: Allow Removent to record the screen in System Settings. If macOS asks for a restart, use Restart Background Service in the menu bar app.
+permissions.checking: Checking
+permissions.daemon_unavailable: Service disconnected
 
 settings.title: Settings
 settings.back_to_devices: Back to Devices

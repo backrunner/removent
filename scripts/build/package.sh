@@ -135,7 +135,7 @@ if [ -n "$IDENTITY" ]; then
         --identifier com.alkinum.removent.desktop "$BUNDLE/Contents/MacOS/removent"
     codesign --force --options runtime --timestamp --sign "$IDENTITY" "$BUNDLE"
     echo "==> verify signature"
-    codesign --verify --deep --strict --verbose=2 "$BUNDLE"
+    python3 scripts/build/verify_signing.py "$BUNDLE" --release
 elif [ -n "$LOCAL_IDENTITY" ]; then
     echo "==> Local signing with a stable identity: $LOCAL_IDENTITY"
     if [ -n "${REMOVENT_CLOUDKIT_PROFILE:-}" ]; then
@@ -146,14 +146,14 @@ elif [ -n "$LOCAL_IDENTITY" ]; then
         rm "$BUNDLE/Contents/Helpers/removent-sync.entitlements"
         python3 scripts/build/configure_cloud_sync.py "$BUNDLE/Contents/Helpers/RemoventSync.app" --verify --environment "$CLOUD_ENVIRONMENT"
     else
-        codesign --force --timestamp=none --sign "$LOCAL_IDENTITY" "$BUNDLE/Contents/Helpers/RemoventSync.app"
+        codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" "$BUNDLE/Contents/Helpers/RemoventSync.app"
     fi
-    codesign --force --timestamp=none --sign "$LOCAL_IDENTITY" "$BUNDLE/Contents/Helpers/RemoventTray.app"
-    codesign --force --timestamp=none --sign "$LOCAL_HOST_IDENTITY" "$BUNDLE/Contents/Helpers/RemoventHost.app"
-    codesign --force --timestamp=none --sign "$LOCAL_IDENTITY" --identifier com.alkinum.removent.cli "$BUNDLE/Contents/MacOS/removent-cli"
-    codesign --force --timestamp=none --sign "$LOCAL_IDENTITY" --identifier com.alkinum.removent.desktop "$BUNDLE/Contents/MacOS/removent"
-    codesign --force --timestamp=none --sign "$LOCAL_IDENTITY" "$BUNDLE"
-    codesign --verify --deep --strict --verbose=2 "$BUNDLE"
+    codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" "$BUNDLE/Contents/Helpers/RemoventTray.app"
+    codesign --force --options runtime --timestamp=none --sign "$LOCAL_HOST_IDENTITY" "$BUNDLE/Contents/Helpers/RemoventHost.app"
+    codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" --identifier com.alkinum.removent.cli "$BUNDLE/Contents/MacOS/removent-cli"
+    codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" --identifier com.alkinum.removent.desktop "$BUNDLE/Contents/MacOS/removent"
+    codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" "$BUNDLE"
+    python3 scripts/build/verify_signing.py "$BUNDLE"
 else
     echo "==> WARNING: APPLE_SIGNING_IDENTITY not set; ad-hoc signing (local testing only)"
     codesign --force --deep -s - "$BUNDLE"

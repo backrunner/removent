@@ -2,6 +2,75 @@ use super::*;
 use gpui::{AnyView, TestAppContext};
 
 #[gpui::test]
+fn permissions_clear_during_restart_and_reappear_from_the_new_snapshot(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let directory = tempfile::tempdir().unwrap();
+    let paths = removent_core::DataPaths {
+        root: directory.path().into(),
+    };
+    let (commands, _rx) = tokio::sync::mpsc::channel(1);
+    let engine = Engine::for_ui_test(paths, commands);
+    let slot = Rc::new(std::cell::RefCell::new(None));
+    let out = slot.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        let view = cx.new(|cx| HomeView::new(engine, window, cx));
+        *out.borrow_mut() = Some(view.clone());
+        gpui_component::Root::new(AnyView::from(view), window, cx)
+    });
+    let view = slot.borrow_mut().take().unwrap();
+    cx.simulate_resize(gpui::size(px(1040.), px(1000.)));
+    for event in [
+        UiEvent::DaemonOnline(true),
+        UiEvent::DaemonPermissions {
+            screen_recording: true,
+            accessibility: true,
+        },
+        UiEvent::DaemonOnline(false),
+        UiEvent::DaemonOnline(true),
+        UiEvent::DaemonPermissions {
+            screen_recording: true,
+            accessibility: true,
+        },
+        UiEvent::DaemonPermissions {
+            screen_recording: true,
+            accessibility: false,
+        },
+    ] {
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| view.handle_event(event, window, cx));
+        });
+        cx.run_until_parked();
+        let grants = cx.update(|_, cx| view.read(cx).daemon_perms);
+        for (selectors, grant) in [
+            (
+                [
+                    "permission-granted-screen-capture",
+                    "permission-settings-screen-capture",
+                    "permission-unknown-screen-capture",
+                ],
+                grants.map(|pair| pair.0),
+            ),
+            (
+                [
+                    "permission-granted-accessibility",
+                    "permission-settings-accessibility",
+                    "permission-unknown-accessibility",
+                ],
+                grants.map(|pair| pair.1),
+            ),
+        ] {
+            for (selector, visible) in selectors.into_iter().zip([
+                grant == Some(true),
+                grant == Some(false),
+                grant.is_none(),
+            ]) {
+                assert_eq!(cx.debug_bounds(selector).is_some(), visible);
+            }
+        }
+    }
+}
+
+#[gpui::test]
 fn quick_discovery_enable_persists_and_keeps_retry_available_on_save_failure(
     cx: &mut TestAppContext,
 ) {
@@ -233,6 +302,62 @@ fn update_channel_controls_persist_and_ignore_obsolete_ready_events(cx: &mut Tes
             UpdateChannel::Beta
         )
     });
+}
+
+#[gpui::test]
+fn update_action_stays_above_long_release_notes_in_both_themes(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let directory = tempfile::tempdir().unwrap();
+    let paths = removent_core::DataPaths {
+        root: directory.path().into(),
+    };
+    let (commands, _rx) = tokio::sync::mpsc::channel(1);
+    let engine = Engine::for_ui_test(paths, commands);
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        let view = cx.new(|cx| HomeView::new(engine, window, cx));
+        view.update(cx, |view, _| {
+            view.settings_open = true;
+            view.settings_section = 4;
+            view.update_status = UpdateStatus::Available {
+                version: "9.0.0".into(),
+                notes: "修复连接恢复，改进远程画面与后台服务。\n".repeat(80),
+            };
+        });
+        gpui_component::Root::new(AnyView::from(view), window, cx)
+    });
+    for dark in [false, true] {
+        cx.update(|window, cx| {
+            let mode = if dark {
+                gpui_component::ThemeMode::Dark
+            } else {
+                gpui_component::ThemeMode::Light
+            };
+            gpui_component::Theme::change(mode, Some(window), cx);
+            crate::theme::apply(dark, cx);
+        });
+        for size in [
+            gpui::size(px(860.), px(600.)),
+            gpui::size(px(1040.), px(700.)),
+        ] {
+            cx.simulate_resize(size);
+            cx.run_until_parked();
+            let button = cx
+                .debug_bounds("update-download")
+                .expect("update action renders");
+            let notes = cx
+                .debug_bounds("update-release-notes")
+                .expect("release notes render");
+            assert!(
+                button.bottom() <= notes.top(),
+                "action must precede the release notes"
+            );
+            assert!(button.right() <= size.width);
+            assert!(
+                button.bottom() <= size.height,
+                "action must be visible without scrolling"
+            );
+        }
+    }
 }
 
 #[gpui::test]

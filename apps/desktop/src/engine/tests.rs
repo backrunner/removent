@@ -1,6 +1,86 @@
 use super::*;
 
 #[test]
+fn daemon_restart_republishes_unchanged_permissions_and_then_live_changes() {
+    let directory = tempfile::tempdir_in("/tmp").unwrap();
+    let paths = DataPaths {
+        root: directory.path().to_owned(),
+    };
+    paths.ensure_layout().unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let engine = Engine::with_state(runtime, paths.clone(), Settings::default());
+    let receiver = engine.events_rx.lock().unwrap().take().unwrap();
+    let server = engine.rt.spawn(async move {
+        let listener = tokio::net::UnixListener::bind(paths.daemon_socket()).unwrap();
+        for _ in 0..2 {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (reader, mut writer) = socket.into_split();
+            let mut reader = tokio::io::BufReader::new(reader);
+            let _: IpcRequest = removent_core::ipc::read_msg(&mut reader)
+                .await
+                .unwrap()
+                .unwrap();
+            let report = StatusReport {
+                screen_recording_granted: true,
+                accessibility_granted: false,
+                ..Default::default()
+            };
+            // Repeated polls within this connection must not spam the UI.
+            let response = IpcResponse::Status(Box::new(report));
+            for _ in 0..2 {
+                removent_core::ipc::write_msg(&mut writer, &response)
+                    .await
+                    .unwrap();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        // A final daemon reports a grant changed in System Settings.
+        let (socket, _) = listener.accept().await.unwrap();
+        let (reader, mut writer) = socket.into_split();
+        let mut reader = tokio::io::BufReader::new(reader);
+        let _: IpcRequest = removent_core::ipc::read_msg(&mut reader)
+            .await
+            .unwrap()
+            .unwrap();
+        let report = StatusReport {
+            screen_recording_granted: true,
+            accessibility_granted: true,
+            ..Default::default()
+        };
+        removent_core::ipc::write_msg(&mut writer, &IpcResponse::Status(Box::new(report)))
+            .await
+            .unwrap();
+    });
+    engine.spawn_daemon_link();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut grants = Vec::new();
+    while grants.len() < 3 {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        match receiver
+            .recv_timeout(remaining)
+            .expect("daemon link must refresh grants after each restart")
+        {
+            UiEvent::DaemonPermissions {
+                screen_recording,
+                accessibility,
+            } => {
+                grants.push((screen_recording, accessibility));
+            }
+            UiEvent::DaemonOnline(false) => {
+                assert!(engine.daemon_perms.lock().unwrap().is_none());
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(grants, [(true, false), (true, false), (true, true)]);
+    engine.rt.block_on(server).unwrap();
+}
+
+#[test]
 fn update_channel_switch_is_persistent_and_transactional() {
     use removent_core::UpdateChannel::{Beta, Stable};
     let dir = tempfile::tempdir().unwrap();

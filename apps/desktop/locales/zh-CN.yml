@@ -79,7 +79,11 @@ permissions.accessibility: 辅助功能
 permissions.screen_capture_purpose: 采集本机画面共享给对端
 permissions.accessibility_purpose: 接收对端键鼠控制
 permissions.open_settings: 打开系统设置
-permissions.daemon_setup_hint: 请在系统设置允许 Removent 和 RemoventHost（屏幕共享服务）。若系统要求重新启动，请在托盘选项中重启后台服务。
+permissions.daemon_setup_hint: 请在系统设置允许 Removent 录屏，并允许 RemoventHost（屏幕共享服务）控制本机。若系统要求重新启动，请在托盘选项中重启后台服务。
+permissions.accessibility_setup_hint: 请在系统设置允许 RemoventHost（屏幕共享服务）控制本机。若系统要求重新启动，请在托盘选项中重启后台服务。
+permissions.screen_capture_setup_hint: 请在系统设置允许 Removent 录屏。若系统要求重新启动，请在托盘选项中重启后台服务。
+permissions.checking: 正在检查
+permissions.daemon_unavailable: 服务未连接
 
 settings.title: 设置
 settings.back_to_devices: 返回设备

@@ -387,7 +387,7 @@ fn stale_download_and_install_requests_cannot_downgrade() {
             };
             s.staged_app = Some(PathBuf::from("/nonexistent/Removent.app"));
         }
-        run_install(0, shared, tx, Arc::new(Mutex::new(None)));
+        run_install(0, shared, tx, test_paths());
         assert!(matches!(
             rx.try_recv().unwrap(),
             UiEvent::UpdateStatus(UpdateStatus::Failed(_))
@@ -430,7 +430,7 @@ fn queued_actions_do_not_survive_switching_channels_and_back() {
         };
         s.staged_app = Some(PathBuf::from("/nonexistent/Removent.app"));
     }
-    run_install(0, shared.clone(), tx, Arc::new(Mutex::new(None)));
+    run_install(0, shared.clone(), tx, test_paths());
     assert!(matches!(
         shared.lock().unwrap().status,
         UpdateStatus::ReadyToInstall { .. }
@@ -588,7 +588,7 @@ fn run_install_ignores_non_ready_state() {
         version: "0.1.1".into(),
     };
     let (tx, rx) = std::sync::mpsc::channel();
-    run_install(0, shared.clone(), tx, Arc::new(Mutex::new(None)));
+    run_install(0, shared.clone(), tx, test_paths());
     assert_eq!(
         shared.lock().unwrap().status,
         UpdateStatus::Downloading {
@@ -616,7 +616,7 @@ fn run_install_claims_swap_atomically() {
         s.staged_app = Some(PathBuf::from("/nonexistent/Removent.app"));
     }
     let (tx, rx) = std::sync::mpsc::channel();
-    run_install(0, shared.clone(), tx, Arc::new(Mutex::new(None)));
+    run_install(0, shared.clone(), tx, test_paths());
     assert!(matches!(
         rx.try_recv().unwrap(),
         UiEvent::UpdateStatus(UpdateStatus::Swapping { .. })

@@ -416,6 +416,7 @@ impl HomeView {
                         "settings.system",
                         "settings.system_description",
                     ))
+                    .child(self.render_update_section(cx))
                     .child(
                         form_group(cx).child(
                             row()
@@ -514,8 +515,7 @@ impl HomeView {
                                         ),
                                 ),
                         ),
-                    )
-                    .child(self.render_update_section(cx));
+                    );
             }
         }
         div()

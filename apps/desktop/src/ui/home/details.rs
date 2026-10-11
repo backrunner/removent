@@ -7,20 +7,23 @@ impl HomeView {
         let colors = cx.theme().colors;
         let connecting = self.connecting.is_some();
         let permissions = |kind: PermissionKind| {
-            let (screen_recording, accessibility) = self.daemon_perms.unwrap_or((false, false));
-            let granted = match kind {
-                PermissionKind::ScreenCapture => screen_recording,
-                PermissionKind::Accessibility => accessibility,
-            };
+            let granted = self
+                .daemon_perms
+                .map(|(screen_recording, accessibility)| match kind {
+                    PermissionKind::ScreenCapture => screen_recording,
+                    PermissionKind::Accessibility => accessibility,
+                });
             div()
+                .debug_selector(move || format!("permission-{}", kind.slug()))
                 .flex()
                 .items_center()
                 .gap_3()
                 .min_h(px(36.))
                 .child(div().flex_1().text_size(px(12.)).child(kind.title()))
-                .when(granted, |el| {
+                .when(granted == Some(true), |el| {
                     el.child(
                         div()
+                            .debug_selector(move || format!("permission-granted-{}", kind.slug()))
                             .flex()
                             .items_center()
                             .gap_2()
@@ -33,19 +36,40 @@ impl HomeView {
                             .child(icon_16("check").text_color(colors.muted_foreground)),
                     )
                 })
-                .when(!granted, |el| {
+                .when(granted == Some(false), |el| {
                     el.child(
-                        Button::new(ElementId::Name(format!("perm-{}", kind.slug()).into()))
-                            .label(t!("permissions.request").to_string())
-                            .disabled(!self.daemon_online)
-                            .tooltip(kind.purpose())
-                            .outline()
-                            .small()
-                            .h(px(28.))
-                            .rounded(px(6.))
-                            .on_click(cx.listener(move |this, _, _, _| {
-                                this.engine.request_host_permission(kind.host_permission());
-                            })),
+                        div()
+                            .debug_selector(move || format!("permission-settings-{}", kind.slug()))
+                            .child(
+                                Button::new(ElementId::Name(
+                                    format!("perm-{}", kind.slug()).into(),
+                                ))
+                                .label(t!("permissions.open_settings").to_string())
+                                .disabled(!self.daemon_online)
+                                .tooltip(kind.purpose())
+                                .outline()
+                                .small()
+                                .h(px(28.))
+                                .rounded(px(6.))
+                                .on_click(cx.listener(
+                                    move |this, _, _, _| {
+                                        this.engine.request_host_permission(kind.host_permission());
+                                    },
+                                )),
+                            ),
+                    )
+                })
+                .when(granted.is_none(), |el| {
+                    el.child(
+                        div()
+                            .debug_selector(move || format!("permission-unknown-{}", kind.slug()))
+                            .text_size(px(12.))
+                            .text_color(colors.muted_foreground)
+                            .child(if self.daemon_online {
+                                t!("permissions.checking").to_string()
+                            } else {
+                                t!("permissions.daemon_unavailable").to_string()
+                            }),
                     )
                 })
         };
@@ -172,7 +196,7 @@ impl HomeView {
                                     div()
                                         .text_size(px(12.))
                                         .text_color(colors.warning)
-                                        .child(t!("permissions.daemon_setup_hint").to_string()),
+                                        .child(crate::permissions::setup_hint(self.daemon_perms)),
                                 )
                             })
                             .child(

@@ -6,6 +6,14 @@ pub enum PermissionKind {
     Accessibility,
 }
 
+pub fn setup_hint(grants: Option<(bool, bool)>) -> String {
+    match grants {
+        Some((true, false)) => rust_i18n::t!("permissions.accessibility_setup_hint").to_string(),
+        Some((false, true)) => rust_i18n::t!("permissions.screen_capture_setup_hint").to_string(),
+        _ => rust_i18n::t!("permissions.daemon_setup_hint").to_string(),
+    }
+}
+
 impl PermissionKind {
     pub fn host_permission(self) -> removent_core::ipc::HostPermission {
         match self {

@@ -140,10 +140,3 @@ pub(super) fn bundle_version(app: &Path) -> Result<String, String> {
     }
     Ok(value)
 }
-
-// ---- swap + relaunch ----
-
-/// daemon IPC request outlet (shared with the engine); used to stop the old
-/// daemon before relaunching after an update.
-pub(super) type DaemonReq =
-    Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<removent_core::ipc::IpcRequest>>>>;

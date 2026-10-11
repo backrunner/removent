@@ -6,7 +6,7 @@ pub fn run_install(
     generation: u64,
     shared: Arc<Mutex<UpdateShared>>,
     events: std::sync::mpsc::Sender<UiEvent>,
-    daemon_req: DaemonReq,
+    paths: DataPaths,
 ) {
     // Concurrency guard (double-click on "Install"): claim the ReadyToInstall →
     // Swapping transition inside one lock; a second call returns instead of
@@ -37,43 +37,68 @@ pub fn run_install(
         let _ = events.send(UiEvent::UpdateStatus(s.status.clone()));
         (staged, version)
     };
-    let resume_service =
-        match removent_core::service_intent::is_stopped(&removent_core::DataPaths::resolve()) {
-            Ok(stopped) => !stopped,
-            Err(error) => {
-                set_status(&shared, &events, UpdateStatus::Failed(error.to_string()));
-                return;
-            }
-        };
+    let resume_service = match removent_core::service_intent::is_stopped(&paths) {
+        Ok(stopped) => !stopped,
+        Err(error) => {
+            set_status(&shared, &events, UpdateStatus::Failed(error.to_string()));
+            return;
+        }
+    };
+    #[cfg(target_os = "macos")]
+    let tray_was_running = match current_bundle()
+        .map(|bundle| super::tray::stop_tray(&paths, &bundle))
+        .transpose()
+    {
+        Ok(running) => running.unwrap_or(false),
+        Err(error) => {
+            set_status(
+                &shared,
+                &events,
+                UpdateStatus::Failed(t!("update.err.swap", err = error.to_string()).to_string()),
+            );
+            return;
+        }
+    };
     match swap_bundle(&staged, &version) {
         Ok(bundle) => {
-            // Stop the old daemon before relaunching: it ships inside the
-            // bundle, and a daemon spawned by the app (not launchd) would
-            // otherwise keep running the old version while the new app
-            // connects to it. launchd restarts it via the kickstart in
-            // relaunch; otherwise the new app re-spawns it on demand.
-            if let Some(tx) = daemon_req.lock().unwrap().as_ref() {
-                let _ = tx.send(removent_core::ipc::IpcRequest::Shutdown);
-                std::thread::sleep(std::time::Duration::from_millis(300));
-            }
             set_status(&shared, &events, UpdateStatus::Relaunching);
-            if let Err(error) = relaunch(&bundle, resume_service) {
+            if let Err(error) = relaunch(&bundle, &paths, resume_service) {
+                // The replacement tray must release its lock before restoring
+                // the old bundle, otherwise rollback leaves a new tray running.
+                #[cfg(target_os = "macos")]
+                if let Err(stop_error) = super::tray::stop_tray(&paths, &bundle) {
+                    set_status(
+                        &shared,
+                        &events,
+                        UpdateStatus::Failed(
+                            t!(
+                                "update.err.swap_rollback",
+                                err = format!("{error}; {stop_error}"),
+                                backup = bundle.with_extension("app.old").display().to_string(),
+                            )
+                            .to_string(),
+                        ),
+                    );
+                    return;
+                }
                 let backup = bundle.with_extension("app.old");
                 let failed = bundle.with_extension("app.failed");
                 let restored = std::fs::rename(&bundle, &failed)
                     .and_then(|()| std::fs::rename(&backup, &bundle));
                 let reason = if restored.is_ok() {
                     let _ = std::fs::remove_dir_all(failed);
-                    // The replacement daemon may already have started. Put
-                    // the restored bundle's server back under the same job.
+                    // Restore all background components, retaining manual stop.
                     #[cfg(target_os = "macos")]
-                    if resume_service
-                        && let Ok(service) = removent_core::service::Service::new(
-                            removent_core::DataPaths::resolve(),
-                            bundle.join("Contents/MacOS/removentd"),
-                        )
-                    {
-                        let _ = service.restart();
+                    if let Err(recovery) = restart_background(&bundle, &paths, resume_service) {
+                        set_status(
+                            &shared,
+                            &events,
+                            UpdateStatus::Failed(
+                                t!("update.err.swap", err = format!("{error}; {recovery}"),)
+                                    .to_string(),
+                            ),
+                        );
+                        return;
                     }
                     t!("update.err.swap", err = error.to_string()).to_string()
                 } else {
@@ -87,7 +112,18 @@ pub fn run_install(
                 set_status(&shared, &events, UpdateStatus::Failed(reason));
             }
         }
-        Err(reason) => set_status(&shared, &events, UpdateStatus::Failed(reason)),
+        Err(reason) => {
+            #[cfg(target_os = "macos")]
+            let reason = if tray_was_running
+                && let Some(bundle) = current_bundle()
+                && let Err(error) = super::tray::start_tray(&paths, &bundle)
+            {
+                format!("{reason} ({error})")
+            } else {
+                reason
+            };
+            set_status(&shared, &events, UpdateStatus::Failed(reason));
+        }
     }
 }
 
@@ -165,20 +201,45 @@ pub(super) fn move_into_place(staged: &Path, bundle: &Path) -> std::io::Result<(
     }
 }
 
-/// Restart the daemon (it ships inside the bundle; best-effort — it may not be
-/// loaded at all), open the new app and exit only if Launch Services accepts it.
-pub(super) fn relaunch(bundle: &Path, resume_service: bool) -> std::io::Result<()> {
-    #[cfg(target_os = "macos")]
+/// Service::restart serializes against watchdogs, unloads KeepAlive and waits
+/// for the old daemon lock to release before launching the new executable.
+#[cfg(target_os = "macos")]
+pub(super) fn restart_background(
+    bundle: &Path,
+    paths: &DataPaths,
+    resume_service: bool,
+) -> std::io::Result<()> {
+    let service = removent_core::service::Service::new(
+        paths.clone(),
+        bundle.join("Contents/MacOS/removentd"),
+    )
+    .map_err(std::io::Error::other)?;
     if resume_service {
-        removent_core::service::Service::new(
-            removent_core::DataPaths::resolve(),
-            bundle.join("Contents/MacOS/removentd"),
-        )
-        .and_then(|service| service.restart())
-        .map_err(std::io::Error::other)?;
+        service.restart().map_err(std::io::Error::other)?;
+    } else {
+        service.stop().map_err(std::io::Error::other)?;
     }
+    if std::env::var("REMOVENT_NO_TRAY").as_deref() != Ok("1") {
+        super::tray::start_tray(paths, bundle)?;
+    }
+    Ok(())
+}
+
+/// Verify the new background processes before opening the desktop. Retain the
+/// data directory when Launch Services creates the replacement app process.
+pub(super) fn relaunch(
+    bundle: &Path,
+    paths: &DataPaths,
+    resume_service: bool,
+) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    restart_background(bundle, paths, resume_service)?;
+    #[cfg(not(target_os = "macos"))]
+    let _ = resume_service;
     let opened = Command::new("/usr/bin/open")
         .arg("-n")
+        .arg("--env")
+        .arg(format!("REMOVENT_DATA_DIR={}", paths.root.display()))
         .arg(bundle)
         .status()?;
     if !opened.success() {

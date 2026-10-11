@@ -42,12 +42,22 @@ def configure_local_signing(environment, destination):
         if selected:
             environment['REMOVENT_LOCAL_SIGNING_IDENTITY'] = selected
     if not environment.get('REMOVENT_LOCAL_HOST_SIGNING_IDENTITY'):
-        # Screen capture can be attributed to the outer app, while control is
-        # attributed to RemoventHost. Their existing certificates can differ.
-        host = None if explicit else installed_identity(destination / 'Contents/Helpers/RemoventHost.app')
-        host = host or environment.get('REMOVENT_LOCAL_SIGNING_IDENTITY')
+        # Use one identity for the desktop and all helpers, just like releases.
+        # Keeping an older host certificate would perpetuate mixed TCC identities.
+        host = environment.get('REMOVENT_LOCAL_SIGNING_IDENTITY')
         if host:
             environment['REMOVENT_LOCAL_HOST_SIGNING_IDENTITY'] = host
+    primary = environment.get('REMOVENT_LOCAL_SIGNING_IDENTITY')
+    host = environment.get('REMOVENT_LOCAL_HOST_SIGNING_IDENTITY')
+
+    def certificate(selector):
+        matches = [digest for digest, name in identities if selector in (digest, name)]
+        if len(matches) != 1:
+            raise RuntimeError('Local signing identity is unavailable or ambiguous')
+        return matches[0]
+
+    if primary and host and certificate(primary) != certificate(host):
+        raise RuntimeError('Desktop and RemoventHost must use the same signing identity')
     if not environment.get('REMOVENT_CLOUDKIT_PROFILE'):
         profile = destination / 'Contents/Helpers/RemoventSync.app/Contents/embedded.provisionprofile'
         if profile.is_file():

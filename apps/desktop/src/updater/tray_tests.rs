@@ -13,34 +13,85 @@ fn fake_tray(bundle: &Path, paths: &DataPaths) -> Running {
     let executable = tray_bundle(bundle).join("Contents/MacOS/RemoventTray");
     std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
     if !executable.exists() {
-        std::fs::copy("/bin/sleep", &executable).unwrap();
+        // Do not re-sign a protected system executable (arm64e/platform code).
+        // Build ordinary native code so CI exercises our process/lock handling
+        // without depending on the runner's trust cache for /bin/sleep.
+        let source = executable.with_extension("c");
+        std::fs::write(
+            &source,
+            r#"#include <fcntl.h>
+#include <stdio.h>
+#include <sys/file.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+    if (argc != 2) return 2;
+    int fd = open(argv[1], O_CREAT | O_RDWR, 0600);
+    if (fd < 0 || flock(fd, LOCK_EX | LOCK_NB) != 0) {
+        perror("fixture lock");
+        return 3;
+    }
+    for (;;) pause();
+}
+"#,
+        )
+        .unwrap();
         assert!(
-            Command::new("/usr/bin/codesign")
-                .args(["--force", "--sign", "-"])
+            Command::new("/usr/bin/xcrun")
+                .args(["clang", "-arch"])
+                .arg(if cfg!(target_arch = "aarch64") {
+                    "arm64"
+                } else {
+                    "x86_64"
+                })
+                .arg(&source)
+                .arg("-o")
                 .arg(&executable)
-                .output()
+                .status()
                 .unwrap()
-                .status
                 .success()
+        );
+        std::fs::remove_file(source).unwrap();
+        let signing = Command::new("/usr/bin/codesign")
+            .args([
+                "--force",
+                "--sign",
+                "-",
+                "--identifier",
+                "com.alkinum.removent.qa.tray",
+            ])
+            .arg(&executable)
+            .output()
+            .unwrap();
+        assert!(
+            signing.status.success(),
+            "fixture signing failed: {}",
+            String::from_utf8_lossy(&signing.stderr)
         );
     }
     paths.ensure_layout().unwrap();
-    let child = Command::new("/usr/bin/python3")
-        .arg("-c")
-        .arg("import os,fcntl,sys; f=os.open(sys.argv[1],os.O_CREAT|os.O_RDWR,0o600); fcntl.flock(f,fcntl.LOCK_EX); os.set_inheritable(f,True); os.execv(sys.argv[2],[sys.argv[2],'60'])")
+    let child = Command::new(&executable)
         .arg(paths.root.join(".tray.lock"))
-        .arg(&executable)
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn().unwrap();
-    let running = Running(child);
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let mut running = Running(child);
     let deadline = Instant::now() + Duration::from_secs(5);
     while !locked(paths).unwrap()
         || fingerprint(running.0.id() as i32, &executable)
             .unwrap()
             .is_none()
     {
-        assert!(Instant::now() < deadline, "fake tray did not start");
+        assert!(
+            running.0.try_wait().unwrap().is_none(),
+            "fake tray exited before acquiring its lock: {}",
+            executable.display()
+        );
+        assert!(
+            Instant::now() < deadline,
+            "fake tray did not start: {}",
+            executable.display()
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
     running

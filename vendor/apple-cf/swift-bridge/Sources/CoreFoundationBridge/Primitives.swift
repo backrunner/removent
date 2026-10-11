@@ -12,6 +12,28 @@ public func cf_string_create_with_cstring(_ value: UnsafePointer<CChar>) -> Unsa
     return Unmanaged.passRetained(string).toOpaque()
 }
 
+@_cdecl("acf_cf_string_create_with_bytes")
+public func acf_cf_string_create_with_bytes(_ bytes: UnsafePointer<UInt8>?, _ length: Int) -> UnsafeMutableRawPointer? {
+    guard length >= 0, bytes != nil || length == 0 else { return nil }
+    guard let string = CFStringCreateWithBytes(nil, bytes, length, CFStringBuiltInEncodings.UTF8.rawValue, false) else {
+        return nil
+    }
+    return Unmanaged.passRetained(string).toOpaque()
+}
+
+@_cdecl("acf_cf_string_copy_utf16")
+public func acf_cf_string_copy_utf16(
+    _ value: UnsafeMutableRawPointer,
+    _ buffer: UnsafeMutablePointer<UniChar>?,
+    _ capacity: Int
+) -> Int {
+    let string = Unmanaged<CFString>.fromOpaque(value).takeUnretainedValue()
+    let length = CFStringGetLength(string)
+    guard let buffer, length <= capacity else { return length }
+    CFStringGetCharacters(string, CFRange(location: 0, length: length), buffer)
+    return length
+}
+
 @_cdecl("cf_string_copy_cstring")
 public func cf_string_copy_cstring(_ value: UnsafeMutableRawPointer) -> UnsafeMutablePointer<CChar>? {
     let string = Unmanaged<CFString>.fromOpaque(value).takeUnretainedValue()
@@ -38,9 +60,21 @@ public func cf_number_create_i64(_ value: Int64) -> UnsafeMutableRawPointer? {
 
 @_cdecl("cf_number_create_u64")
 public func cf_number_create_u64(_ value: UInt64) -> UnsafeMutableRawPointer? {
-    var value = value
-    guard let number = CFNumberCreate(nil, .longLongType, &value) else { return nil }
+    guard var signed = Int64(exactly: value) else {
+        return Unmanaged.passRetained(NSNumber(value: value) as CFNumber).toOpaque()
+    }
+    guard let number = CFNumberCreate(nil, .sInt64Type, &signed) else { return nil }
     return Unmanaged.passRetained(number).toOpaque()
+}
+
+private func acfNumberIsUnsigned64(_ number: CFNumber) -> Bool {
+    String(cString: (number as NSNumber).objCType) == "Q"
+}
+
+private func acfNumberDoubleValue(_ number: CFNumber) -> Double {
+    var double = 0.0
+    CFNumberGetValue(number, .doubleType, &double)
+    return double
 }
 
 @_cdecl("cf_number_create_f64")
@@ -53,13 +87,37 @@ public func cf_number_create_f64(_ value: Double) -> UnsafeMutableRawPointer? {
 @_cdecl("cf_number_get_i64")
 public func cf_number_get_i64(_ value: UnsafeMutableRawPointer, _ out: UnsafeMutablePointer<Int64>) -> Bool {
     let number = Unmanaged<CFNumber>.fromOpaque(value).takeUnretainedValue()
+    if CFNumberIsFloatType(number) {
+        guard let exact = Int64(exactly: acfNumberDoubleValue(number)) else { return false }
+        out.pointee = exact
+        return true
+    }
+    if acfNumberIsUnsigned64(number) {
+        guard let exact = Int64(exactly: (number as NSNumber).uint64Value) else { return false }
+        out.pointee = exact
+        return true
+    }
     return CFNumberGetValue(number, .sInt64Type, out)
 }
 
 @_cdecl("cf_number_get_u64")
 public func cf_number_get_u64(_ value: UnsafeMutableRawPointer, _ out: UnsafeMutablePointer<UInt64>) -> Bool {
     let number = Unmanaged<CFNumber>.fromOpaque(value).takeUnretainedValue()
-    return CFNumberGetValue(number, .longLongType, out)
+    if CFNumberIsFloatType(number) {
+        guard let exact = UInt64(exactly: acfNumberDoubleValue(number)) else { return false }
+        out.pointee = exact
+        return true
+    }
+    if acfNumberIsUnsigned64(number) {
+        out.pointee = (number as NSNumber).uint64Value
+        return true
+    }
+    var signed: Int64 = 0
+    guard CFNumberGetValue(number, .sInt64Type, &signed), let exact = UInt64(exactly: signed) else {
+        return false
+    }
+    out.pointee = exact
+    return true
 }
 
 @_cdecl("cf_number_get_f64")
@@ -91,12 +149,17 @@ public func cf_data_get_length(_ value: UnsafeMutableRawPointer) -> Int {
     return CFDataGetLength(data)
 }
 
-@_cdecl("cf_data_copy_bytes")
-public func cf_data_copy_bytes(_ value: UnsafeMutableRawPointer, _ buffer: UnsafeMutablePointer<UInt8>) {
+@_cdecl("acf_cf_data_copy_bytes")
+public func acf_cf_data_copy_bytes(
+    _ value: UnsafeMutableRawPointer,
+    _ buffer: UnsafeMutablePointer<UInt8>?,
+    _ capacity: Int
+) -> Int {
     let data = Unmanaged<CFData>.fromOpaque(value).takeUnretainedValue()
     let length = CFDataGetLength(data)
-    guard let bytePtr = CFDataGetBytePtr(data), length > 0 else { return }
-    buffer.update(from: bytePtr, count: length)
+    guard let buffer, length <= capacity else { return length }
+    CFDataGetBytes(data, CFRange(location: 0, length: length), buffer)
+    return length
 }
 
 @_cdecl("cf_date_get_type_id")
@@ -185,10 +248,30 @@ public func cf_error_create(
     return Unmanaged.passRetained(error).toOpaque()
 }
 
+@_cdecl("acf_cf_error_create")
+public func acf_cf_error_create(
+    _ domain: UnsafeMutableRawPointer,
+    _ code: Int64,
+    _ description: UnsafeMutableRawPointer?
+) -> UnsafeMutableRawPointer? {
+    let domain = Unmanaged<CFString>.fromOpaque(domain).takeUnretainedValue()
+    var userInfo: CFDictionary?
+    if let description {
+        let descriptionString = Unmanaged<CFString>.fromOpaque(description).takeUnretainedValue()
+        let dictionary = [kCFErrorLocalizedDescriptionKey as AnyHashable: descriptionString] as NSDictionary
+        userInfo = unsafeBitCast(dictionary, to: CFDictionary.self)
+    }
+    guard let code = CFIndex(exactly: code), let error = CFErrorCreate(nil, domain, code, userInfo) else {
+        return nil
+    }
+    return Unmanaged.passRetained(error).toOpaque()
+}
+
 @_cdecl("cf_error_get_domain")
 public func cf_error_get_domain(_ value: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer? {
     let error = Unmanaged<CFError>.fromOpaque(value).takeUnretainedValue()
-    return Unmanaged.passRetained(CFErrorGetDomain(error)).toOpaque()
+    guard let domain = CFErrorGetDomain(error) else { return nil }
+    return Unmanaged.passRetained(domain).toOpaque()
 }
 
 @_cdecl("cf_error_get_code")

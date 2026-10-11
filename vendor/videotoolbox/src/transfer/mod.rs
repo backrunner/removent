@@ -90,7 +90,6 @@ pub struct PixelTransferSession {
 }
 
 unsafe impl Send for PixelTransferSession {}
-unsafe impl Sync for PixelTransferSession {}
 
 crate::utils::retained::vt_retained!(
     PixelTransferSession,
@@ -113,8 +112,9 @@ impl PixelTransferSession {
     /// Returns [`VTError::SessionCreateFailed`] if Apple refuses.
     pub fn new() -> Result<Self, VTError> {
         let mut session: ffi::VTPixelTransferSessionRef = ptr::null_mut();
-        let status =
-            unsafe { ffi::VTPixelTransferSessionCreate(ffi::kCFAllocatorDefault, &mut session) };
+        let status = unsafe {
+            ffi::VTPixelTransferSessionCreate(ffi::kCFAllocatorDefault, &raw mut session)
+        };
         if status != 0 || session.is_null() {
             return Err(VTError::SessionCreateFailed(status));
         }
@@ -261,7 +261,6 @@ pub struct PixelRotationSession {
 }
 
 unsafe impl Send for PixelRotationSession {}
-unsafe impl Sync for PixelRotationSession {}
 
 crate::utils::retained::vt_retained!(
     PixelRotationSession,
@@ -284,8 +283,9 @@ impl PixelRotationSession {
     /// Returns [`VTError::SessionCreateFailed`] if Apple refuses.
     pub fn new() -> Result<Self, VTError> {
         let mut session: ffi::VTPixelRotationSessionRef = ptr::null_mut();
-        let status =
-            unsafe { ffi::VTPixelRotationSessionCreate(ffi::kCFAllocatorDefault, &mut session) };
+        let status = unsafe {
+            ffi::VTPixelRotationSessionCreate(ffi::kCFAllocatorDefault, &raw mut session)
+        };
         if status != 0 || session.is_null() {
             return Err(VTError::SessionCreateFailed(status));
         }
@@ -448,40 +448,41 @@ mod tests {
     #[test]
     fn rotation_variants_map_to_expected_cfstring_constants() {
         assert_eq!(Rotation::None.as_cf_string(), unsafe { ffi::kVTRotation_0 });
-        assert_eq!(
-            Rotation::Clockwise90.as_cf_string(),
-            unsafe { ffi::kVTRotation_CW90 }
-        );
-        assert_eq!(Rotation::Half180.as_cf_string(), unsafe { ffi::kVTRotation_180 });
-        assert_eq!(
-            Rotation::CounterClockwise90.as_cf_string(),
-            unsafe { ffi::kVTRotation_CCW90 }
-        );
+        assert_eq!(Rotation::Clockwise90.as_cf_string(), unsafe {
+            ffi::kVTRotation_CW90
+        });
+        assert_eq!(Rotation::Half180.as_cf_string(), unsafe {
+            ffi::kVTRotation_180
+        });
+        assert_eq!(Rotation::CounterClockwise90.as_cf_string(), unsafe {
+            ffi::kVTRotation_CCW90
+        });
     }
 
     #[test]
     fn scaling_modes_map_to_expected_cfstring_constants() {
-        assert_eq!(ScalingMode::Normal.as_cf_string(), unsafe { ffi::kVTScalingMode_Normal });
+        assert_eq!(ScalingMode::Normal.as_cf_string(), unsafe {
+            ffi::kVTScalingMode_Normal
+        });
         assert_eq!(
             ScalingMode::CropSourceToCleanAperture.as_cf_string(),
             unsafe { ffi::kVTScalingMode_CropSourceToCleanAperture }
         );
-        assert_eq!(
-            ScalingMode::Letterbox.as_cf_string(),
-            unsafe { ffi::kVTScalingMode_Letterbox }
-        );
-        assert_eq!(ScalingMode::Trim.as_cf_string(), unsafe { ffi::kVTScalingMode_Trim });
+        assert_eq!(ScalingMode::Letterbox.as_cf_string(), unsafe {
+            ffi::kVTScalingMode_Letterbox
+        });
+        assert_eq!(ScalingMode::Trim.as_cf_string(), unsafe {
+            ffi::kVTScalingMode_Trim
+        });
     }
 
     #[test]
     fn downsampling_modes_map_to_expected_cfstring_constants() {
-        assert_eq!(
-            DownsamplingMode::Decimate.as_cf_string(),
-            unsafe { ffi::kVTDownsamplingMode_Decimate }
-        );
-        assert_eq!(
-            DownsamplingMode::Average.as_cf_string(),
-            unsafe { ffi::kVTDownsamplingMode_Average }
-        );
+        assert_eq!(DownsamplingMode::Decimate.as_cf_string(), unsafe {
+            ffi::kVTDownsamplingMode_Decimate
+        });
+        assert_eq!(DownsamplingMode::Average.as_cf_string(), unsafe {
+            ffi::kVTDownsamplingMode_Average
+        });
     }
 }

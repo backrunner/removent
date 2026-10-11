@@ -26,13 +26,16 @@ public func cf_url_create_file_path(_ path: UnsafePointer<CChar>, _ isDirectory:
 @_cdecl("cf_url_copy_absolute_string")
 public func cf_url_copy_absolute_string(_ value: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer? {
     let url = Unmanaged<CFURL>.fromOpaque(value).takeUnretainedValue()
-    return Unmanaged.passRetained(CFURLGetString(url)).toOpaque()
+    let absolute = CFURLCopyAbsoluteURL(url) ?? url
+    guard let string = CFURLGetString(absolute) else { return nil }
+    return Unmanaged.passRetained(string).toOpaque()
 }
 
 @_cdecl("cf_url_copy_file_system_path")
 public func cf_url_copy_file_system_path(_ value: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer? {
     let url = Unmanaged<CFURL>.fromOpaque(value).takeUnretainedValue()
-    return Unmanaged.passRetained(CFURLCopyFileSystemPath(url, .cfurlposixPathStyle)).toOpaque()
+    guard let path = CFURLCopyFileSystemPath(url, .cfurlposixPathStyle) else { return nil }
+    return Unmanaged.passRetained(path).toOpaque()
 }
 
 @_cdecl("cf_url_has_directory_path")
@@ -180,14 +183,16 @@ public func cf_time_zone_create(_ name: UnsafePointer<CChar>) -> UnsafeMutableRa
 @_cdecl("cf_time_zone_copy_name")
 public func cf_time_zone_copy_name(_ value: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer? {
     let timeZone = Unmanaged<CFTimeZone>.fromOpaque(value).takeUnretainedValue()
-    return Unmanaged.passRetained(CFTimeZoneGetName(timeZone)).toOpaque()
+    guard let name = CFTimeZoneGetName(timeZone) else { return nil }
+    return Unmanaged.passRetained(name).toOpaque()
 }
 
 @_cdecl("cf_time_zone_get_seconds_from_gmt")
 public func cf_time_zone_get_seconds_from_gmt(_ value: UnsafeMutableRawPointer, _ date: UnsafeMutableRawPointer) -> Int32 {
     let timeZone = Unmanaged<CFTimeZone>.fromOpaque(value).takeUnretainedValue()
     let date = Unmanaged<CFDate>.fromOpaque(date).takeUnretainedValue()
-    return Int32(CFTimeZoneGetSecondsFromGMT(timeZone, CFDateGetAbsoluteTime(date)))
+    let offset = CFTimeZoneGetSecondsFromGMT(timeZone, CFDateGetAbsoluteTime(date))
+    return Int32(exactly: offset.rounded(.towardZero)) ?? 0
 }
 
 @_cdecl("cf_character_set_get_type_id")
@@ -198,8 +203,15 @@ public func cf_character_set_get_type_id() -> Int {
 @_cdecl("cf_character_set_create_with_characters_in_string")
 public func cf_character_set_create_with_characters_in_string(_ value: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer? {
     let string = Unmanaged<CFString>.fromOpaque(value).takeUnretainedValue()
-    guard let characterSet = CFCharacterSetCreateWithCharactersInString(nil, string) else { return nil }
-    return Unmanaged.passRetained(characterSet).toOpaque()
+    let length = CFStringGetLength(string)
+    var units = [UniChar](repeating: 0, count: length)
+    CFStringGetCharacters(string, CFRange(location: 0, length: length), &units)
+    guard let characterSet = CFCharacterSetCreateMutable(nil) else { return nil }
+    for scalar in String(decoding: units, as: UTF16.self).unicodeScalars {
+        CFCharacterSetAddCharactersInRange(characterSet, CFRange(location: CFIndex(scalar.value), length: 1))
+    }
+    guard let immutable = CFCharacterSetCreateCopy(nil, characterSet) else { return nil }
+    return Unmanaged.passRetained(immutable).toOpaque()
 }
 
 @_cdecl("cf_character_set_create_inverted_set")
@@ -212,8 +224,7 @@ public func cf_character_set_create_inverted_set(_ value: UnsafeMutableRawPointe
 @_cdecl("cf_character_set_is_character_member")
 public func cf_character_set_is_character_member(_ value: UnsafeMutableRawPointer, _ scalar: UInt32) -> Bool {
     let characterSet = Unmanaged<CFCharacterSet>.fromOpaque(value).takeUnretainedValue()
-    guard let scalar = UniChar(exactly: scalar) else { return false }
-    return CFCharacterSetIsCharacterMember(characterSet, scalar)
+    return CFCharacterSetIsLongCharacterMember(characterSet, scalar)
 }
 
 @_cdecl("cf_number_formatter_get_type_id")
@@ -224,7 +235,8 @@ public func cf_number_formatter_get_type_id() -> Int {
 @_cdecl("cf_number_formatter_create")
 public func cf_number_formatter_create(_ locale: UnsafeMutableRawPointer?, _ style: Int32) -> UnsafeMutableRawPointer? {
     let locale = locale.map { Unmanaged<CFLocale>.fromOpaque($0).takeUnretainedValue() }
-    guard let formatter = CFNumberFormatterCreate(nil, locale, CFNumberFormatterStyle(rawValue: Int(style))!) else {
+    guard let style = CFNumberFormatterStyle(rawValue: CFIndex(style)),
+          let formatter = CFNumberFormatterCreate(nil, locale, style) else {
         return nil
     }
     return Unmanaged.passRetained(formatter).toOpaque()
@@ -266,12 +278,9 @@ public func cf_date_formatter_create(
     _ timeStyle: Int32
 ) -> UnsafeMutableRawPointer? {
     let locale = locale.map { Unmanaged<CFLocale>.fromOpaque($0).takeUnretainedValue() }
-    guard let formatter = CFDateFormatterCreate(
-        nil,
-        locale,
-        CFDateFormatterStyle(rawValue: Int(dateStyle))!,
-        CFDateFormatterStyle(rawValue: Int(timeStyle))!
-    ) else {
+    guard let dateStyle = CFDateFormatterStyle(rawValue: CFIndex(dateStyle)),
+          let timeStyle = CFDateFormatterStyle(rawValue: CFIndex(timeStyle)),
+          let formatter = CFDateFormatterCreate(nil, locale, dateStyle, timeStyle) else {
         return nil
     }
     return Unmanaged.passRetained(formatter).toOpaque()
@@ -326,7 +335,8 @@ public func cf_file_security_get_mode(_ value: UnsafeMutableRawPointer, _ outMod
 @_cdecl("cf_file_security_set_mode")
 public func cf_file_security_set_mode(_ value: UnsafeMutableRawPointer, _ mode: UInt32) -> Bool {
     let fileSecurity = Unmanaged<CFFileSecurity>.fromOpaque(value).takeUnretainedValue()
-    return CFFileSecuritySetMode(fileSecurity, mode_t(mode))
+    guard let mode = mode_t(exactly: mode) else { return false }
+    return CFFileSecuritySetMode(fileSecurity, mode)
 }
 
 @_cdecl("cf_preferences_set_app_value")

@@ -19,8 +19,8 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme, Disableable, Sizable, TitleBar,
-    divider::Divider,
     input::{InputEvent, InputState},
+    separator::Separator as Divider,
     spinner::Spinner,
     switch::Switch,
 };
@@ -39,9 +39,10 @@ use tokio::sync::oneshot;
 
 gpui::actions!(home, [HomeEscape, HomeSettings, HomeConnect, HomeSearch]);
 
-// Content aligns with the search field; row highlights extend into the gutter.
-// Row padding accounts for the 1px focus/selection border.
+// Sidebar headings, search, cards, and unselected item content share a grid.
+// Reserve the 1px focus/selection border in every interaction state.
 const SIDEBAR_INSET: f32 = 16.;
+// Row surfaces extend beyond the content grid without moving content on selection.
 const SIDEBAR_ROW_INSET: f32 = 8.;
 
 #[derive(Clone)]
@@ -163,16 +164,35 @@ fn device_glyph(size: f32, colors: &gpui_component::ThemeColor) -> Div {
     icon_tile("monitor", size, colors)
 }
 
-/// Small muted group heading inside the sidebar list (Saved / Nearby).
-fn list_group_label(text: String, cx: &App) -> Div {
+/// Each device source has its own heading and filtered result count.
+fn list_group_label(text: String, count: usize, cx: &App) -> Div {
     div()
         .px(px(SIDEBAR_ROW_INSET))
         .pt_3()
         .pb_1()
+        .flex()
+        .items_center()
+        .justify_between()
+        .flex_shrink_0()
         .text_size(px(11.))
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(cx.theme().muted_foreground)
         .child(text)
+        .child(
+            div()
+                .h(px(24.))
+                .min_w(px(24.))
+                .when(count < 10, |el| el.w(px(24.)))
+                .when(count >= 10, |el| el.px(px(6.)))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .line_height(px(14.))
+                .rounded(px(6.))
+                .bg(cx.theme().secondary_hover)
+                .child(count.to_string()),
+        )
 }
 
 /// A single line that remeasures when its flex allocation changes. GPUI's
@@ -187,8 +207,8 @@ fn sidebar_line() -> Div {
         .line_clamp(1)
 }
 
-/// Shared compact typography for nearby, saved and local device rows.
-fn sidebar_labels(width: f32, title: String, subtitle: String, cx: &App) -> Div {
+/// Protocol and address stay separate while sharing the available row width.
+fn sidebar_labels(width: f32, title: String, protocol: &str, address: String, cx: &App) -> Div {
     div()
         .w(px(width))
         .flex_shrink_0()
@@ -205,13 +225,48 @@ fn sidebar_labels(width: f32, title: String, subtitle: String, cx: &App) -> Div 
                 .child(title),
         )
         .child(
-            sidebar_line()
-                .w(px(width))
-                .text_size(px(11.))
-                .line_height(px(14.))
-                .text_color(cx.theme().muted_foreground)
-                .child(subtitle),
+            div()
+                .w_full()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .child(sidebar_tag(protocol.to_string(), false, cx))
+                .child(
+                    sidebar_line()
+                        .flex_1()
+                        .text_size(px(11.))
+                        .line_height(px(14.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child(address),
+                ),
         )
+}
+
+/// Device kind and sharing state remain separate, readable labels.
+fn sidebar_tag(text: String, active: bool, cx: &App) -> Div {
+    let colors = cx.theme().colors;
+    div()
+        .flex_shrink_0()
+        .px(px(6.))
+        .h(px(18.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .text_size(px(10.))
+        .line_height(px(14.))
+        .text_color(if active {
+            colors.success
+        } else {
+            colors.muted_foreground
+        })
+        .bg(if active {
+            colors.success.opacity(0.12)
+        } else {
+            colors.secondary_hover
+        })
+        .child(text)
 }
 
 /// Bookmark glyph keyed by protocol, matching the connection dialog picker.

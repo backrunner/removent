@@ -8,7 +8,7 @@ use crate::admission::{AdmissionDecision, decide};
 use crate::frame_dedup::FrameDeduplicator;
 use crate::input_sink::InputSink;
 use futures::{SinkExt, StreamExt};
-use rand::RngCore;
+use rand::Rng;
 use removent_core::{
     AdmissionMode, ClipSyncState, DeviceIdentity, PeerRecord, PeersStore, TextClipboard,
     adapt::{AdaptationController, QualityState, Sample},

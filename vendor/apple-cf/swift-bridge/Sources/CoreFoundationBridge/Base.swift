@@ -8,18 +8,22 @@ func acfCFString(from cString: UnsafePointer<CChar>?) -> CFString? {
 
 func acfCopyCString(from string: CFString) -> UnsafeMutablePointer<CChar>? {
     let length = CFStringGetLength(string)
-    let capacity = CFStringGetMaximumSizeForEncoding(length, CFStringBuiltInEncodings.UTF8.rawValue) + 1
-    let buffer = UnsafeMutablePointer<CChar>.allocate(capacity: capacity)
+    let maximumSize = CFStringGetMaximumSizeForEncoding(length, CFStringBuiltInEncodings.UTF8.rawValue)
+    guard maximumSize != kCFNotFound, maximumSize < Int.max,
+          let raw = malloc(maximumSize + 1) else {
+        return nil
+    }
+    let buffer = raw.assumingMemoryBound(to: CChar.self)
     let ok = CFStringGetCString(
         string,
         buffer,
-        capacity,
+        maximumSize + 1,
         CFStringBuiltInEncodings.UTF8.rawValue
     )
     if ok {
         return buffer
     }
-    buffer.deallocate()
+    free(raw)
     return nil
 }
 
@@ -69,7 +73,7 @@ public func cf_type_retain(_ value: UnsafeMutableRawPointer) -> UnsafeMutableRaw
 @_cdecl("cf_type_hash")
 public func cf_type_hash(_ value: UnsafeMutableRawPointer) -> Int {
     let object = unsafeBitCast(acfBorrowedAnyObject(value), to: CFTypeRef.self)
-    return Int(CFHash(object))
+    return Int(bitPattern: CFHash(object))
 }
 
 @_cdecl("cf_type_equal")
@@ -83,6 +87,13 @@ public func cf_type_equal(_ lhs: UnsafeMutableRawPointer, _ rhs: UnsafeMutableRa
 public func cf_type_get_type_id(_ value: UnsafeMutableRawPointer) -> Int {
     let object = unsafeBitCast(acfBorrowedAnyObject(value), to: CFTypeRef.self)
     return Int(CFGetTypeID(object))
+}
+
+@_cdecl("acf_cf_type_copy_description_string")
+public func acf_cf_type_copy_description_string(_ value: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer? {
+    let object = unsafeBitCast(acfBorrowedAnyObject(value), to: CFTypeRef.self)
+    guard let description = CFCopyDescription(object) else { return nil }
+    return Unmanaged.passRetained(description).toOpaque()
 }
 
 @_cdecl("cf_type_copy_description")

@@ -2,11 +2,11 @@ use core::fmt;
 
 /// Generic Core Foundation / Core Graphics creation error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CFError {
+pub struct NullPointerError {
     operation: &'static str,
 }
 
-impl CFError {
+impl NullPointerError {
     /// Create a new error for the named Core Foundation / Core Graphics call.
     #[must_use]
     pub const fn new(operation: &'static str) -> Self {
@@ -20,7 +20,7 @@ impl CFError {
     }
 }
 
-impl fmt::Display for CFError {
+impl fmt::Display for NullPointerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -30,4 +30,4 @@ impl fmt::Display for CFError {
     }
 }
 
-impl std::error::Error for CFError {}
+impl std::error::Error for NullPointerError {}

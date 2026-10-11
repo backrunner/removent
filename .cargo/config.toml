@@ -1,5 +1,10 @@
-# audiopus_sys bundles an older Opus CMake project. CMake 4 requires callers
+# Opus source builds may use older CMake projects. CMake 4 requires callers
 # to opt that project into a supported policy baseline when pkg-config cannot
 # provide a system libopus.
 [env]
 CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+
+# ScreenCaptureKit's Swift bridge uses the concurrency runtime. Dependency
+# build-script link arguments do not reach every consuming binary or test.
+[target.'cfg(target_os = "macos")']
+rustflags = ["-C", "link-arg=-Wl,-rpath,/usr/lib/swift"]

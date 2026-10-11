@@ -14,7 +14,7 @@ tokio.workspace = true
 tokio-util.workspace = true
 quinn.workspace = true
 # 0.11.17 can underflow the DATAGRAM queue counter under congestion.
-quinn-proto = "0.11.18"
+quinn-proto = "0.11.19"
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true

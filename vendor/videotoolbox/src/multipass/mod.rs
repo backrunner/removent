@@ -20,7 +20,6 @@ pub struct FrameSilo {
 }
 
 unsafe impl Send for FrameSilo {}
-unsafe impl Sync for FrameSilo {}
 
 crate::utils::retained::vt_retained!(FrameSilo, field = inner, release = ffi::CFRelease);
 
@@ -44,7 +43,7 @@ impl FrameSilo {
                 ptr::null(),
                 ffi::CMTimeRange::INVALID,
                 ptr::null(),
-                &mut p,
+                &raw mut p,
             )
         };
         if s != 0 || p.is_null() {
@@ -76,7 +75,7 @@ impl FrameSilo {
     /// Returns [`VTError::EncodeFailed`] on `OSStatus` failure.
     pub fn progress_of_current_pass(&self) -> Result<f32, VTError> {
         let mut p: f32 = 0.0;
-        let s = unsafe { ffi::VTFrameSiloGetProgressOfCurrentPass(self.inner, &mut p) };
+        let s = unsafe { ffi::VTFrameSiloGetProgressOfCurrentPass(self.inner, &raw mut p) };
         if s == 0 {
             Ok(p)
         } else {
@@ -152,7 +151,6 @@ pub struct MultiPassStorage {
 }
 
 unsafe impl Send for MultiPassStorage {}
-unsafe impl Sync for MultiPassStorage {}
 
 crate::utils::retained::vt_retained!(
     MultiPassStorage,
@@ -181,7 +179,7 @@ impl MultiPassStorage {
                 ptr::null(),
                 ffi::CMTimeRange::INVALID,
                 ptr::null(),
-                &mut p,
+                &raw mut p,
             )
         };
         if s != 0 || p.is_null() {
@@ -223,7 +221,7 @@ unsafe extern "C" fn frame_silo_collect_sample_buffer(
     let Some(samples) = (unsafe { refcon.cast::<Vec<CMSampleBuffer>>().as_mut() }) else {
         return -1;
     };
-    let Some(sample) = apple_cf::cm::CMSampleBuffer::from_raw_retained(sample_buffer.cast()) else {
+    let Some(sample) = apple_cf::cm::CMSampleBuffer::from_raw_borrowed(sample_buffer.cast()) else {
         return -1;
     };
     samples.push(sample);

@@ -170,7 +170,8 @@ impl VideoDecoder {
             return Err(VideoError::CoreMedia(status));
         }
 
-        let format_desc = apple_cf::cm::CMFormatDescription::from_raw(desc.cast())
+        // SAFETY: the Create function returned a +1 retain, transferred to this wrapper.
+        let format_desc = unsafe { apple_cf::cm::CMFormatDescription::from_raw(desc.cast()) }
             .expect("non-null format description");
         let callback = output.clone();
         let session = CompatibleDecompressionSession::new(&format_desc, move |frame| {
@@ -180,7 +181,10 @@ impl VideoDecoder {
                 return;
             }
             // presentation_time is (value, timescale); normalized to microseconds.
-            let pts_us = scale_to_us(frame.presentation_time);
+            let pts_us = scale_to_us((
+                frame.presentation_time.value,
+                frame.presentation_time.timescale,
+            ));
             if let Some(bgra) = pixel_buffer_to_bgra(&pb) {
                 callback(DecodedBgra { data: bgra, pts_us });
             }
@@ -299,7 +303,7 @@ impl VideoDecoder {
             if sb.is_null() {
                 return Err(VideoError::NullSampleBuffer);
             }
-            let wrapped = apple_cf::cm::CMSampleBuffer::from_raw_retained(sb)
+            let wrapped = apple_cf::cm::CMSampleBuffer::from_raw_borrowed(sb)
                 .ok_or(VideoError::NullSampleBuffer)?;
             videotoolbox::ffi::CFRelease(sb.cast()); // return our temporary +1
             self.session

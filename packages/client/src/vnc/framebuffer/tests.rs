@@ -1,5 +1,33 @@
 use super::*;
 
+#[tokio::test]
+async fn server_fin_is_an_interruption_not_a_successful_session_end() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let client = tokio::net::TcpStream::connect(listener.local_addr().unwrap())
+        .await
+        .unwrap();
+    let (mut server, _) = listener.accept().await.unwrap();
+    server.shutdown().await.unwrap();
+    let (frames, _rx) = removent_core::latest::channel();
+    let (signals, _signals_rx) = mpsc::channel(4);
+    let (reader, _writer) = client.into_split();
+    let error = read_frames(
+        reader,
+        frames,
+        signals,
+        Arc::new(RwLock::new(FrameSize {
+            width: 1,
+            height: 1,
+            authoritative: true,
+        })),
+        requested_pixel_format(),
+        Arc::new(VncStats::default()),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+}
+
 fn rectangle(x: u16, y: u16, width: u16, height: u16, pixels: &[u8]) -> Vec<u8> {
     let mut bytes = vec![0, 0, 1];
     for value in [x, y, width, height] {

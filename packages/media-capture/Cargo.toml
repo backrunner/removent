@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 removent-core = { workspace = true }
-screencapturekit = "0.3"
+screencapturekit = "11.0"
 core-media-rs = "0.3"
 core-foundation = "0.10"
 core-video-rs = "0.3"

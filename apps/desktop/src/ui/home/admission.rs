@@ -48,7 +48,7 @@ impl HomeView {
         if let Some(PinDialog::Trust { tx, .. }) = self.pin_dialog.take() {
             let _ = tx.send(true);
             self.set_connection_stage(ConnectionStage::Negotiating, cx);
-            window.focus(&self.focus);
+            window.focus(&self.focus, cx);
         }
         cx.notify();
     }

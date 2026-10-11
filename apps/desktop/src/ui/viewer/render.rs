@@ -7,6 +7,7 @@ impl Render for ViewerView {
                 .toolbar_until
                 .is_some_and(|until| Instant::now() < until);
 
+        let canvas_bounds = self.canvas_bounds.clone();
         let colors = cx.theme().colors;
         // Text/icons on the fixed dark surface (0x05070A background) do not use theme
         // tokens — muted_foreground lacks contrast on a dark base in the light theme;
@@ -149,7 +150,7 @@ impl Render for ViewerView {
                     let phase = match ev.touch_phase {
                         TouchPhase::Started => ScrollPhase::Began,
                         TouchPhase::Moved => ScrollPhase::Changed,
-                        TouchPhase::Ended => ScrollPhase::Ended,
+                        TouchPhase::Ended | TouchPhase::Cancelled => ScrollPhase::Ended,
                     };
                     this.engine.send_input_scroll(0, dx_mm, dy_mm, phase);
                 }),
@@ -185,14 +186,35 @@ impl Render for ViewerView {
             )
             .child(
                 div()
+                    .debug_selector(|| "viewer-canvas".into())
                     .relative()
                     .flex_1()
+                    .min_h_0()
+                    .min_w_0()
                     .overflow_hidden()
                     .child(match self.current.clone() {
-                        Some(image) => div()
-                            .size_full()
-                            .child(img(image).size_full().object_fit(ObjectFit::Contain))
-                            .into_any_element(),
+                        Some(image) => gpui::canvas(
+                            move |bounds, _, _| canvas_bounds.set(Some(bounds)),
+                            move |bounds, _, window, _| {
+                                // Img's intrinsic aspect ratio can expand its percentage
+                                // height under flex layout. Paint in the exact bounds used
+                                // by input instead, independent of image layout sizing.
+                                let picture = ObjectFit::Contain.get_bounds(bounds, image.size(0));
+                                if let Err(error) = window.paint_image(
+                                    picture,
+                                    Default::default(),
+                                    Default::default(),
+                                    image,
+                                    0,
+                                    false,
+                                ) {
+                                    tracing::warn!(%error, "could not paint remote frame");
+                                }
+                            },
+                        )
+                        .absolute()
+                        .size_full()
+                        .into_any_element(),
                         None => div()
                             .size_full()
                             .flex()
@@ -218,7 +240,17 @@ impl Render for ViewerView {
                     .when(self.info_visible && !self.ended, |el| {
                         el.child(self.render_info(window, cx))
                     })
-                    .when(self.ended, |el| el.child(self.render_ended_overlay(cx))),
+                    .when(self.ended, |el| el.child(self.render_ended_overlay(cx)))
+                    .when(
+                        matches!(
+                            self.recovery.state(),
+                            removent_client::recovery::State::Offline
+                                | removent_client::recovery::State::Reconnecting {
+                                    after_offline: true
+                                }
+                        ),
+                        |el| el.child(self.render_network_overlay(cx)),
+                    ),
             )
     }
 }

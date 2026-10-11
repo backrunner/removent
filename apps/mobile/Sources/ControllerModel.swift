@@ -12,6 +12,9 @@ final class ControllerModel: ObservableObject {
     @Published var cloudSync: ConnectionSyncService?
     @Published var bookmarks: [Bookmark] = []
     @Published var presentingSession = false
+    @Published var recovering = false
+    @Published var networkOverlay = false
+    @Published var networkOffline = false
     @Published var ready = false
     @Published var authenticationMode = "pairing_code"
     @Published var certificatePrompt: CertificatePrompt?
@@ -173,6 +176,7 @@ final class ControllerModel: ObservableObject {
         }
         generation = value.uint64Value
         retryCommand = command; sessionTitle = title; error = nil
+        recovering = false; networkOverlay = false; networkOffline = false
         ready = false; needsPIN = false; certificatePrompt = nil; isConnecting = true; frameSize = .zero; receivedFrames = 0; fps = 0
         sampleFrames = 0; sampleTime = CACurrentMediaTime()
         codec = ""; remoteClipboard = false; remoteAudio = false; canRefresh = false; audio.stop()
@@ -186,6 +190,7 @@ final class ControllerModel: ObservableObject {
     func disconnect(dismiss: Bool = true) {
         let result = try? call(["op":"disconnect"]) as? [String:Any]
         generation = (result?["generation"] as? NSNumber)?.uint64Value ?? generation + 1
+        recovering = false; networkOverlay = false; networkOffline = false
         ready = false; needsPIN = false; certificatePrompt = nil; isConnecting = false; audio.stop()
         status = L("Disconnected", "连接已断开")
         UIApplication.shared.isIdleTimerDisabled = false
@@ -209,7 +214,7 @@ final class ControllerModel: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
     func input(_ event: [String:Any]) {
-        guard ready else { return }
+        guard ready && !recovering else { return }
         do { try call(["op":"input", "generation":generation, "event":event]) }
         catch { self.error = error.localizedDescription; disconnect(dismiss:false) }
     }
@@ -345,6 +350,11 @@ final class ControllerModel: ObservableObject {
             case "otp": status = L("Enter the current code from your authenticator", "输入验证器中的当前动态验证码")
             default: status = L("Enter the PIN shown on the computer", "输入电脑上显示的配对码")
             }
+        case "recovery":
+            recovering = true; audio.stop(); needsPIN = false; certificatePrompt = nil
+            networkOffline = event["offline"] as? Bool ?? false
+            networkOverlay = event["visible"] as? Bool ?? false
+            status = networkOffline ? L("Network disconnected", "网络已断开") : L("Reconnecting…", "正在重新连接…")
         case "progress":
             let stage = event["stage"] as? String ?? "Connecting"
             let stages = ["Resolving":L("Finding computer…", "正在查找电脑…"),
@@ -353,8 +363,8 @@ final class ControllerModel: ObservableObject {
                 "Reconnecting":L("Reconnecting…", "正在重新连接…")]
             status = stages[stage] ?? stage
             isConnecting = true
-            if stage == "Reconnecting" { ready = false; audio.stop() }
         case "ready":
+            recovering = false; networkOverlay = false; networkOffline = false
             if let resolved = event["resolved"] as? [String:Any], var command = retryCommand, var request = command["request"] as? [String:Any] {
                 request["host"] = resolved["host"]; request["port"] = resolved["port"]; request["relay"] = resolved["relay"]
                 command["request"] = request; command.removeValue(forKey: "credential_id"); retryCommand = command
@@ -384,6 +394,7 @@ final class ControllerModel: ObservableObject {
                 }
             }
         case "closed":
+            recovering = false; networkOverlay = false; networkOffline = false
             ready = false; needsPIN = false; certificatePrompt = nil; isConnecting = false; audio.stop(); UIApplication.shared.isIdleTimerDisabled = false
             status = L("Disconnected", "连接已断开"); error = event["error"] as? String
         default: break

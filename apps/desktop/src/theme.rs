@@ -71,6 +71,7 @@ pub fn popup_shadow(dark: bool) -> Vec<BoxShadow> {
         offset: point(px(0.), px(8.)),
         blur_radius: px(24.),
         spread_radius: px(-3.),
+        inset: false,
     }]
 }
 
@@ -171,10 +172,6 @@ pub fn apply(dark: bool, cx: &mut App) {
     t.table_even = p.background;
     t.table_row_border = p.border;
     t.accordion = p.surface;
-    t.accordion_hover = t.list_hover;
-    t.tiles = p.surface;
-    t.bullish = p.success;
-    t.bearish = p.danger;
 
     theme.shadow = true;
     theme.radius = px(8.);

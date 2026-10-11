@@ -196,7 +196,7 @@ impl Render for ConnectionDialog {
                                 .outline()
                                 .small()
                                 .disabled(busy)
-                                .label(format!("{} · {}", route.endpoint, saved.host))
+                                .label(format!("{} ({})", route.endpoint, saved.host))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.select_relay(&saved, window, cx)
                                 })),

@@ -1,9 +1,10 @@
 //! mDNS discovery (protocol.md §3).
 
 use crate::error::{NetError, Result};
-use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+use mdns_sd::{ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
 use removent_proto::{Caps, MDNS_SERVICE};
 use std::collections::HashMap;
+#[cfg(test)]
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -119,9 +120,15 @@ impl Advertiser {
         }
         label.truncate(end);
         let instance = format!("{label} - {short_fp}");
+        // Each DNS-SD TXT entry is limited to 255 bytes, including "name=".
+        // Keep long device names valid without splitting a UTF-8 character.
+        let mut name_end = name.len().min(255 - "name=".len());
+        while !name.is_char_boundary(name_end) {
+            name_end -= 1;
+        }
         let mut props: HashMap<String, String> = [
             ("v".to_string(), "1".to_string()),
-            ("name".to_string(), name.to_string()),
+            ("name".to_string(), name[..name_end].to_string()),
             ("fp".to_string(), short_fp.to_string()),
             ("cap".to_string(), cap_string(caps)),
             ("busy".to_string(), if busy { "1" } else { "0" }.to_string()),
@@ -310,7 +317,7 @@ impl DiscoveryBrowser {
     }
 }
 
-fn resolved_entry(protocol: DiscoveryProtocol, info: &ServiceInfo) -> Option<DeviceEntry> {
+fn resolved_entry(protocol: DiscoveryProtocol, info: &ResolvedService) -> Option<DeviceEntry> {
     let props = info.get_properties();
     let native = protocol == DiscoveryProtocol::Removent;
     let short_fp = if native {
@@ -326,7 +333,7 @@ fn resolved_entry(protocol: DiscoveryProtocol, info: &ServiceInfo) -> Option<Dev
     }
     let instance_name = info
         .get_fullname()
-        .strip_suffix(info.get_type())
+        .strip_suffix(&info.ty_domain)
         .unwrap_or(info.get_fullname())
         .trim_end_matches('.');
     let name = if native {
@@ -351,7 +358,7 @@ fn resolved_entry(protocol: DiscoveryProtocol, info: &ServiceInfo) -> Option<Dev
         instance: info.get_fullname().to_string(),
         name: name.to_string(),
         short_fp: short_fp.to_ascii_lowercase(),
-        addr: pick_addr(info.get_addresses(), info.get_port()),
+        addr: pick_scoped_addr(info.get_addresses(), info.get_port()),
         caps: if native {
             parse_cap_string(props.get_property_val_str("cap").unwrap_or(""))
         } else {
@@ -362,20 +369,23 @@ fn resolved_entry(protocol: DiscoveryProtocol, info: &ServiceInfo) -> Option<Dev
     })
 }
 
-/// Prefer IPv4; keep the first IPv6 when no v4 exists (v6 is no longer dropped unconditionally).
-fn pick_addr(addrs: &std::collections::HashSet<IpAddr>, port: u16) -> Option<std::net::SocketAddr> {
+fn pick_scoped_addr(
+    addrs: &std::collections::HashSet<ScopedIp>,
+    port: u16,
+) -> Option<std::net::SocketAddr> {
     let mut first_v6 = None;
     for ip in addrs {
         match ip {
-            IpAddr::V4(_) => return Some(std::net::SocketAddr::new(*ip, port)),
-            IpAddr::V6(_) => {
-                if first_v6.is_none() {
-                    first_v6 = Some(*ip);
-                }
+            ScopedIp::V4(ip) => return Some(std::net::SocketAddr::new((*ip.addr()).into(), port)),
+            ScopedIp::V6(ip) if first_v6.is_none() => {
+                first_v6 = Some(
+                    std::net::SocketAddrV6::new(*ip.addr(), port, 0, ip.scope_id().index).into(),
+                );
             }
+            _ => {}
         }
     }
-    first_v6.map(|ip| std::net::SocketAddr::new(ip, port))
+    first_v6
 }
 
 /// Resolve the public locator only. The private PIN is verified by RVP PAKE.

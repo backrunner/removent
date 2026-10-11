@@ -11,6 +11,19 @@ impl HomeView {
             return;
         }
         match ev {
+            UiEvent::ClientRecovery { .. } => {
+                if self.engine.client_recovery().state()
+                    != removent_client::recovery::State::Connected
+                    && matches!(
+                        self.pin_dialog,
+                        Some(PinDialog::Entry(_) | PinDialog::Trust { .. })
+                    )
+                {
+                    self.pin_dialog = None;
+                    self.clear_pin_input(window, cx);
+                }
+                cx.notify();
+            }
             UiEvent::PairedConnections { entries, .. } => {
                 self.saved = entries;
                 cx.notify();
@@ -142,7 +155,7 @@ impl HomeView {
                     tx,
                 });
                 self.set_status(t!("trust.waiting").to_string(), StatusTone::Info);
-                window.focus(&self.focus);
+                window.focus(&self.focus, cx);
             }
             UiEvent::ClientNeedsPin { tx, mode, .. } => {
                 self.set_connection_stage(ConnectionStage::Pairing, cx);
@@ -169,7 +182,7 @@ impl HomeView {
                 // Start from an empty field and hand it the keyboard focus.
                 self.clear_pin_input(window, cx);
                 let focus = self.pin_input.focus_handle(cx);
-                window.focus(&focus);
+                window.focus(&focus, cx);
             }
             UiEvent::SessionReady { codec, .. } => {
                 self.connection_dialog = None;

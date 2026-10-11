@@ -8,6 +8,7 @@ pub use input_queue::{InputSender, InputSnapshot};
 pub mod jitter;
 pub mod keychain;
 pub mod rdp;
+pub mod recovery;
 pub mod saved;
 pub mod session;
 mod video_feedback;

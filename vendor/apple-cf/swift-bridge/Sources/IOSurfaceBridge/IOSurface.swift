@@ -251,14 +251,19 @@ public func io_surface_create(
     _ bytesPerElement: Int,
     _ surfaceOut: UnsafeMutablePointer<UnsafeMutableRawPointer?>
 ) -> Int32 {
-    let bytesPerRow = width * bytesPerElement
+    let (bytesPerRow, rowOverflow) = width.multipliedReportingOverflow(by: bytesPerElement)
+    let (allocSize, sizeOverflow) = bytesPerRow.multipliedReportingOverflow(by: height)
+    guard width >= 0, height >= 0, bytesPerElement >= 0, !rowOverflow, !sizeOverflow else {
+        surfaceOut.pointee = nil
+        return -1
+    }
 
     let properties: [IOSurfacePropertyKey: Any] = [
         .width: width,
         .height: height,
         .bytesPerElement: bytesPerElement,
         .bytesPerRow: bytesPerRow,
-        .allocSize: bytesPerRow * height,
+        .allocSize: allocSize,
         .pixelFormat: pixelFormat,
     ]
 

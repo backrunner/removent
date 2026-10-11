@@ -4,6 +4,7 @@ fn cancelled_attempt_cannot_publish_frames_pins_or_ready() {
     let dir = tempfile::tempdir().unwrap();
     let mut engine = Engine::new(dir.path().to_str().unwrap(), "test").unwrap();
     let old = Attempt {
+        recovery: Default::default(),
         shared: engine.shared.clone(),
         generation: 0,
     };
@@ -158,6 +159,7 @@ fn certificate_confirmation_cannot_be_consumed_by_a_stale_attempt_or_survive_can
         Err(oneshot::error::TryRecvError::Closed)
     ));
     let old = Attempt {
+        recovery: Default::default(),
         shared: engine.shared.clone(),
         generation: 0,
     };

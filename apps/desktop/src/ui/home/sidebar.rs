@@ -69,7 +69,7 @@ impl HomeView {
             .gap_3()
             .px(px(SIDEBAR_ROW_INSET - 1.))
             .py_2()
-            .rounded(px(8.))
+            .rounded(px(10.))
             .cursor_pointer()
             // Single-click selects; double-click connects directly.
             .on_click(cx.listener(move |this, ev: &gpui::ClickEvent, window, cx| {
@@ -85,7 +85,8 @@ impl HomeView {
             .child(sidebar_labels(
                 text_width,
                 row.name.clone(),
-                format!("{} · {}", row.protocol.short_label(), row.addr),
+                row.protocol.short_label(),
+                row.addr.to_string(),
                 cx,
             ))
             .when(trusted, |el| {
@@ -146,7 +147,7 @@ impl HomeView {
             .gap_3()
             .px(px(SIDEBAR_ROW_INSET - 1.))
             .py_2()
-            .rounded(px(12.))
+            .rounded(px(10.))
             .cursor_pointer()
             // Same interaction as discovered devices: click selects, double-click connects.
             .on_click(cx.listener(move |this, ev: &gpui::ClickEvent, window, cx| {
@@ -162,7 +163,8 @@ impl HomeView {
             .child(sidebar_labels(
                 text_width,
                 entry.display_name(),
-                format!("{} · {}", entry.protocol.short_label(), entry.address()),
+                entry.protocol.short_label(),
+                entry.address().to_string(),
                 cx,
             ));
         if selected {
@@ -205,9 +207,8 @@ impl HomeView {
         } else {
             256.
         };
-        let local_text_width = sidebar_width - 2. * SIDEBAR_INSET - 28. - 10.;
         // Explicit widths also let GPUI remeasure one-line labels after resizing.
-        let row_text_width = sidebar_width - 2. * SIDEBAR_INSET - 32. - 12.;
+        let row_text_width = sidebar_width - 1. - 2. * SIDEBAR_INSET - 32. - 12.;
         let discovery = self.engine.settings().discovery;
         let discovering = discovery.removent || discovery.vnc || discovery.rdp;
         let query = self.search_input.read(cx).value().trim().to_lowercase();
@@ -231,68 +232,119 @@ impl HomeView {
                     || entry.address().to_string().contains(&query)
             })
             .collect();
-        let mut list = div()
-            .id("device-list")
+        // Keep both sources visible, including their own empty/search states.
+        let mut saved_section = div()
+            .id("saved-section")
             .flex()
             .flex_col()
-            .flex_1()
-            .w_full()
-            .min_w_0()
-            .min_h_0()
+            .flex_shrink_0()
             .gap_1()
-            .overflow_y_scroll();
-        // Bookmarks come first: they are the user's own connect targets, while
-        // discovered devices below depend on LAN presence.
-        if !saved_rows.is_empty() {
-            list = list.child(list_group_label(t!("saved.section").to_string(), cx));
-            for entry in saved_rows.iter().copied() {
-                list = list.child(self.render_saved_row(entry, row_text_width, cx));
-            }
-            if !rows.is_empty() {
-                list = list.child(list_group_label(t!("device.nearby").to_string(), cx));
-            }
-        }
-        if rows.is_empty() && (saved_rows.is_empty() || query.is_empty()) {
-            list = list.child(
+            .child(list_group_label(
+                t!("saved.section").to_string(),
+                saved_rows.len(),
+                cx,
+            ));
+        if saved_rows.is_empty() {
+            saved_section = saved_section.child(
                 div()
-                    .p_4()
-                    .mx(px(SIDEBAR_ROW_INSET))
-                    .mt_2()
-                    .rounded(px(14.))
-                    .border_1()
-                    .border_color(colors.border)
-                    .bg(colors.group_box)
-                    .flex()
-                    .flex_col()
-                    .gap_3()
+                    .px(px(SIDEBAR_ROW_INSET))
+                    .py_2()
+                    .text_size(px(12.))
+                    .text_color(colors.muted_foreground)
                     .child(
-                        div()
-                            .mb_1()
-                            .child(icon("wifi").size(px(24.)).text_color(colors.accent)),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(12.))
-                            .text_color(colors.muted_foreground)
-                            .child(
-                                t!(if query.is_empty() {
-                                    if discovering {
-                                        "device.searching"
-                                    } else {
-                                        "device.discovery_off"
-                                    }
-                                } else {
-                                    "device.no_match"
-                                })
-                                .to_string(),
-                            ),
-                    )
-                    .when(query.is_empty(), |el| {
-                        el.child(
+                        t!(if query.is_empty() {
+                            "saved.empty"
+                        } else {
+                            "saved.no_match"
+                        })
+                        .to_string(),
+                    ),
+            );
+        }
+        for entry in saved_rows {
+            saved_section = saved_section.child(self.render_saved_row(entry, row_text_width, cx));
+        }
+        let mut nearby_section = div()
+            .id("discovery-section")
+            .flex()
+            .flex_col()
+            .flex_shrink_0()
+            .gap_1()
+            .mt_3()
+            .child(div().mx(px(SIDEBAR_ROW_INSET)).h(px(1.)).bg(colors.border))
+            .child(list_group_label(
+                t!("device.nearby").to_string(),
+                rows.len(),
+                cx,
+            ));
+        if rows.is_empty() {
+            nearby_section =
+                nearby_section.child(
+                    div()
+                        .mx(px(SIDEBAR_ROW_INSET))
+                        .p_3()
+                        .mt_1()
+                        .rounded(px(10.))
+                        .border_1()
+                        .border_color(colors.border)
+                        .bg(colors.group_box)
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .text_color(colors.muted_foreground)
+                        .child(
                             div()
-                                .text_size(px(12.))
-                                .text_color(colors.muted_foreground)
+                                .flex()
+                                .items_center()
+                                .gap_2()
                                 .child(
+                                    div()
+                                        .size(px(32.))
+                                        .flex_shrink_0()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded(px(8.))
+                                        .bg(colors.secondary_hover)
+                                        .child(
+                                            icon_16(if !query.is_empty() {
+                                                "search"
+                                            } else if discovering {
+                                                "wifi"
+                                            } else {
+                                                "wifi-off"
+                                            })
+                                            .size(px(20.))
+                                            .text_color(if discovering && query.is_empty() {
+                                                colors.accent
+                                            } else {
+                                                colors.muted_foreground
+                                            }),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_size(px(12.))
+                                        .line_height(px(18.))
+                                        .child(
+                                            t!(if query.is_empty() {
+                                                if discovering {
+                                                    "device.searching"
+                                                } else {
+                                                    "device.discovery_off"
+                                                }
+                                            } else {
+                                                "device.no_match"
+                                            })
+                                            .to_string(),
+                                        ),
+                                ),
+                        )
+                        .when(query.is_empty(), |el| {
+                            el.child(
+                                div().text_size(px(11.)).line_height(px(17.)).child(
                                     t!(if discovering {
                                         "device.searching_hint"
                                     } else {
@@ -300,15 +352,55 @@ impl HomeView {
                                     })
                                     .to_string(),
                                 ),
-                        )
-                    }),
-            );
+                            )
+                        })
+                        .when(query.is_empty() && !discovering, |el| {
+                            el.child(
+                                div()
+                                    .flex()
+                                    .debug_selector(|| "enable-discovery".into())
+                                    .child(
+                                        Button::new("enable-discovery")
+                                            .icon(icon_16("wifi"))
+                                            .label(t!("device.enable_discovery").to_string())
+                                            .primary()
+                                            .small()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                if this.persist_settings(|s| {
+                                                    s.discovery.removent = true;
+                                                    s.discovery.vnc = true;
+                                                    s.discovery.rdp = true;
+                                                }) {
+                                                    this.set_status(
+                                                        t!("device.discovery_enabled").to_string(),
+                                                        StatusTone::Ok,
+                                                    );
+                                                }
+                                                cx.notify();
+                                            })),
+                                    ),
+                            )
+                        }),
+                );
         }
         for (fp, row) in rows {
             let trusted = self.trusted.contains(fp.as_str());
             let text_width = row_text_width - if trusted { 16. + 12. } else { 0. };
-            list = list.child(self.render_device_row(fp, row, trusted, text_width, cx));
+            nearby_section =
+                nearby_section.child(self.render_device_row(fp, row, trusted, text_width, cx));
         }
+        let list = div()
+            .id("device-list")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .w_full()
+            .min_w_0()
+            .min_h_0()
+            .pb_3()
+            .overflow_y_scroll()
+            .child(saved_section)
+            .child(nearby_section);
         div()
             .w(px(sidebar_width))
             .flex_shrink_0()
@@ -325,17 +417,7 @@ impl HomeView {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(section_label(t!("device.section").to_string(), cx))
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .text_color(colors.muted_foreground)
-                            .px_2()
-                            .py_1()
-                            .rounded(px(6.))
-                            .bg(colors.secondary)
-                            .child(self.devices.len().to_string()),
-                    ),
+                    .child(section_label(t!("device.section").to_string(), cx)),
             )
             .child(
                 div().px(px(SIDEBAR_INSET)).pb_3().child(
@@ -369,12 +451,12 @@ impl HomeView {
                             .focus(|style| style.border_color(colors.ring))
                             .flex()
                             .items_center()
-                            .gap(px(10.))
+                            .gap_3()
                             .w_full()
                             .min_w_0()
                             .px(px(SIDEBAR_ROW_INSET - 1.))
                             .py_2()
-                            .rounded(px(8.))
+                            .rounded(px(10.))
                             .when(self.selected.is_none() && !self.settings_open, |el| {
                                 el.bg(colors.accent.opacity(0.15))
                                     .border_color(colors.accent.opacity(0.3))
@@ -405,7 +487,7 @@ impl HomeView {
                             }))
                             .child(
                                 div()
-                                    .size(px(28.))
+                                    .size(px(32.))
                                     .flex_shrink_0()
                                     .flex()
                                     .items_center()
@@ -414,20 +496,46 @@ impl HomeView {
                                     .bg(colors.secondary_hover.opacity(0.45))
                                     .child(icon_16("monitor").text_color(colors.muted_foreground)),
                             )
-                            .child(sidebar_labels(
-                                local_text_width,
-                                self.engine.device_name(),
-                                format!(
-                                    "{} · {}",
-                                    t!("device.this_mac"),
-                                    t!(if self.host_on {
-                                        "sharing.enabled"
-                                    } else {
-                                        "sharing.disabled"
-                                    })
-                                ),
-                                cx,
-                            )),
+                            .child(
+                                div()
+                                    .w(px(row_text_width))
+                                    .flex_shrink_0()
+                                    .min_w_0()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(2.))
+                                    .child(
+                                        sidebar_line()
+                                            .w(px(row_text_width))
+                                            .h(px(16.))
+                                            .text_size(px(13.))
+                                            .line_height(px(16.))
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .child(self.engine.device_name()),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .h(px(18.))
+                                            .items_center()
+                                            .gap_1()
+                                            .child(sidebar_tag(
+                                                t!("device.this_mac").to_string(),
+                                                false,
+                                                cx,
+                                            ))
+                                            .child(sidebar_tag(
+                                                t!(if self.host_on {
+                                                    "sharing.enabled"
+                                                } else {
+                                                    "sharing.disabled"
+                                                })
+                                                .to_string(),
+                                                self.host_on,
+                                                cx,
+                                            )),
+                                    ),
+                            ),
                     ),
             )
     }

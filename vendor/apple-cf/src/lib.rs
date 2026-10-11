@@ -1,5 +1,5 @@
-//! `apple-cf` — safe, dependency-free Rust bindings for Apple's shared
-//! Core* frameworks.
+//! `apple-cf` — safe Rust bindings for Apple's shared Core* frameworks.
+//! The only Rust dependency is the family's `doom-fish-utils` helper crate.
 //!
 //! This crate is the foundation of the doom-fish macOS Rust suite. It exists
 //! so framework-agnostic types like [`cg::CGRect`], [`iosurface::IOSurface`],
@@ -44,7 +44,13 @@ pub mod raw;
 /// Shared helper utilities and FFI shims.
 pub mod utils;
 
-pub use error::CFError;
+pub use error::NullPointerError;
+
+#[deprecated(
+    since = "0.11.0",
+    note = "renamed to `NullPointerError`; `apple_cf::cf::CFError` wraps `CFErrorRef`"
+)]
+pub type CFError = NullPointerError;
 
 #[cfg(feature = "cg")]
 #[cfg_attr(docsrs, doc(cfg(feature = "cg")))]

@@ -4,7 +4,7 @@
 //!
 //! # API Documentation
 //!
-//! Safe, **zero-runtime-dependency** Rust bindings for Apple's
+//! Safe Rust bindings for Apple's
 //! [VideoToolbox](https://developer.apple.com/documentation/videotoolbox)
 //! framework — hardware-accelerated H.264, HEVC, and `ProRes` codecs on macOS.
 //!
@@ -19,6 +19,7 @@
 //!
 //! ```rust,no_run
 //! use videotoolbox::prelude::*;
+//! use apple_cf::cm::CMTime;
 //! use apple_cf::iosurface::IOSurface;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -31,7 +32,7 @@
 //!     .with_expected_frame_rate(60.0)
 //!     .build()?;
 //!
-//! let encoded = encoder.encode(&surface, (0, 60))?;
+//! let encoded = encoder.encode(&surface, CMTime::new(0, 60))?;
 //! println!("Got {} bytes of H.264", encoded.data.len());
 //! # Ok(())
 //! # }
@@ -115,7 +116,10 @@ pub use motion_estimation::{
 pub use raw_processing::{RawProcessingParameter, RawProcessingSession};
 
 #[cfg(feature = "compression")]
-pub use compression::{CompressionSession, CompressionSessionBuilder, EncodedFrame, ProfileLevel};
+pub use compression::{
+    CompressionSession, CompressionSessionBuilder, EncodedFrame, EncoderGpu, FrameProperties,
+    HardwareAcceleration, ProfileLevel,
+};
 
 /// Common imports for users of this crate.
 pub mod prelude {
@@ -124,9 +128,11 @@ pub mod prelude {
     pub use crate::transfer::{PixelRotationSession, PixelTransferSession, Rotation};
 
     #[cfg(feature = "compression")]
-    pub use crate::compression::{CompressionSession, CompressionSessionBuilder, EncodedFrame};
+    pub use crate::compression::{
+        CompressionSession, CompressionSessionBuilder, EncodedFrame, EncoderGpu, FrameProperties,
+        HardwareAcceleration, ProfileLevel,
+    };
 }
 
 #[cfg(target_os = "macos")]
-pub use utilities::{copy_raw_processor_extension_properties, copy_video_decoder_extension_properties,
-    register_professional_workflow_decoders, register_professional_workflow_encoders};
+pub use utilities::{copy_raw_processor_extension_properties, copy_video_decoder_extension_properties, register_professional_workflow_decoders, register_professional_workflow_encoders};

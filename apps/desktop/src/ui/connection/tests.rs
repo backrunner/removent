@@ -112,7 +112,7 @@ fn relay_prefill_preserves_secret_but_destination_edits_clear_it(cx: &mut TestAp
     cx.update(|window, cx| {
         dialog.update(cx, |form, cx| {
             form.relay_endpoint.update(cx, |s, cx| {
-                s.set_value("removent://another.example:443", window, cx)
+                s.replace_all("removent://another.example:443", window, cx)
             });
         })
     });
@@ -125,14 +125,14 @@ fn relay_prefill_preserves_secret_but_destination_edits_clear_it(cx: &mut TestAp
                 "credential-free registration is valid"
             );
             form.password
-                .update(cx, |s, cx| s.set_value("22".repeat(32), window, cx));
+                .update(cx, |s, cx| s.replace_all("22".repeat(32), window, cx));
         })
     });
     cx.run_until_parked();
     cx.update(|window, cx| {
         dialog.update(cx, |form, cx| {
             form.host
-                .update(cx, |s, cx| s.set_value("other-room", window, cx));
+                .update(cx, |s, cx| s.replace_all("other-room", window, cx));
         })
     });
     cx.run_until_parked();
@@ -515,5 +515,23 @@ fn relay_tls_settings_are_optional_and_survive_editing(cx: &mut TestAppContext) 
             assert_eq!(restored.server_name, "relay.example");
             assert!(restored.accept_invalid_certificate);
         })
+    });
+}
+
+#[gpui::test]
+fn programmatic_destination_change_cannot_send_a_previous_routes_credential(
+    cx: &mut TestAppContext,
+) {
+    let (dialog, cx) = setup(cx);
+    cx.update(|window, cx| {
+        dialog.update(cx, |form, cx| {
+            form.prefill(&relay_bookmark(), Some("11".repeat(32)), window, cx);
+            // set_value is deliberately silent in GPUI Kit 0.7; submission
+            // must remain safe even before any edit event is delivered.
+            form.relay_endpoint.update(cx, |input, cx| {
+                input.set_value("removent://another.example:443", window, cx)
+            });
+            assert!(form.request(cx).is_err());
+        });
     });
 }

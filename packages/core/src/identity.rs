@@ -2,8 +2,9 @@
 
 use crate::error::{CoreError, Result};
 use crate::paths::DataPaths;
+use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePrivateKey};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use pkcs8::{DecodePrivateKey, EncodePrivateKey, LineEnding};
+use pkcs8::LineEnding;
 use rcgen::{CertificateParams, DnType, KeyPair};
 use sha2::{Digest, Sha256};
 
@@ -67,8 +68,12 @@ pub fn load_or_create(paths: &DataPaths, device_name: &str) -> Result<DeviceIden
 }
 
 fn create_and_store(paths: &DataPaths, _device_name: &str) -> Result<String> {
-    let mut csprng = rand::rngs::OsRng;
-    let signing_key = SigningKey::generate(&mut csprng);
+    use rand::TryRng;
+    let mut seed = [0u8; 32];
+    rand::rngs::SysRng
+        .try_fill_bytes(&mut seed)
+        .map_err(|error| CoreError::Crypto(format!("generate device key: {error}")))?;
+    let signing_key = SigningKey::from_bytes(&seed);
     let doc = signing_key
         .to_pkcs8_der()
         .map_err(|e| CoreError::Crypto(e.to_string()))?;

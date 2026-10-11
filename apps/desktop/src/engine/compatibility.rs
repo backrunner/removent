@@ -25,8 +25,7 @@ pub(super) fn vnc_failure_message(error: &removent_client::VncError) -> String {
 }
 
 /// Connect to a standard RFB/VNC server and bridge its raw frames into the
-/// same viewer bus used by RVP. VNC has no Removent pairing/resume channel, so
-/// a disconnect is reported directly to the UI.
+/// same viewer bus used by RVP. The shared supervisor reconnects on transport errors.
 pub(super) async fn run_vnc_client(
     request: ConnectionRequest,
     attempt: ClientAttempt,

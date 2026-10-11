@@ -6,8 +6,10 @@
 //!
 //! # Safety
 //!
-//! Base address access is only available through lock guards to ensure proper
-//! memory synchronization. The surface must be locked before accessing pixel data.
+//! Base addresses are exposed through lock guards that balance native mapping
+//! and synchronization. Because retained, native, GPU, and cross-process aliases
+//! can still access the same storage, creating Rust references from those
+//! addresses requires an explicit unsafe exclusivity or immutability guarantee.
 
 use super::ffi;
 use std::ffi::c_void;
@@ -155,8 +157,9 @@ pub struct PlaneProperties {
 ///     // Lock for read-only access
 ///     let guard = surface.lock(IOSurfaceLockOptions::READ_ONLY)?;
 ///
-///     // Access pixel data through the guard
-///     let data = guard.as_slice();
+///     // SAFETY: no native or retained alias can mutate or remap the surface
+///     // while this reference is alive.
+///     let data = unsafe { guard.as_slice() }.expect("surface base address");
 ///     println!("Surface has {} bytes", data.len());
 ///
 ///     // Surface automatically unlocked when guard drops
@@ -216,7 +219,7 @@ impl IOSurface {
     ) -> Option<Self> {
         let mut ptr: *mut c_void = std::ptr::null_mut();
         let status = unsafe {
-            crate::ffi::io_surface_create(width, height, pixel_format, bytes_per_element, &mut ptr)
+            crate::ffi::io_surface_create(width, height, pixel_format, bytes_per_element, &raw mut ptr)
         };
         if status == 0 && !ptr.is_null() {
             Some(Self(ptr))
@@ -363,7 +366,7 @@ impl IOSurface {
                 } else {
                     std::ptr::null()
                 },
-                &mut ptr,
+                &raw mut ptr,
             )
         };
 
@@ -374,8 +377,14 @@ impl IOSurface {
         }
     }
 
-    /// Wraps a +1 retained `IOSurfaceRef` and returns `None` for null.
-    pub fn from_raw(ptr: *mut c_void) -> Option<Self> {
+    /// Adopts a +1 retained `IOSurfaceRef` and returns `None` for null.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `IOSurfaceRef` of the exact type carrying
+    /// one retain transferred to this wrapper. The caller must not release or
+    /// separately adopt that transferred retain.
+    pub unsafe fn from_raw(ptr: *mut c_void) -> Option<Self> {
         if ptr.is_null() {
             None
         } else {
@@ -383,15 +392,32 @@ impl IOSurface {
         }
     }
 
+    /// Retains a +0 borrowed `IOSurfaceRef` and returns an owned wrapper.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `IOSurfaceRef` of the exact type for the
+    /// duration of the retain call.
+    #[must_use]
+    pub unsafe fn from_raw_borrowed(ptr: *mut c_void) -> Option<Self> {
+        if ptr.is_null() {
+            None
+        } else {
+            let retained = unsafe { ffi::io_surface_retain(ptr) };
+            unsafe { Self::from_raw(retained) }
+        }
+    }
+
     /// Wraps a raw `IOSurfaceRef` by taking ownership without retaining it.
     ///
     /// # Safety
-    /// The caller must ensure `ptr` is a valid +1 retained `IOSurfaceRef`.
+    /// `ptr` must be a non-null, live `IOSurfaceRef` of the exact type carrying
+    /// one retain transferred to this wrapper.
     pub const unsafe fn from_ptr(ptr: *mut c_void) -> Self {
         Self(ptr)
     }
 
-    /// Get the raw pointer
+    /// Borrow the raw +0 `IOSurfaceRef` while `self` remains alive.
     #[must_use]
     pub const fn as_ptr(&self) -> *mut c_void {
         self.0
@@ -543,18 +569,27 @@ impl IOSurface {
         }
     }
 
-    /// Lock the surface for CPU access (low-level API)
+    /// Lock the surface for CPU access (low-level API).
     ///
     /// Prefer using [`lock`](Self::lock) for RAII-style access.
+    /// This is a native synchronization/mapping operation and does not grant
+    /// Rust-exclusive access to the surface bytes.
     ///
     /// # Arguments
     /// * `options` - Lock options (e.g., `IOSurfaceLockOptions::READ_ONLY`)
     ///
+    /// # Safety
+    ///
+    /// Every successful call must be paired exactly once with
+    /// [`Self::unlock_raw`] using identical options. The caller must not mix
+    /// this protocol with a live RAII guard or let derived access outlive the
+    /// matching unlock.
+    ///
     /// # Errors
     /// Returns `kern_return_t` error code if the lock fails.
-    pub fn lock_raw(&self, options: IOSurfaceLockOptions) -> Result<u32, i32> {
+    pub unsafe fn lock_raw(&self, options: IOSurfaceLockOptions) -> Result<u32, i32> {
         let mut seed: u32 = 0;
-        let status = unsafe { ffi::io_surface_lock(self.0, options.as_u32(), &mut seed) };
+        let status = unsafe { ffi::io_surface_lock(self.0, options.as_u32(), &raw mut seed) };
         if status == 0 {
             Ok(seed)
         } else {
@@ -562,16 +597,23 @@ impl IOSurface {
         }
     }
 
-    /// Unlock the surface after CPU access (low-level API)
+    /// Unlock the surface after CPU access (low-level API).
     ///
     /// # Arguments
     /// * `options` - Must match the options used in the corresponding `lock_raw()` call
     ///
+    /// # Safety
+    ///
+    /// This call must balance exactly one successful [`Self::lock_raw`] call
+    /// with identical options. No pointer or reference derived from that
+    /// mapping may be accessed afterward, and the mapping must not belong to an
+    /// RAII guard.
+    ///
     /// # Errors
     /// Returns `kern_return_t` error code if the unlock fails.
-    pub fn unlock_raw(&self, options: IOSurfaceLockOptions) -> Result<u32, i32> {
+    pub unsafe fn unlock_raw(&self, options: IOSurfaceLockOptions) -> Result<u32, i32> {
         let mut seed: u32 = 0;
-        let status = unsafe { ffi::io_surface_unlock(self.0, options.as_u32(), &mut seed) };
+        let status = unsafe { ffi::io_surface_unlock(self.0, options.as_u32(), &raw mut seed) };
         if status == 0 {
             Ok(seed)
         } else {
@@ -597,13 +639,14 @@ impl IOSurface {
     ///
     /// fn read_surface(surface: &IOSurface) -> Result<(), i32> {
     ///     let guard = surface.lock(IOSurfaceLockOptions::READ_ONLY)?;
-    ///     let data = guard.as_slice();
+    ///     // SAFETY: no alias can mutate or remap the surface while `data` lives.
+    ///     let data = unsafe { guard.as_slice() }.expect("surface base address");
     ///     println!("Read {} bytes", data.len());
     ///     Ok(())
     /// }
     /// ```
     pub fn lock(&self, options: IOSurfaceLockOptions) -> Result<IOSurfaceLockGuard<'_>, i32> {
-        self.lock_raw(options)?;
+        unsafe { self.lock_raw(options)? };
         Ok(IOSurfaceLockGuard {
             surface: self,
             options,
@@ -633,12 +676,12 @@ impl IOSurface {
 
 /// RAII guard for locked `IOSurface`
 ///
-/// Provides safe access to surface memory while the lock is held.
+/// Balances a native surface mapping while the guard is held.
 /// The surface is automatically unlocked when this guard is dropped.
 ///
 /// # Memory Access
 ///
-/// All base address access is through this guard to ensure proper locking.
+/// The guard establishes native synchronization, not Rust exclusivity.
 ///
 /// # Examples
 ///
@@ -648,16 +691,16 @@ impl IOSurface {
 /// fn access_surface(surface: &IOSurface) -> Result<(), i32> {
 ///     let guard = surface.lock(IOSurfaceLockOptions::READ_ONLY)?;
 ///
-///     // Access the entire buffer
-///     let data = guard.as_slice();
+///     // SAFETY: no alias can mutate or remap the surface while `data` lives.
+///     let data = unsafe { guard.as_slice() }.expect("surface base address");
 ///
 ///     // Access a specific row
-///     if let Some(row) = guard.row(0) {
+///     if let Some(row) = unsafe { guard.row(0) } {
 ///         println!("First row: {} bytes", row.len());
 ///     }
 ///
 ///     // Access a specific plane (for multi-planar formats)
-///     if let Some(plane_data) = guard.plane_data(0) {
+///     if let Some(plane_data) = unsafe { guard.plane_data(0) } {
 ///         println!("Plane 0: {} bytes", plane_data.len());
 ///     }
 ///
@@ -712,23 +755,21 @@ impl IOSurfaceLockGuard<'_> {
         self.surface.plane_count()
     }
 
-    /// Get the base address of the locked surface
+    /// Get the base address of the locked surface.
     ///
-    /// # Safety
-    ///
-    /// The returned pointer is only valid while this guard is held.
+    /// Dereferencing the returned pointer is unsafe. The native lock keeps the
+    /// mapping synchronized but does not guarantee Rust aliasing or immutability.
     #[must_use]
     pub fn base_address(&self) -> *const u8 {
         self.surface.base_address_raw().cast_const()
     }
 
-    /// Get the mutable base address (only valid for read-write locks)
+    /// Get the mutable base address (only valid for read-write locks).
     ///
     /// Returns `None` if this is a read-only lock.
     ///
-    /// # Safety
-    ///
-    /// The returned pointer is only valid while this guard is held.
+    /// Dereferencing the returned pointer requires unique access to the bytes
+    /// across all Rust, native, retained, GPU, and cross-process aliases.
     pub fn base_address_mut(&mut self) -> Option<*mut u8> {
         if self.options.is_read_only() {
             None
@@ -737,7 +778,7 @@ impl IOSurfaceLockGuard<'_> {
         }
     }
 
-    /// Get the base address of a specific plane
+    /// Get the base address of a specific plane.
     ///
     /// For multi-planar formats like YCbCr 4:2:0:
     /// - Plane 0: Y (luminance) data
@@ -745,18 +786,18 @@ impl IOSurfaceLockGuard<'_> {
     ///
     /// Returns `None` if the plane index is out of bounds.
     ///
-    /// # Safety
-    ///
-    /// The returned pointer is only valid while this guard is held.
+    /// Dereferencing the returned pointer is unsafe because the lock does not
+    /// establish Rust immutability.
     pub fn base_address_of_plane(&self, plane_index: usize) -> Option<*const u8> {
         self.surface
             .base_address_of_plane_raw(plane_index)
             .map(<*mut u8>::cast_const)
     }
 
-    /// Get the mutable base address of a specific plane
+    /// Get the mutable base address of a specific plane.
     ///
-    /// Returns `None` if this is a read-only lock or the plane index is out of bounds.
+    /// Returns `None` if this is a read-only lock or the plane index is out of
+    /// bounds. Dereferencing requires unique access across every alias.
     pub fn base_address_of_plane_mut(&mut self, plane_index: usize) -> Option<*mut u8> {
         if self.options.is_read_only() {
             return None;
@@ -764,41 +805,65 @@ impl IOSurfaceLockGuard<'_> {
         self.surface.base_address_of_plane_raw(plane_index)
     }
 
-    /// Get a slice view of the surface data
+    /// Get a slice view of the surface allocation.
     ///
-    /// The lock guard ensures the surface is locked for the lifetime of the slice.
+    /// Returns `None` for a missing base address or a length that cannot be
+    /// represented by a Rust slice.
+    ///
+    /// # Safety
+    ///
+    /// For the returned reference's lifetime, the allocation must remain
+    /// initialized, immovable, and locked, and no Rust or native alias may
+    /// mutate or remap any byte in it.
     #[must_use]
-    pub fn as_slice(&self) -> &[u8] {
+    pub unsafe fn as_slice(&self) -> Option<&[u8]> {
         let ptr = self.base_address();
         let len = self.alloc_size();
-        if ptr.is_null() || len == 0 {
-            &[]
-        } else {
-            unsafe { std::slice::from_raw_parts(ptr, len) }
+        if len == 0 {
+            return Some(&[]);
         }
+        if ptr.is_null() || isize::try_from(len).is_err() {
+            return None;
+        }
+        Some(unsafe { std::slice::from_raw_parts(ptr, len) })
     }
 
-    /// Get a mutable slice view of the surface data (only valid for read-write locks)
+    /// Get a mutable slice view of the surface allocation.
     ///
-    /// Returns `None` if this is a read-only lock.
-    pub fn as_slice_mut(&mut self) -> Option<&mut [u8]> {
+    /// Returns `None` for read-only locks, a missing base address, or a length
+    /// that cannot be represented by a Rust slice.
+    ///
+    /// # Safety
+    ///
+    /// For the returned reference's lifetime, this caller must have unique
+    /// access to the full allocation across every Rust, native, retained, GPU,
+    /// and cross-process alias. The allocation must remain initialized,
+    /// immovable, and locked.
+    pub unsafe fn as_slice_mut(&mut self) -> Option<&mut [u8]> {
         if self.options.is_read_only() {
             return None;
         }
         let ptr = self.base_address_mut()?;
         let len = self.alloc_size();
-        if ptr.is_null() || len == 0 {
-            Some(&mut [])
-        } else {
-            Some(unsafe { std::slice::from_raw_parts_mut(ptr, len) })
+        if len == 0 {
+            return Some(&mut []);
         }
+        if ptr.is_null() || isize::try_from(len).is_err() {
+            return None;
+        }
+        Some(unsafe { std::slice::from_raw_parts_mut(ptr, len) })
     }
 
-    /// Get a specific row as a slice
+    /// Get a specific row as a slice.
     ///
     /// Returns `None` if the row index is out of bounds.
+    ///
+    /// # Safety
+    ///
+    /// For the returned reference's lifetime, the row must remain initialized,
+    /// immovable, locked, and immutable through every Rust and native alias.
     #[must_use]
-    pub fn row(&self, row_index: usize) -> Option<&[u8]> {
+    pub unsafe fn row(&self, row_index: usize) -> Option<&[u8]> {
         if row_index >= self.height() {
             return None;
         }
@@ -806,40 +871,70 @@ impl IOSurfaceLockGuard<'_> {
         if ptr.is_null() {
             return None;
         }
-        unsafe {
-            let row_ptr = ptr.add(row_index * self.bytes_per_row());
-            Some(std::slice::from_raw_parts(row_ptr, self.bytes_per_row()))
+        let bytes_per_row = self.bytes_per_row();
+        let offset = row_index.checked_mul(bytes_per_row)?;
+        let end = offset.checked_add(bytes_per_row)?;
+        if end > self.alloc_size() || isize::try_from(bytes_per_row).is_err() {
+            return None;
         }
+        Some(unsafe { std::slice::from_raw_parts(ptr.add(offset), bytes_per_row) })
     }
 
-    /// Get a slice of plane data
+    /// Get a slice of plane data.
     ///
     /// Returns the data for a specific plane as a byte slice. The slice size is
     /// calculated from the plane's height and bytes per row.
     ///
-    /// Returns `None` if the plane index is out of bounds.
+    /// Returns `None` if the plane index is out of bounds or its byte length
+    /// cannot be represented.
+    ///
+    /// # Safety
+    ///
+    /// For the returned reference's lifetime, the plane must remain initialized,
+    /// immovable, locked, and immutable through every Rust and native alias.
     #[must_use]
-    pub fn plane_data(&self, plane_index: usize) -> Option<&[u8]> {
-        let base = self.base_address_of_plane(plane_index)?;
-        let height = self.surface.height_of_plane(plane_index);
-        let bytes_per_row = self.surface.bytes_per_row_of_plane(plane_index);
-        Some(unsafe { std::slice::from_raw_parts(base, height * bytes_per_row) })
+    pub unsafe fn plane_data(&self, plane_index: usize) -> Option<&[u8]> {
+        let (base, height, bytes_per_row) = self.plane_extent(plane_index)?;
+        let len = height.checked_mul(bytes_per_row)?;
+        Some(unsafe { std::slice::from_raw_parts(base, len) })
     }
 
-    /// Get a specific row from a plane as a slice
+    /// Get a specific row from a plane as a slice.
     ///
     /// Returns `None` if the plane or row index is out of bounds.
+    ///
+    /// # Safety
+    ///
+    /// For the returned reference's lifetime, the row must remain initialized,
+    /// immovable, locked, and immutable through every Rust and native alias.
     #[must_use]
-    pub fn plane_row(&self, plane_index: usize, row_index: usize) -> Option<&[u8]> {
-        let height = self.surface.height_of_plane(plane_index);
+    pub unsafe fn plane_row(&self, plane_index: usize, row_index: usize) -> Option<&[u8]> {
+        let (base, height, bytes_per_row) = self.plane_extent(plane_index)?;
         if row_index >= height {
             return None;
         }
+        let offset = row_index.checked_mul(bytes_per_row)?;
+        Some(unsafe { std::slice::from_raw_parts(base.add(offset), bytes_per_row) })
+    }
+
+    fn plane_extent(&self, plane_index: usize) -> Option<(*const u8, usize, usize)> {
+        if self.plane_count() == 0 || plane_index >= self.plane_count() {
+            return None;
+        }
+        let allocation = self.base_address();
         let base = self.base_address_of_plane(plane_index)?;
+        if allocation.is_null() {
+            return None;
+        }
+        let height = self.surface.height_of_plane(plane_index);
         let bytes_per_row = self.surface.bytes_per_row_of_plane(plane_index);
-        Some(unsafe {
-            std::slice::from_raw_parts(base.add(row_index * bytes_per_row), bytes_per_row)
-        })
+        let len = height.checked_mul(bytes_per_row)?;
+        let offset = (base as usize).checked_sub(allocation as usize)?;
+        let end = offset.checked_add(len)?;
+        if end > self.alloc_size() || isize::try_from(len).is_err() {
+            return None;
+        }
+        Some((base, height, bytes_per_row))
     }
 
     /// Access surface with a standard `std::io::Cursor`
@@ -854,7 +949,8 @@ impl IOSurfaceLockGuard<'_> {
     ///
     /// fn read_surface(surface: &IOSurface) {
     ///     let guard = surface.lock(IOSurfaceLockOptions::READ_ONLY).unwrap();
-    ///     let mut cursor = guard.cursor();
+    ///     // SAFETY: no alias can mutate or remap the surface while the cursor lives.
+    ///     let mut cursor = unsafe { guard.cursor() }.unwrap();
     ///
     ///     // Read first 4 bytes
     ///     let mut pixel = [0u8; 4];
@@ -865,9 +961,14 @@ impl IOSurfaceLockGuard<'_> {
     ///     cursor.seek(SeekFrom::Start(offset as u64)).unwrap();
     /// }
     /// ```
+    ///
+    /// # Safety
+    ///
+    /// The same immutability and mapping guarantees as [`Self::as_slice`] must
+    /// hold for the cursor's lifetime.
     #[must_use]
-    pub fn cursor(&self) -> io::Cursor<&[u8]> {
-        io::Cursor::new(self.as_slice())
+    pub unsafe fn cursor(&self) -> Option<io::Cursor<&[u8]>> {
+        unsafe { self.as_slice() }.map(io::Cursor::new)
     }
 
     /// Get raw pointer to surface data
@@ -896,17 +997,9 @@ impl IOSurfaceLockGuard<'_> {
     }
 }
 
-impl std::ops::Deref for IOSurfaceLockGuard<'_> {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        self.as_slice()
-    }
-}
-
 impl Drop for IOSurfaceLockGuard<'_> {
     fn drop(&mut self) {
-        let _ = self.surface.unlock_raw(self.options);
+        let _ = unsafe { self.surface.unlock_raw(self.options) };
     }
 }
 
@@ -922,29 +1015,16 @@ impl std::fmt::Debug for IOSurfaceLockGuard<'_> {
     }
 }
 
-impl Drop for IOSurface {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe {
-                ffi::io_surface_release(self.0);
-            }
-        }
-    }
-}
-
-impl Clone for IOSurface {
-    fn clone(&self) -> Self {
-        unsafe {
-            let ptr = ffi::io_surface_retain(self.0);
-            Self(ptr)
-        }
-    }
-}
+crate::utils::retained::cf_retained!(
+    IOSurface,
+    retain = ffi::io_surface_retain,
+    release = ffi::io_surface_release,
+);
 
 // SAFETY: `IOSurfaceRef` is a Core Foundation type documented by Apple as safe
 // to share across threads (it is the primary cross-process frame-delivery
-// mechanism).  Our wrapper holds only the opaque pointer; all mutation
-// (lock/unlock) goes through Apple's thread-safe primitives.
+// mechanism). Native lock/unlock operations are thread-safe; byte dereferencing
+// has a separate unsafe contract because a lock does not establish Rust aliasing.
 unsafe impl Send for IOSurface {}
 unsafe impl Sync for IOSurface {}
 

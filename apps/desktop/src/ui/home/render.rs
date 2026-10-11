@@ -2,7 +2,17 @@ use super::*;
 
 impl Render for HomeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let connection_visible = self.pin_dialog.is_none() && self.admission.is_none();
+        let recovery = self.engine.client_recovery().state();
+        let offline_overlay = self.connecting.is_some()
+            && matches!(
+                recovery,
+                removent_client::recovery::State::Offline
+                    | removent_client::recovery::State::Reconnecting {
+                        after_offline: true
+                    }
+            );
+        let connection_visible =
+            self.pin_dialog.is_none() && self.admission.is_none() && !offline_overlay;
         if let Some(dialog) = &self.connection_dialog {
             dialog.update(cx, |form, cx| {
                 form.set_obscured(!connection_visible, &self.focus, window, cx)
@@ -36,7 +46,7 @@ impl Render for HomeView {
                     && this.connection_dialog.is_none()
                 {
                     this.settings_open = !this.settings_open;
-                    window.focus(&this.focus);
+                    window.focus(&this.focus, cx);
                     cx.notify();
                 }
             }))
@@ -72,13 +82,13 @@ impl Render for HomeView {
                     this.cancel_pin(window, cx);
                 } else if matches!(this.pin_dialog, Some(PinDialog::Display(_))) {
                     this.pin_dialog = None;
-                    window.focus(&this.focus);
+                    window.focus(&this.focus, cx);
                     cx.notify();
                 } else if let Some(dialog) = &this.connection_dialog {
                     dialog.update(cx, |form, cx| form.back(window, cx));
                 } else if this.settings_open {
                     this.settings_open = false;
-                    window.focus(&this.focus);
+                    window.focus(&this.focus, cx);
                     cx.notify();
                 }
             }))
@@ -171,5 +181,40 @@ impl Render for HomeView {
             )
             .children(self.render_pin_dialog(cx))
             .children(self.render_admission_dialog(cx))
+            .when(offline_overlay, |el| {
+                let offline = recovery == removent_client::recovery::State::Offline;
+                el.child(modal_overlay(
+                    "network-overlay",
+                    self.dialog_seq,
+                    div()
+                        .w(px(360.))
+                        .p_5()
+                        .rounded(px(18.))
+                        .bg(colors.popover)
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap_3()
+                        .child(
+                            t!(if offline {
+                                "viewer.network_offline"
+                            } else {
+                                "viewer.network_reconnecting"
+                            })
+                            .to_string(),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(12.))
+                                .child(t!("viewer.network_retry_hint").to_string()),
+                        )
+                        .child(
+                            Button::new("cancel-offline-connection")
+                                .label(t!("connection.cancel_attempt").to_string())
+                                .on_click(cx.listener(|this, _, _, cx| this.cancel_connection(cx))),
+                        ),
+                    cx,
+                ))
+            })
     }
 }

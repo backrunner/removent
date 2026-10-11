@@ -79,7 +79,7 @@ impl ConnectionDialog {
             }
         }));
         let focus = cx.focus_handle();
-        window.focus(&focus);
+        window.focus(&focus, cx);
         Self {
             step: Step::Protocol,
             saved_id: None,
@@ -158,7 +158,7 @@ impl ConnectionDialog {
             self.error = None;
             self.password
                 .update(cx, |s, cx| s.set_value("", window, cx));
-            window.focus(&self.focus);
+            window.focus(&self.focus, cx);
             cx.notify();
         }
     }
@@ -239,7 +239,7 @@ impl ConnectionDialog {
             .any(|input| input.focus_handle(cx).is_focused(window));
             if self.focus.contains_focused(window, cx) || field_focused {
                 self.restore_focus = window.focused(cx);
-                window.focus(fallback);
+                window.focus(fallback, cx);
             }
         } else {
             window.focus(
@@ -247,6 +247,7 @@ impl ConnectionDialog {
                     .restore_focus
                     .take()
                     .unwrap_or_else(|| self.focus.clone()),
+                cx,
             );
         }
         cx.notify();
@@ -257,6 +258,15 @@ impl ConnectionDialog {
             return Err(String::new());
         };
         let via_relay = protocol == ConnectionProtocol::Removent && self.via_relay;
+        if via_relay
+            && !self.password.read(cx).value().is_empty()
+            && self
+                .relay_secret_scope
+                .as_ref()
+                .is_some_and(|scope| *scope != self.relay_scope(cx))
+        {
+            return Err(t!("connection.relay_credential_destination_changed").to_string());
+        }
         if via_relay && self.relay_secret_task.is_some() {
             return Err(t!("connection.relay_credential_loading").to_string());
         }
@@ -368,7 +378,7 @@ impl ConnectionDialog {
         self.port.update(cx, |s, cx| {
             s.set_value(address.port.to_string(), window, cx)
         });
-        window.focus(&self.username.focus_handle(cx));
+        window.focus(&self.username.focus_handle(cx), cx);
     }
 
     /// Reopen a bookmark. `None` leaves its password empty for the user to fill.
@@ -595,13 +605,13 @@ impl ConnectionDialog {
         }
     }
 
-    pub(super) fn cycle_focus(&self, backwards: bool, window: &mut Window, cx: &gpui::App) {
+    pub(super) fn cycle_focus(&self, backwards: bool, window: &mut Window, cx: &mut gpui::App) {
         // Keep keyboard navigation inside the modal, including its buttons and toggles.
         for _ in 0..128 {
             if backwards {
-                window.focus_prev();
+                window.focus_prev(cx);
             } else {
-                window.focus_next();
+                window.focus_next(cx);
             }
             if self.focus.contains_focused(window, cx) {
                 break;

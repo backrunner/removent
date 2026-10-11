@@ -34,6 +34,9 @@ extern "C" {
     // ---- dispatch ----
     /// Swift bridge function `acf_dispatch_queue_create` for the corresponding Apple API.
     pub fn acf_dispatch_queue_create(label: *const c_char, qos: i32) -> *const c_void;
+    pub fn acf_dispatch_queue_create_concurrent(label: *const c_char, qos: i32) -> *const c_void;
+    pub fn acf_dispatch_queue_main() -> *const c_void;
+    pub fn acf_dispatch_queue_global(qos: i32) -> *const c_void;
     /// Swift bridge function `dispatch_queue_release` for the corresponding Apple API.
     pub fn dispatch_queue_release(queue: *const c_void);
     /// Swift bridge function `dispatch_queue_retain` for the corresponding Apple API.
@@ -133,8 +136,8 @@ extern "C" {
     pub fn cm_sample_buffer_get_data_buffer(sample_buffer: *mut c_void) -> *mut c_void;
     /// Swift bridge function `cm_sample_buffer_get_format_description` for the corresponding Apple API.
     pub fn cm_sample_buffer_get_format_description(sample_buffer: *mut c_void) -> *mut c_void;
-    /// Swift bridge function `cm_sample_buffer_get_image_buffer` for the corresponding Apple API.
-    pub fn cm_sample_buffer_get_image_buffer(sample_buffer: *mut c_void) -> *mut c_void;
+    /// Swift bridge function that returns a +1 retained image buffer.
+    pub fn cm_sample_buffer_copy_image_buffer(sample_buffer: *mut c_void) -> *mut c_void;
     /// Swift bridge function `cm_sample_buffer_get_presentation_timestamp` for the corresponding Apple API.
     pub fn cm_sample_buffer_get_presentation_timestamp(
         sample_buffer: *mut c_void,
@@ -165,6 +168,29 @@ extern "C" {
     pub fn cm_sample_buffer_is_valid(sample_buffer: *mut c_void) -> bool;
     /// Swift bridge function `cm_sample_buffer_data_is_ready` for the corresponding Apple API.
     pub fn cm_sample_buffer_data_is_ready(sample_buffer: *mut c_void) -> bool;
+    pub fn acf_cm_sample_buffer_copy_audio_buffer_list(
+        sample_buffer: *mut c_void,
+        out_num_buffers: *mut u32,
+        out_buffers: *mut *mut c_void,
+        out_buffers_len: *mut usize,
+        out_block_buffer: *mut *mut c_void,
+    ) -> i32;
+    pub fn acf_cm_audio_buffer_array_free(buffers: *mut c_void);
+    pub fn acf_cm_sample_buffer_copy_sample_attachments(sample_buffer: *mut c_void) -> *mut c_void;
+    pub fn acf_cm_sample_buffer_is_sync_sample(sample_buffer: *mut c_void) -> bool;
+    pub fn acf_cm_video_format_description_get_dimensions(
+        format_description: *mut c_void,
+        out_width: *mut i32,
+        out_height: *mut i32,
+    ) -> bool;
+    pub fn acf_cm_video_format_description_copy_parameter_set(
+        format_description: *mut c_void,
+        hevc: bool,
+        index: usize,
+        out_count: *mut usize,
+        out_nal_unit_header_length: *mut i32,
+        out_status: *mut i32,
+    ) -> *mut c_void;
 
     // ---- CMBlockBuffer ----
     /// Swift bridge function `cm_block_buffer_release` for the corresponding Apple API.
@@ -346,9 +372,9 @@ extern "C" {
     /// Swift bridge function `cv_pixel_buffer_get_base_address` for the corresponding Apple API.
     pub fn cv_pixel_buffer_get_base_address(pixel_buffer: *mut c_void) -> *mut c_void;
     /// Swift bridge function `cv_pixel_buffer_lock_base_address` for the corresponding Apple API.
-    pub fn cv_pixel_buffer_lock_base_address(pixel_buffer: *mut c_void, flags: u32) -> i32;
+    pub fn cv_pixel_buffer_lock_base_address(pixel_buffer: *mut c_void, flags: u64) -> i32;
     /// Swift bridge function `cv_pixel_buffer_unlock_base_address` for the corresponding Apple API.
-    pub fn cv_pixel_buffer_unlock_base_address(pixel_buffer: *mut c_void, flags: u32) -> i32;
+    pub fn cv_pixel_buffer_unlock_base_address(pixel_buffer: *mut c_void, flags: u64) -> i32;
     /// Swift bridge function `cv_pixel_buffer_get_io_surface` for the corresponding Apple API.
     pub fn cv_pixel_buffer_get_io_surface(pixel_buffer: *mut c_void) -> *mut c_void;
     /// Swift bridge function `cv_pixel_buffer_get_extended_pixels` for the corresponding Apple API.
@@ -395,32 +421,110 @@ extern "C" {
         pixel_buffer_out: *mut *mut c_void,
     ) -> i32;
 
-    // ---- CVPixelBufferPool ----
-    /// Swift bridge function `cv_pixel_buffer_pool_release` for the corresponding Apple API.
-    pub fn cv_pixel_buffer_pool_release(pool: *mut c_void);
-    /// Swift bridge function `cv_pixel_buffer_pool_retain` for the corresponding Apple API.
-    pub fn cv_pixel_buffer_pool_retain(pool: *mut c_void) -> *mut c_void;
-    /// Swift bridge function `cv_pixel_buffer_pool_hash` for the corresponding Apple API.
-    pub fn cv_pixel_buffer_pool_hash(pool: *mut c_void) -> usize;
-    /// Swift bridge function `cv_pixel_buffer_pool_get_type_id` for the corresponding Apple API.
-    pub fn cv_pixel_buffer_pool_get_type_id() -> usize;
-    /// Swift bridge function `cv_pixel_buffer_pool_create` for the corresponding Apple API.
-    pub fn cv_pixel_buffer_pool_create(
-        width: usize,
-        height: usize,
-        pixel_format_type: u32,
-        max_buffers: usize,
-        pool_out: *mut *mut c_void,
-    ) -> i32;
-    /// Swift bridge function `cv_pixel_buffer_pool_create_pixel_buffer` for the corresponding Apple API.
-    pub fn cv_pixel_buffer_pool_create_pixel_buffer(
-        pool: *mut c_void,
-        pixel_buffer_out: *mut *mut c_void,
-    ) -> i32;
-    /// Swift bridge function `cv_pixel_buffer_pool_flush` for the corresponding Apple API.
-    pub fn cv_pixel_buffer_pool_flush(pool: *mut c_void);
-    /// Swift bridge function `cv_pixel_buffer_pool_get_attributes` for the corresponding Apple API.
-    pub fn cv_pixel_buffer_pool_get_attributes(pool: *mut c_void) -> *const c_void;
-    /// Swift bridge function `cv_pixel_buffer_pool_get_pixel_buffer_attributes` for the corresponding Apple API.
-    pub fn cv_pixel_buffer_pool_get_pixel_buffer_attributes(pool: *mut c_void) -> *const c_void;
+}
+
+// MARK: - ABI Layout Assertions
+//
+// The hand-written `#[repr(C)]` value types below are passed across the FFI
+// boundary by value (e.g. `CMTimeRangeGetEnd(range: CMTimeRange) -> CMTime`,
+// `CVImageBufferGetCleanRect(...) -> CVImageRect`) or read out of buffers that
+// Apple's frameworks / the Swift bridge populate (`AudioBuffer`,
+// `AudioBufferListRaw`). Their layout must match the matching C / Swift struct
+// exactly: any change to a field type, field order, or padding silently
+// corrupts marshalled data at runtime.
+//
+// These compile-time assertions pin the size and alignment of every such
+// struct so accidental field reordering / type changes fail the build
+// immediately. Field offsets are pinned indirectly via size + alignment
+// rather than per-field `offset_of!`. The runtime `verify_ffi_layout` check in
+// `tests/ffi_layout_tests.rs` guards the same invariants.
+
+#[cfg(any(feature = "cg", feature = "cm", feature = "cv"))]
+use core::mem::{align_of, size_of};
+
+#[cfg(feature = "cg")]
+const _: () = {
+    use crate::cg::{CGAffineTransform, CGPoint, CGRect, CGSize, CGVector};
+    assert!(size_of::<CGPoint>() == 16);
+    assert!(align_of::<CGPoint>() == 8);
+    assert!(size_of::<CGSize>() == 16);
+    assert!(align_of::<CGSize>() == 8);
+    assert!(size_of::<CGRect>() == 32);
+    assert!(align_of::<CGRect>() == 8);
+    assert!(size_of::<CGVector>() == 16);
+    assert!(align_of::<CGVector>() == 8);
+    assert!(size_of::<CGAffineTransform>() == 48);
+    assert!(align_of::<CGAffineTransform>() == 8);
+};
+
+#[cfg(feature = "cv")]
+const _: () = {
+    use crate::cv::{CVImageRect, CVImageSize, CVPixelBufferLockFlags};
+    assert!(size_of::<CVImageSize>() == 16);
+    assert!(align_of::<CVImageSize>() == 8);
+    assert!(size_of::<CVImageRect>() == 32);
+    assert!(align_of::<CVImageRect>() == 8);
+    assert!(size_of::<CVPixelBufferLockFlags>() == 8);
+    assert!(align_of::<CVPixelBufferLockFlags>() == 8);
+};
+
+#[cfg(feature = "cm")]
+const _: () = {
+    use crate::cm::{AudioBuffer, AudioBufferListRaw, CMSampleTimingInfo, CMTime, CMTimeRange};
+    assert!(size_of::<CMTime>() == 24);
+    assert!(align_of::<CMTime>() == 8);
+    assert!(size_of::<CMSampleTimingInfo>() == 72);
+    assert!(align_of::<CMSampleTimingInfo>() == 8);
+    assert!(size_of::<CMTimeRange>() == 48);
+    assert!(align_of::<CMTimeRange>() == 8);
+    assert!(size_of::<AudioBuffer>() == 16);
+    assert!(align_of::<AudioBuffer>() == 8);
+    assert!(size_of::<AudioBufferListRaw>() == 24);
+    assert!(align_of::<AudioBufferListRaw>() == 8);
+};
+
+/// Verify the ABI layout (size + alignment) of every by-value `#[repr(C)]`
+/// FFI value type at runtime.
+///
+/// Returns `true` only if all enabled-framework structs still match the layout
+/// pinned by the compile-time assertions above. This mirrors those `const`
+/// assertions in a form the integration tests in `tests/ffi_layout_tests.rs`
+/// can exercise, so a layout regression is caught as a test failure as well as
+/// a build failure.
+#[must_use]
+pub const fn verify_ffi_layout() -> bool {
+    #[allow(unused_mut)]
+    let mut ok = true;
+
+    #[cfg(feature = "cg")]
+    {
+        use crate::cg::{CGAffineTransform, CGPoint, CGRect, CGSize, CGVector};
+        ok = ok && size_of::<CGPoint>() == 16 && align_of::<CGPoint>() == 8;
+        ok = ok && size_of::<CGSize>() == 16 && align_of::<CGSize>() == 8;
+        ok = ok && size_of::<CGRect>() == 32 && align_of::<CGRect>() == 8;
+        ok = ok && size_of::<CGVector>() == 16 && align_of::<CGVector>() == 8;
+        ok = ok && size_of::<CGAffineTransform>() == 48 && align_of::<CGAffineTransform>() == 8;
+    }
+
+    #[cfg(feature = "cv")]
+    {
+        use crate::cv::{CVImageRect, CVImageSize, CVPixelBufferLockFlags};
+        ok = ok && size_of::<CVImageSize>() == 16 && align_of::<CVImageSize>() == 8;
+        ok = ok && size_of::<CVImageRect>() == 32 && align_of::<CVImageRect>() == 8;
+        ok = ok
+            && size_of::<CVPixelBufferLockFlags>() == 8
+            && align_of::<CVPixelBufferLockFlags>() == 8;
+    }
+
+    #[cfg(feature = "cm")]
+    {
+        use crate::cm::{AudioBuffer, AudioBufferListRaw, CMSampleTimingInfo, CMTime, CMTimeRange};
+        ok = ok && size_of::<CMTime>() == 24 && align_of::<CMTime>() == 8;
+        ok = ok && size_of::<CMSampleTimingInfo>() == 72 && align_of::<CMSampleTimingInfo>() == 8;
+        ok = ok && size_of::<CMTimeRange>() == 48 && align_of::<CMTimeRange>() == 8;
+        ok = ok && size_of::<AudioBuffer>() == 16 && align_of::<AudioBuffer>() == 8;
+        ok = ok && size_of::<AudioBufferListRaw>() == 24 && align_of::<AudioBufferListRaw>() == 8;
+    }
+
+    ok
 }

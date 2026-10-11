@@ -19,8 +19,14 @@ impl Engine {
         };
         let paths = self.paths.clone();
         let settings = self.settings.lock().unwrap().clone();
+        let (generation, recovery) = {
+            let mut channels = self.client_channels.lock().unwrap();
+            let generation = channels.invalidate();
+            (generation, channels.recovery.clone())
+        };
         let attempt = ClientAttempt {
-            generation: self.client_channels.lock().unwrap().invalidate(),
+            generation,
+            recovery: recovery.clone(),
             started: std::time::Instant::now(),
             channels: self.client_channels.clone(),
             events: self.events_tx.clone(),
@@ -33,15 +39,39 @@ impl Engine {
             async move {
                 // catch_unwind: even a task panic must reset the UI (the connect button
                 // must not get stuck on "connecting…").
-                let result = std::panic::AssertUnwindSafe(run_requested_client(
-                    identity,
-                    request,
-                    paths,
-                    settings,
-                    attempt.clone(),
-                ))
-                .catch_unwind()
-                .await;
+                let mut changes = recovery.subscribe();
+                let monitor = async {
+                    while changes.changed().await.is_ok() {
+                        let state = changes.borrow_and_update().clone();
+                        if state != removent_client::recovery::State::Connected {
+                            attempt.pause_input();
+                        }
+                        let _ = attempt.events.send(UiEvent::ClientRecovery {
+                            generation: attempt.generation,
+                        });
+                    }
+                };
+                let run = std::panic::AssertUnwindSafe(recovery.run(|| {
+                    attempt.pause_input();
+                    let request = recovery
+                        .destination
+                        .lock()
+                        .unwrap()
+                        .clone()
+                        .unwrap_or_else(|| request.clone());
+                    run_requested_client(
+                        identity.clone(),
+                        request,
+                        paths.clone(),
+                        settings.clone(),
+                        attempt.clone(),
+                    )
+                }))
+                .catch_unwind();
+                let result = tokio::select! {
+                    result = run => result,
+                    _ = monitor => unreachable!(),
+                };
                 attempt.finish(match result {
                     Ok(Ok(())) => None,
                     Ok(Err(e)) => Some(format!("{e:#}")),
@@ -52,6 +82,18 @@ impl Engine {
         );
         *task = Some(handle);
         Ok(())
+    }
+
+    pub fn client_recovery(&self) -> removent_client::recovery::Recovery {
+        self.client_channels.lock().unwrap().recovery.clone()
+    }
+
+    pub fn client_input_ready(&self, generation: usize) -> bool {
+        let channels = self.client_channels.lock().unwrap();
+        channels.generation == generation
+            && channels.geometry.is_some()
+            && channels.cmd.is_some()
+            && channels.recovery.state() == removent_client::recovery::State::Connected
     }
 
     pub fn client_generation(&self) -> usize {

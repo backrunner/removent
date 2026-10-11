@@ -22,6 +22,7 @@ extern "C" {
     pub fn cf_type_get_type_id(value: *mut c_void) -> usize;
     /// Swift bridge function `cf_type_copy_description` for the corresponding Apple API.
     pub fn cf_type_copy_description(value: *mut c_void) -> *mut c_char;
+    pub fn acf_cf_type_copy_description_string(value: *mut c_void) -> *mut c_void;
 
     /// Swift bridge function `cf_string_get_type_id` for the corresponding Apple API.
     pub fn cf_string_get_type_id() -> usize;
@@ -31,6 +32,9 @@ extern "C" {
     pub fn cf_string_copy_cstring(value: *mut c_void) -> *mut c_char;
     /// Swift bridge function `cf_string_get_length` for the corresponding Apple API.
     pub fn cf_string_get_length(value: *mut c_void) -> usize;
+    pub fn acf_cf_string_create_with_bytes(bytes: *const u8, len: usize) -> *mut c_void;
+    pub fn acf_cf_string_copy_utf16(value: *mut c_void, buffer: *mut u16, capacity: usize)
+        -> usize;
 
     /// Swift bridge function `cf_number_get_type_id` for the corresponding Apple API.
     pub fn cf_number_get_type_id() -> usize;
@@ -55,8 +59,7 @@ extern "C" {
     pub fn cf_data_create(bytes: *const u8, len: usize) -> *mut c_void;
     /// Swift bridge function `cf_data_get_length` for the corresponding Apple API.
     pub fn cf_data_get_length(value: *mut c_void) -> usize;
-    /// Swift bridge function `cf_data_copy_bytes` for the corresponding Apple API.
-    pub fn cf_data_copy_bytes(value: *mut c_void, buffer: *mut u8);
+    pub fn acf_cf_data_copy_bytes(value: *mut c_void, buffer: *mut u8, capacity: usize) -> usize;
 
     /// Swift bridge function `cf_date_get_type_id` for the corresponding Apple API.
     pub fn cf_date_get_type_id() -> usize;
@@ -83,6 +86,11 @@ extern "C" {
         domain: *mut c_void,
         code: i64,
         description: *const c_char,
+    ) -> *mut c_void;
+    pub fn acf_cf_error_create(
+        domain: *mut c_void,
+        code: i64,
+        description: *mut c_void,
     ) -> *mut c_void;
     /// Swift bridge function `cf_error_get_domain` for the corresponding Apple API.
     pub fn cf_error_get_domain(value: *mut c_void) -> *mut c_void;
@@ -306,8 +314,11 @@ extern "C" {
         candidate: *mut c_void,
         out_value: *mut *mut c_void,
     ) -> bool;
-    /// Swift bridge function `cf_set_get_values` for the corresponding Apple API.
-    pub fn cf_set_get_values(value: *mut c_void, out_values: *mut *mut c_void);
+    pub fn acf_cf_set_copy_values(
+        value: *mut c_void,
+        out_values: *mut *mut c_void,
+        capacity: usize,
+    ) -> usize;
     /// Swift bridge function `cf_set_apply_function` for the corresponding Apple API.
     pub fn cf_set_apply_function(
         value: *mut c_void,
@@ -357,6 +368,7 @@ extern "C" {
     /// Swift bridge function `cf_notification_center_get_local` for the corresponding Apple API.
     pub fn cf_notification_center_get_local() -> *mut c_void;
     /// Swift bridge function `cf_notification_center_get_distributed` for the corresponding Apple API.
+    #[cfg(target_os = "macos")]
     pub fn cf_notification_center_get_distributed() -> *mut c_void;
     /// Swift bridge function `cf_notification_center_get_darwin` for the corresponding Apple API.
     pub fn cf_notification_center_get_darwin() -> *mut c_void;
@@ -458,7 +470,9 @@ extern "C" {
     pub fn cf_file_descriptor_invalidate(value: *mut c_void);
 
     /// Swift bridge function `cf_xml_create_string_by_escaping_entities` for the corresponding Apple API.
+    #[cfg(target_os = "macos")]
     pub fn cf_xml_create_string_by_escaping_entities(value: *mut c_void) -> *mut c_void;
     /// Swift bridge function `cf_xml_create_string_by_unescaping_entities` for the corresponding Apple API.
+    #[cfg(target_os = "macos")]
     pub fn cf_xml_create_string_by_unescaping_entities(value: *mut c_void) -> *mut c_void;
 }

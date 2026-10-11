@@ -390,7 +390,7 @@ struct SettingsView: View {
                 Section {
                     LabeledContent(L("Version", "版本"), value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
                 } footer: {
-                    Text(L("Removent for iPhone and iPad", "Removent · iPhone 与 iPad"))
+                    Text(L("Removent for iPhone and iPad", "适用于 iPhone 与 iPad 的 Removent"))
                 }
             }
             .modifier(MobileContentWidth())

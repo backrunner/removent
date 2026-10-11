@@ -11,9 +11,11 @@ TRAY_LOG="$TMPDIR_TEST/tray.log"
 DAEMON_LOG="$TMPDIR_TEST/daemon.log"
 TRAY_PID=""
 DAEMON_PID=""
+DUPLICATE_PID=""
 
 cleanup() {
     [ -n "$TRAY_PID" ] && kill "$TRAY_PID" 2>/dev/null
+    [ -n "$DUPLICATE_PID" ] && kill "$DUPLICATE_PID" 2>/dev/null
     [ -n "$DAEMON_PID" ] && kill "$DAEMON_PID" 2>/dev/null
     rm -rf "$TMPDIR_TEST"
 }
@@ -43,18 +45,33 @@ REMOVENT_DATA_DIR="$TMPDIR_TEST" REMOVENT_TRAY_NO_ALERTS=1 \
     apps/tray/.build/debug/RemoventTray >"$TRAY_LOG" 2>&1 &
 TRAY_PID=$!
 
-sleep 1
+# Wait for the first process to own the lock and connect. A fixed one-second
+# sleep can let the second process win startup on a busy build machine.
+for _ in $(seq 1 50); do
+    grep -q "connected to daemon" "$TRAY_LOG" && break
+    kill -0 "$TRAY_PID" 2>/dev/null || break
+    sleep 0.2
+done
+grep -q "connected to daemon" "$TRAY_LOG" || {
+    echo "FAIL: first tray did not connect"
+    cat "$TRAY_LOG"
+    exit 1
+}
 # Same data directory must not create a second menu-bar controller or IPC client.
 REMOVENT_DATA_DIR="$TMPDIR_TEST" REMOVENT_TRAY_NO_ALERTS=1 \
     apps/tray/.build/debug/RemoventTray >"$TMPDIR_TEST/duplicate.log" 2>&1 &
 DUPLICATE_PID=$!
-sleep 1
+for _ in $(seq 1 50); do
+    kill -0 "$DUPLICATE_PID" 2>/dev/null || break
+    sleep 0.2
+done
 if kill -0 "$DUPLICATE_PID" 2>/dev/null; then
     kill "$DUPLICATE_PID"
     echo "FAIL: duplicate tray did not exit"
     exit 1
 fi
 wait "$DUPLICATE_PID" || { echo "FAIL: duplicate tray did not exit cleanly"; exit 1; }
+DUPLICATE_PID=""
 echo "PASS: duplicate tray exits without replacing the first"
 
 sleep 6

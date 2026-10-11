@@ -47,7 +47,7 @@ struct SessionView: View {
                             .accessibilityIdentifier("remoteCanvas")
                             .accessibilityLabel(L("Remote desktop", "远程桌面"))
                             .accessibilityValue("\(model.receivedFrames)")
-                        if !model.ready { connectionState }
+                        if !model.ready && !model.networkOverlay { connectionState }
                         if model.ready && (stats || model.error != nil) {
                             VStack(alignment: .leading, spacing: 8) {
                                 if stats {
@@ -89,6 +89,18 @@ struct SessionView: View {
                                     .accessibilityIdentifier("showSessionControls")
                             }
                         }
+                        if model.networkOverlay {
+                            ZStack {
+                                Color.black.opacity(0.75)
+                                VStack(spacing: 16) {
+                                    Image(systemName: model.networkOffline ? "wifi.slash" : "arrow.clockwise").font(.title)
+                                    Text(model.networkOffline ? L("Network disconnected", "网络已断开") : L("Reconnecting…", "正在重新连接…")).font(.headline)
+                                    Text(L("The session will reconnect automatically when the network is available.", "网络恢复后将自动尝试重新连接。")).font(.subheadline).multilineTextAlignment(.center)
+                                    Button(L("Disconnect", "断开连接")) { model.disconnect() }
+                                }.padding(24).frame(maxWidth: 380)
+                            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .accessibilityIdentifier("networkDisconnectedOverlay")
+                        }
                     }
                     .frame(width: viewport.width, height: viewportHeight, alignment: .topLeading)
                     .background(.black)
@@ -124,6 +136,12 @@ struct SessionView: View {
                 pendingSheet = nil
             }
             revealControls()
+        }
+        .onChange(of: model.recovering) { _, recovering in
+            if recovering {
+                keyboard = false; modifiers = 0; keyboardFrame = .zero
+                clipboard = false; gestures = false; actions = false; actionsPresented = false; pendingSheet = nil
+            }
         }
         .onChange(of: keyboard) { _, _ in revealControls() }
         .onChange(of: actions) { _, value in

@@ -130,7 +130,7 @@ pub fn available_video_encoder_details_with_options(
             options_dict
                 .as_ref()
                 .map_or(ptr::null(), |dict| dict.as_ptr().cast_const().cast()),
-            &mut arr,
+            &raw mut arr,
         )
     };
     if status != 0 {
@@ -177,17 +177,18 @@ pub fn supported_property_dictionary_for_encoder(
             encoder_specification
                 .as_ref()
                 .map_or(ptr::null(), |dict| dict.as_ptr().cast_const().cast()),
-            &mut encoder_id_out,
-            &mut supported_properties_out,
+            &raw mut encoder_id_out,
+            &raw mut supported_properties_out,
         )
     };
     if status != 0 {
         return Err(status);
     }
 
-    let encoder_id =
-        CFString::from_raw(encoder_id_out.cast_mut().cast()).map(|string| string.to_string_lossy());
-    let supported_properties = CFDictionary::from_raw(supported_properties_out.cast_mut().cast());
+    let encoder_id = unsafe { CFString::from_raw(encoder_id_out.cast_mut().cast()) }
+        .map(|string| string.to_string_lossy());
+    let supported_properties =
+        unsafe { CFDictionary::from_raw(supported_properties_out.cast_mut().cast()) };
 
     Ok(EncoderSupportedProperties {
         encoder_id,
@@ -289,7 +290,7 @@ fn dictionary_with_boolean(key: ffi::CFStringRef, value: bool) -> CFDictionary {
             },
         );
     }
-    CFDictionary::from_raw(dict.cast()).expect("CFDictionaryCreateMutable returned NULL")
+    unsafe { CFDictionary::from_raw(dict.cast()) }.expect("CFDictionaryCreateMutable returned NULL")
 }
 
 fn dictionary_with_encoder_id(encoder_id: &str) -> CFDictionary {
@@ -309,7 +310,7 @@ fn dictionary_with_encoder_id(encoder_id: &str) -> CFDictionary {
             encoder_id.as_ptr().cast(),
         );
     }
-    CFDictionary::from_raw(dict.cast()).expect("CFDictionaryCreateMutable returned NULL")
+    unsafe { CFDictionary::from_raw(dict.cast()) }.expect("CFDictionaryCreateMutable returned NULL")
 }
 
 #[allow(
@@ -358,15 +359,15 @@ unsafe fn cf_number_u32(n: *const c_void) -> Option<u32> {
 }
 
 unsafe fn cf_number_i64(n: *const c_void) -> Option<i64> {
-    unsafe { CFNumber::from_raw_retained(n.cast_mut()) }.and_then(|number| number.to_i64())
+    unsafe { CFNumber::from_raw_borrowed(n.cast_mut()) }.and_then(|number| number.to_i64())
 }
 
 unsafe fn cf_number_u64(n: *const c_void) -> Option<u64> {
-    unsafe { CFNumber::from_raw_retained(n.cast_mut()) }.and_then(|number| number.to_u64())
+    unsafe { CFNumber::from_raw_borrowed(n.cast_mut()) }.and_then(|number| number.to_u64())
 }
 
 unsafe fn cf_dictionary(value: *const c_void) -> Option<CFDictionary> {
-    unsafe { CFDictionary::from_raw_retained(value.cast_mut()) }
+    unsafe { CFDictionary::from_raw_borrowed(value.cast_mut()) }
 }
 
 unsafe fn cf_bool(value: *const c_void) -> Option<bool> {

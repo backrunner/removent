@@ -87,10 +87,10 @@ impl CMBlockBuffer {
         }
         let mut ptr: *mut std::ffi::c_void = std::ptr::null_mut();
         let status = unsafe {
-            ffi::cm_block_buffer_create_with_data(data.as_ptr().cast(), data.len(), &mut ptr)
+            ffi::cm_block_buffer_create_with_data(data.as_ptr().cast(), data.len(), &raw mut ptr)
         };
         if status == 0 && !ptr.is_null() {
-            Some(Self(ptr))
+            unsafe { Self::from_raw(ptr) }
         } else {
             None
         }
@@ -113,16 +113,22 @@ impl CMBlockBuffer {
     #[must_use]
     pub fn create_empty() -> Option<Self> {
         let mut ptr: *mut std::ffi::c_void = std::ptr::null_mut();
-        let status = unsafe { ffi::cm_block_buffer_create_empty(&mut ptr) };
+        let status = unsafe { ffi::cm_block_buffer_create_empty(&raw mut ptr) };
         if status == 0 && !ptr.is_null() {
-            Some(Self(ptr))
+            unsafe { Self::from_raw(ptr) }
         } else {
             None
         }
     }
 
-    /// Wraps a +1 retained `CMBlockBufferRef` and returns `None` for null.
-    pub fn from_raw(ptr: *mut std::ffi::c_void) -> Option<Self> {
+    /// Adopts a +1 retained `CMBlockBufferRef` and returns `None` for null.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CMBlockBufferRef` of the exact type
+    /// carrying one retain transferred to this wrapper. The caller must not
+    /// release or separately adopt that transferred retain.
+    pub unsafe fn from_raw(ptr: *mut std::ffi::c_void) -> Option<Self> {
         if ptr.is_null() {
             None
         } else {
@@ -130,15 +136,32 @@ impl CMBlockBuffer {
         }
     }
 
+    /// Retains a +0 borrowed `CMBlockBufferRef` and returns an owned wrapper.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CMBlockBufferRef` of the exact type for
+    /// the duration of the retain call.
+    #[must_use]
+    pub unsafe fn from_raw_borrowed(ptr: *mut std::ffi::c_void) -> Option<Self> {
+        if ptr.is_null() {
+            None
+        } else {
+            let retained = unsafe { ffi::cm_block_buffer_retain(ptr) };
+            unsafe { Self::from_raw(retained) }
+        }
+    }
+
     /// Wraps a raw `CMBlockBufferRef` by taking ownership without retaining it.
     ///
     /// # Safety
-    /// The caller must ensure `ptr` is a valid +1 retained `CMBlockBufferRef`.
+    /// `ptr` must be a non-null, live `CMBlockBufferRef` of the exact type
+    /// carrying one retain transferred to this wrapper.
     pub const unsafe fn from_ptr(ptr: *mut std::ffi::c_void) -> Self {
         Self(ptr)
     }
 
-    /// Get the raw pointer to the block buffer
+    /// Borrow the raw +0 block-buffer pointer while `self` remains alive.
     #[must_use]
     pub const fn as_ptr(&self) -> *mut std::ffi::c_void {
         self.0
@@ -233,9 +256,9 @@ impl CMBlockBuffer {
             let status = ffi::cm_block_buffer_get_data_pointer(
                 self.0,
                 offset,
-                &mut length_at_offset,
-                &mut total_length,
-                &mut data_pointer,
+                &raw mut length_at_offset,
+                &raw mut total_length,
+                &raw mut data_pointer,
             );
 
             if status == 0 && !data_pointer.is_null() {
@@ -261,9 +284,9 @@ impl CMBlockBuffer {
         let status = ffi::cm_block_buffer_get_data_pointer(
             self.0,
             offset,
-            &mut length_at_offset,
-            &mut total_length,
-            &mut data_pointer,
+            &raw mut length_at_offset,
+            &raw mut total_length,
+            &raw mut data_pointer,
         );
 
         if status == 0 && !data_pointer.is_null() {
@@ -383,7 +406,7 @@ impl CMBlockBuffer {
     /// use apple_cf::cm::CMBlockBuffer;
     ///
     /// fn process_contiguous(buffer: &CMBlockBuffer) {
-    ///     if let Some(data) = buffer.as_slice() {
+    ///     if let Some(data) = unsafe { buffer.as_slice() } {
     ///         println!("Processing {} contiguous bytes", data.len());
     ///     } else {
     ///         // Fall back to copying
@@ -394,7 +417,8 @@ impl CMBlockBuffer {
     /// }
     /// ```
     #[must_use]
-    pub fn as_slice(&self) -> Option<&[u8]> {
+    #[allow(clippy::missing_safety_doc)]
+    pub unsafe fn as_slice(&self) -> Option<&[u8]> {
         let len = self.data_length();
         if len == 0 {
             return Some(&[]);
@@ -446,15 +470,6 @@ impl CMBlockBuffer {
     /// }
     /// ```
     pub fn cursor(&self) -> Option<io::Cursor<Vec<u8>>> {
-        // Try the zero-copy path first: if the buffer is contiguous we can hand
-        // out a `Vec` cloned from a borrowed slice (single allocation, no FFI
-        // round-trip), instead of going through `copy_data_bytes` which would
-        // call `CMBlockBufferCopyDataBytes` even though every byte is already
-        // reachable in process. For discontiguous buffers we fall back to the
-        // FFI copy path.
-        if let Some(slice) = self.as_slice() {
-            return Some(io::Cursor::new(slice.to_vec()));
-        }
         self.copy_data_bytes(0, self.data_length())
             .map(io::Cursor::new)
     }
@@ -476,7 +491,7 @@ impl CMBlockBuffer {
     ///
     /// fn read_contiguous(buffer: &CMBlockBuffer) {
     ///     // Try zero-copy first
-    ///     if let Some(mut cursor) = buffer.cursor_ref() {
+    ///     if let Some(mut cursor) = unsafe { buffer.cursor_ref() } {
     ///         let mut header = [0u8; 4];
     ///         cursor.read_exact(&mut header).unwrap();
     ///     } else {
@@ -488,29 +503,17 @@ impl CMBlockBuffer {
     ///     }
     /// }
     /// ```
-    pub fn cursor_ref(&self) -> Option<io::Cursor<&[u8]>> {
-        self.as_slice().map(io::Cursor::new)
+    #[allow(clippy::missing_safety_doc)]
+    pub unsafe fn cursor_ref(&self) -> Option<io::Cursor<&[u8]>> {
+        unsafe { self.as_slice() }.map(io::Cursor::new)
     }
 }
 
-impl Clone for CMBlockBuffer {
-    fn clone(&self) -> Self {
-        unsafe {
-            let ptr = ffi::cm_block_buffer_retain(self.0);
-            Self(ptr)
-        }
-    }
-}
-
-impl Drop for CMBlockBuffer {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe {
-                ffi::cm_block_buffer_release(self.0);
-            }
-        }
-    }
-}
+crate::utils::retained::cf_retained!(
+    CMBlockBuffer,
+    retain = ffi::cm_block_buffer_retain,
+    release = ffi::cm_block_buffer_release,
+);
 
 // SAFETY: `CMBlockBufferRef` is a Core Foundation type; Apple documents its
 // retain/release operations as thread-safe.  Our wrapper never mutates the

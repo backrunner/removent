@@ -6,8 +6,8 @@ license.workspace = true
 
 [dependencies]
 removent-proto = { workspace = true }
-videotoolbox = "0.18"
-apple-cf = "0.9"
+videotoolbox = "0.21"
+apple-cf = "0.11"
 opus = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

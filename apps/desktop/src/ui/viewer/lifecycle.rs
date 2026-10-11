@@ -9,7 +9,7 @@ impl ViewerView {
         cx: &mut Context<Self>,
     ) -> Self {
         let focus = cx.focus_handle();
-        window.focus(&focus);
+        window.focus(&focus, cx);
 
         // The single-slot channel wakes GPUI directly. No polling thread or
         // unbounded intermediary is needed while the window is busy.
@@ -93,7 +93,40 @@ impl ViewerView {
             }));
         });
 
+        let recovery = engine.client_recovery();
+        let mut recovery_rx = recovery.subscribe();
+        cx.spawn(async move |this, cx| {
+            while recovery_rx.changed().await.is_ok() {
+                let state = recovery_rx.borrow_and_update().clone();
+                if this
+                    .update(cx, |this, cx| {
+                        if state != removent_client::recovery::State::Connected {
+                            this.pressed_keys.clear();
+                            this.buttons = 0;
+                            this.sent_modifiers = KeyModifiers::empty();
+                            this.clip_clear_task = None;
+                        }
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+                if matches!(
+                    state,
+                    removent_client::recovery::State::Ended
+                        | removent_client::recovery::State::Failed(_)
+                ) {
+                    break;
+                }
+            }
+        })
+        .detach();
+
         Self {
+            recovery,
+            input_epoch: 0,
+            canvas_bounds: Default::default(),
             session_generation: engine.client_generation(),
             engine,
             current: None,
@@ -132,6 +165,16 @@ impl ViewerView {
             return;
         }
         if let Some(buf) = image::RgbaImage::from_raw(frame.width, frame.height, frame.data) {
+            let epoch = self.recovery.connection_epoch();
+            if self.input_epoch != epoch {
+                // A fast reconnect can coalesce watch notifications. Never
+                // carry held inputs into a replacement transport in that case.
+                self.input_epoch = epoch;
+                self.pressed_keys.clear();
+                self.buttons = 0;
+                self.sent_modifiers = KeyModifiers::empty();
+                self.last_mouse = None;
+            }
             let next = Arc::new(RenderImage::new(vec![image::Frame::new(buf)]));
             if let Some(previous) = self.current.replace(next) {
                 // RenderImage IDs are unique. GPUI's sprite atlas does not
@@ -173,7 +216,7 @@ impl ViewerView {
     pub(super) fn toggle_info(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.info_visible = !self.info_visible;
         self.diagnostics = self.engine.client_diagnostics(self.session_generation);
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         cx.notify();
     }
 
@@ -188,7 +231,8 @@ impl ViewerView {
     /// Input is forwarded only while a live session is streaming frames.
     pub(super) fn input_active(&self) -> bool {
         !self.ended
-            && self.engine.client_generation() == self.session_generation
+            && self.recovery.state() == removent_client::recovery::State::Connected
+            && self.engine.client_input_ready(self.session_generation)
             && self.width > 0
             && self.height > 0
     }

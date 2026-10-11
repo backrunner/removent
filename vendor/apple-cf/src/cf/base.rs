@@ -1,9 +1,15 @@
 use crate::ffi;
-use std::ffi::{c_void, CStr};
+use std::ffi::c_void;
 use std::fmt;
 
 /// Trait for Core Foundation values that can be inserted into CF collections.
-pub trait AsCFType {
+///
+/// # Safety
+///
+/// Implementors must return a non-null, live Core Foundation object pointer
+/// of the represented type. The pointer must remain valid for the duration of
+/// the borrow and support generic Core Foundation retain/release operations.
+pub unsafe trait AsCFType {
     /// Borrow the underlying Core Foundation object pointer.
     fn as_ptr(&self) -> *mut c_void;
 
@@ -11,7 +17,7 @@ pub trait AsCFType {
     #[must_use]
     fn to_cf_type(&self) -> CFType {
         let retained = unsafe { ffi::cf_type_retain(self.as_ptr()) };
-        CFType::from_raw(retained).expect("retained CFType pointer must be non-null")
+        unsafe { CFType::from_raw(retained) }.expect("retained CFType pointer must be non-null")
     }
 }
 
@@ -19,9 +25,15 @@ pub trait AsCFType {
 pub struct CFType(*mut c_void);
 
 impl CFType {
-    /// Wraps a +1 retained `CFTypeRef` and returns `None` for null.
+    /// Adopts a +1 retained `CFTypeRef` and returns `None` for null.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live Core Foundation object pointer carrying
+    /// one retain that is transferred to the returned wrapper. The caller must
+    /// not release or separately adopt that transferred retain.
     #[must_use]
-    pub fn from_raw(ptr: *mut c_void) -> Option<Self> {
+    pub unsafe fn from_raw(ptr: *mut c_void) -> Option<Self> {
         if ptr.is_null() {
             None
         } else {
@@ -29,22 +41,23 @@ impl CFType {
         }
     }
 
-    /// Retains a +0 borrowed `CFTypeRef` and wraps the resulting +1 reference.
+    /// Retains a +0 borrowed `CFTypeRef` and returns an owned wrapper.
     ///
     /// # Safety
     ///
-    /// `ptr` must be either NULL or a valid `CFTypeRef`.
+    /// A non-null `ptr` must be a live Core Foundation object pointer for the
+    /// duration of the retain call.
     #[must_use]
-    pub unsafe fn from_raw_retained(ptr: *mut c_void) -> Option<Self> {
+    pub unsafe fn from_raw_borrowed(ptr: *mut c_void) -> Option<Self> {
         if ptr.is_null() {
             None
         } else {
             let retained = unsafe { ffi::cf_type_retain(ptr) };
-            Self::from_raw(retained)
+            unsafe { Self::from_raw(retained) }
         }
     }
 
-    /// Borrow the raw `CFTypeRef` pointer.
+    /// Borrow the raw +0 `CFTypeRef` pointer while `self` remains alive.
     #[must_use]
     pub const fn as_ptr(&self) -> *mut c_void {
         self.0
@@ -65,36 +78,24 @@ impl CFType {
     /// Human-readable Core Foundation description.
     #[must_use]
     pub fn description(&self) -> String {
-        let ptr = unsafe { ffi::cf_type_copy_description(self.0) };
-        if ptr.is_null() {
-            return String::new();
+        if self.type_id() == unsafe { ffi::cf_run_loop_get_type_id() } {
+            return format!("<CFRunLoop {:p}>", self.0);
         }
-        let string = unsafe { CStr::from_ptr(ptr) }
-            .to_string_lossy()
-            .into_owned();
-        unsafe { ffi::acf_free_string(ptr) };
-        string
+        let ptr = unsafe { ffi::acf_cf_type_copy_description_string(self.0) };
+        unsafe { crate::cf::CFString::from_raw(ptr) }
+            .map_or_else(String::new, |description| description.to_string_lossy())
     }
 }
 
-impl Clone for CFType {
-    fn clone(&self) -> Self {
-        let retained = unsafe { ffi::cf_type_retain(self.0) };
-        Self(retained)
-    }
-}
+crate::utils::retained::cf_retained!(
+    CFType,
+    retain = ffi::cf_type_retain,
+    release = ffi::cf_type_release,
+);
 
-impl AsCFType for CFType {
+unsafe impl AsCFType for CFType {
     fn as_ptr(&self) -> *mut c_void {
         self.0
-    }
-}
-
-impl Drop for CFType {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { ffi::cf_type_release(self.0) };
-        }
     }
 }
 
@@ -134,7 +135,7 @@ pub struct SwiftObject(*mut c_void);
 impl SwiftObject {
     /// Wraps a +1 retained bridge object pointer and returns `None` for null.
     #[must_use]
-    pub(crate) fn from_raw(ptr: *mut c_void) -> Option<Self> {
+    pub(crate) fn from_raw_owned(ptr: *mut c_void) -> Option<Self> {
         if ptr.is_null() {
             None
         } else {
@@ -149,20 +150,11 @@ impl SwiftObject {
     }
 }
 
-impl Clone for SwiftObject {
-    fn clone(&self) -> Self {
-        let retained = unsafe { ffi::acf_object_retain(self.0) };
-        Self(retained)
-    }
-}
-
-impl Drop for SwiftObject {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { ffi::acf_object_release(self.0) };
-        }
-    }
-}
+crate::utils::retained::cf_retained!(
+    SwiftObject,
+    retain = ffi::acf_object_retain,
+    release = ffi::acf_object_release,
+);
 
 impl PartialEq for SwiftObject {
     fn eq(&self, other: &Self) -> bool {
@@ -191,23 +183,27 @@ macro_rules! impl_cf_type_wrapper {
         pub struct $name(pub(crate) crate::cf::base::CFType);
 
         impl $name {
-            #[doc = concat!("Wraps a +1 retained `", stringify!($name), "` pointer and returns `None` for null.")]
-            #[must_use]
-            pub fn from_raw(ptr: *mut std::ffi::c_void) -> Option<Self> {
-                crate::cf::base::CFType::from_raw(ptr).map(Self)
-            }
-
-            #[doc = concat!("Retains a +0 borrowed `", stringify!($name), "` pointer and wraps the resulting +1 reference.")]
+            #[doc = concat!("Adopts a +1 retained `", stringify!($name), "` pointer and returns `None` for null.")]
             ///
             /// # Safety
             ///
-            #[doc = concat!("`ptr` must be NULL or a valid `", stringify!($name), "` pointer.")]
+            #[doc = concat!("A non-null `ptr` must be a live `", stringify!($name), "` pointer of the exact dynamic type carrying one retain transferred to this wrapper. The caller must not release or separately adopt that transferred retain.")]
             #[must_use]
-            pub unsafe fn from_raw_retained(ptr: *mut std::ffi::c_void) -> Option<Self> {
-                unsafe { crate::cf::base::CFType::from_raw_retained(ptr) }.map(Self)
+            pub unsafe fn from_raw(ptr: *mut std::ffi::c_void) -> Option<Self> {
+                unsafe { crate::cf::base::CFType::from_raw(ptr) }.map(Self)
             }
 
-            /// Returns the wrapped raw Core Foundation pointer.
+            #[doc = concat!("Retains a +0 borrowed `", stringify!($name), "` pointer and returns an owned wrapper.")]
+            ///
+            /// # Safety
+            ///
+            #[doc = concat!("A non-null `ptr` must be a live `", stringify!($name), "` pointer of the exact dynamic type for the duration of the retain call.")]
+            #[must_use]
+            pub unsafe fn from_raw_borrowed(ptr: *mut std::ffi::c_void) -> Option<Self> {
+                unsafe { crate::cf::base::CFType::from_raw_borrowed(ptr) }.map(Self)
+            }
+
+            /// Borrows the raw +0 Core Foundation pointer while `self` remains alive.
             #[must_use]
             pub const fn as_ptr(&self) -> *mut std::ffi::c_void {
                 self.0.as_ptr()
@@ -226,7 +222,7 @@ macro_rules! impl_cf_type_wrapper {
             }
         }
 
-        impl crate::cf::base::AsCFType for $name {
+        unsafe impl crate::cf::base::AsCFType for $name {
             fn as_ptr(&self) -> *mut std::ffi::c_void {
                 self.as_ptr()
             }

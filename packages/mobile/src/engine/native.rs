@@ -163,28 +163,39 @@ pub(super) async fn run_native(
     let confirmation = trust
         .needs_confirmation
         .then(|| attempt.certificate_confirmation(destination, false));
-    let mut session = removent_client::connect_session_with_confirmation(
-        endpoint(address, identity, expected)?,
-        address,
-        identity,
-        config(),
-        None,
-        None,
-        Some(Box::new(move |mode, pin| {
-            pin_attempt.update(|s| {
-                s.pin = Some(pin);
-                s.auth_mode = mode;
-                s.event(json!({"type":"pin", "mode":mode, "generation":pin_attempt.generation}));
-            });
-        })),
-        confirmation,
-    )
-    .await?;
+    let resume = attempt.recovery.native.lock().unwrap().clone();
+    let mut session = if let Some(resume) = resume {
+        resume.reconnect(address, identity, config()).await?
+    } else {
+        removent_client::connect_session_with_confirmation(
+            endpoint(address, identity, expected)?,
+            address,
+            identity,
+            config(),
+            None,
+            None,
+            Some(Box::new(move |mode, pin| {
+                pin_attempt.update(|s| {
+                    s.pin = Some(pin);
+                    s.auth_mode = mode;
+                    s.event(
+                        json!({"type":"pin", "mode":mode, "generation":pin_attempt.generation}),
+                    );
+                });
+            })),
+            confirmation,
+        )
+        .await?
+    };
     let peer_pin = session
         .conn
         .peer_fingerprint()
         .context("Host certificate missing")?;
-    expected = Some(peer_pin); // Resumes must authenticate the exact initial host.
+    *attempt.recovery.native.lock().unwrap() = Some(removent_client::recovery::NativeResume {
+        token: session.resume_token.clone(),
+        negotiated: session.negotiated.clone(),
+        fingerprint: peer_pin,
+    });
     {
         removent_client::host_pins::remember(
             &attempt.shared.paths,
@@ -206,8 +217,22 @@ pub(super) async fn run_native(
             });
         json!({"host":host, "port":if route.is_some() { 0 } else { address.port() }, "relay":route})
     });
-    let mut resumed_once = false;
-    loop {
+    if request.pairing_code.is_some() {
+        let mut destination = request.clone();
+        destination.pairing_code = None;
+        if let Some(route) = &mut destination.relay {
+            route.host_fingerprint = hex::encode(peer_pin);
+            destination.address.host = bridge
+                .as_ref()
+                .and_then(|b| b.resolved_room.clone())
+                .context("Relay did not resolve invitation")?;
+        } else {
+            destination.address =
+                removent_client::connection::ConnectionAddress::from_socket(address);
+        }
+        *attempt.recovery.destination.lock().unwrap() = Some(destination);
+    }
+    {
         let params = session.negotiated.audio;
         attempt.update(|s| {
             s.input = Some(InputChannel::Ordered(session.input_tx.clone()));
@@ -217,6 +242,7 @@ pub(super) async fn run_native(
             s.audio_rate = params.sample_rate;
             s.audio_channels = params.channels;
         });
+        attempt.recovery.connected();
         attempt.event(
             json!({"type":"ready", "codec":format!("{:?}", session.negotiated.video.codec),
             "audio":params.enabled, "sample_rate":params.sample_rate, "channels":params.channels,
@@ -247,45 +273,6 @@ pub(super) async fn run_native(
         if !session.was_interrupted() {
             return Ok(());
         }
-        ensure!(
-            !resumed_once,
-            "Connection interrupted; reconnect to the host"
-        );
-        let token = session
-            .current_resume_token()
-            .context("Connection interrupted")?;
-        let ack = session.negotiated.clone();
-        drop(session);
-        attempt.progress("Reconnecting");
-        // Retain the relay bridge for the complete session, including quick resume.
-        let _keep_bridge = &bridge;
-        let mut next = None;
-        for retry in 0..3 {
-            if retry > 0 {
-                tokio::time::sleep(Duration::from_millis(300)).await;
-            }
-            if let Ok(Ok(s)) = tokio::time::timeout(
-                Duration::from_secs(8),
-                removent_client::quick_resume(
-                    endpoint(address, identity, expected)?,
-                    address,
-                    identity,
-                    {
-                        let mut cfg = config();
-                        cfg.pairing_code = None;
-                        cfg
-                    },
-                    token,
-                    ack.clone(),
-                ),
-            )
-            .await
-            {
-                next = Some(s);
-                break;
-            }
-        }
-        session = next.context("Connection interrupted; automatic reconnect failed")?;
-        resumed_once = true;
+        anyhow::bail!("Connection interrupted")
     }
 }

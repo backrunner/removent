@@ -83,14 +83,14 @@ pub(super) fn pixel_buffer_to_bgra(pb: &apple_cf::cv::CVPixelBuffer) -> Option<V
 /// BT.709, treats missing/other as BT.601.
 pub(super) fn is_bt709(pb: &apple_cf::cv::CVPixelBuffer) -> bool {
     // SAFETY: pb is valid; the attachment is a +0 borrowed reference and
-    // from_raw_retained retains it itself.
+    // from_raw_borrowed retains it itself.
     unsafe {
         let key = std::ptr::addr_of!(apple_cf::raw::kCVImageBufferYCbCrMatrixKey).read();
         let v = apple_cf::raw::CVBufferGetAttachment(pb.as_ptr().cast(), key, std::ptr::null_mut());
         if v.is_null() {
             return false;
         }
-        apple_cf::cf::CFString::from_raw_retained(v.cast_mut())
+        apple_cf::cf::CFString::from_raw_borrowed(v.cast_mut())
             .is_some_and(|s| s.to_string_lossy() == "ITU_R_709-2")
     }
 }

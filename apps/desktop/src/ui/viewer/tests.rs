@@ -20,7 +20,7 @@ fn setup(cx: &mut TestAppContext) -> (Fixture, &mut VisualTestContext) {
     });
     let directory = tempfile::tempdir().unwrap();
     let (commands, mut commands_rx) = tokio::sync::mpsc::channel(64);
-    let engine = Engine::for_viewer_test(
+    let engine = Engine::for_ui_test(
         removent_core::DataPaths {
             root: directory.path().into(),
         },
@@ -175,9 +175,8 @@ fn full_info_fits_minimum_window_and_idle_samples_reset_fps(cx: &mut TestAppCont
     cx.run_until_parked();
     let panel = cx.debug_bounds("viewer-info").unwrap();
     let close = cx.debug_bounds("close-viewer-info").unwrap();
-    // After fixing the double-subtraction of TITLE_BAR_HEIGHT, the panel can be taller
     assert!(
-        panel.bottom() <= px(320. + 18.),
+        panel.bottom() <= px(320.),
         "panel should fit in window: {panel:?}"
     );
     assert!(panel.right() <= px(480.));
@@ -245,5 +244,81 @@ fn escape_and_find_belong_to_remote_except_explicit_local_chords() {
             local,
             "{key}"
         );
+    }
+}
+
+#[gpui::test]
+fn rendered_canvas_fits_window_and_clicks_follow_contained_pixels(cx: &mut TestAppContext) {
+    let (mut fixture, cx) = setup(cx);
+    for (width, height, fw, fh) in [
+        (1280., 720., 2560, 1440),
+        (480., 320., 2560, 1440),
+        (1000., 700., 640, 480),
+        (640., 900., 1920, 1080),
+    ] {
+        cx.simulate_resize(size(px(width), px(height)));
+        cx.update(|window, cx| {
+            fixture.viewer.update(cx, |view, cx| {
+                view.handle_frame(
+                    VideoFrame {
+                        width: fw,
+                        height: fh,
+                        data: vec![0; (fw * fh * 4) as usize],
+                        pts_us: 0,
+                    },
+                    window,
+                );
+                cx.notify();
+            })
+        });
+        cx.run_until_parked();
+        let bounds = cx.debug_bounds("viewer-canvas").unwrap();
+        assert_eq!(bounds.top(), TITLE_BAR_HEIGHT);
+        assert_eq!(
+            bounds.bottom(),
+            px(height),
+            "the picture must not push past the bottom edge"
+        );
+        assert_eq!(bounds.size.width, px(width));
+        let scale = (width / fw as f32).min(f32::from(bounds.size.height) / fh as f32);
+        let left = f32::from(bounds.left()) + (width - fw as f32 * scale) / 2.;
+        let top =
+            f32::from(bounds.top()) + (f32::from(bounds.size.height) - fh as f32 * scale) / 2.;
+        for (x, y) in [(0.1, 0.1), (0.5, 0.5), (0.9, 0.9)] {
+            while fixture.commands.try_recv().is_ok() {}
+            let position = point(
+                px(left + fw as f32 * scale * x),
+                px(top + fh as f32 * scale * y),
+            );
+            cx.simulate_mouse_down(position, MouseButton::Left, Default::default());
+            cx.simulate_mouse_up(position, MouseButton::Left, Default::default());
+            let ControlMsg::MouseEvent {
+                x_px,
+                y_px,
+                kind: MouseKind::LeftDown,
+                ..
+            } = fixture.commands.try_recv().unwrap()
+            else {
+                panic!("expected click")
+            };
+            assert!((x_px - fw as f32 * x).abs() < 0.01, "{x_px}");
+            assert!((y_px - fh as f32 * y).abs() < 0.01, "{y_px}");
+        }
+        cx.update(|window, cx| {
+            fixture.viewer.update(cx, |view, _| {
+                assert!(
+                    view.frame_px(point(px(20.), px(5.)), window, false)
+                        .is_none()
+                );
+                assert_eq!(
+                    view.frame_px(point(px(-100.), px(-100.)), window, true),
+                    Some((0., 0.))
+                );
+                assert_eq!(
+                    view.frame_px(point(px(width + 100.), px(height + 100.)), window, true),
+                    Some((fw as f32 - 1., fh as f32 - 1.))
+                );
+            })
+        });
     }
 }

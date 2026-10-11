@@ -20,6 +20,7 @@ static ICONS: &[(&str, &str)] = icons![
     "cloud",
     "copy",
     "eye",
+    "ellipsis",
     "folder",
     "gauge",
     "info",
@@ -38,6 +39,7 @@ static ICONS: &[(&str, &str)] = icons![
     "volume-2",
     "volume-x",
     "wifi",
+    "wifi-off",
     "x",
 ];
 

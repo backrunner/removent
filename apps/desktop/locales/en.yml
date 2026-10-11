@@ -193,9 +193,12 @@ viewer.ended_desc: The peer closed the session, or the network connection was in
 viewer.close_window: Close Window
 
 device.section: "Devices"
-device.nearby: "Nearby"
+device.nearby: "LAN discovery"
 device.this_mac: "This Mac"
 saved.section: "Saved"
+action.more: "More actions"
+saved.empty: "No saved connections"
+saved.no_match: "No matching saved connections"
 saved.subtitle: "Saved connection"
 saved.protocol: "Protocol"
 saved.remove: "Remove saved connection"
@@ -298,7 +301,9 @@ settings.discovery_hint: Uses Bonjour/mDNS and scans the local IPv4 network for 
 device.protocol: Protocol
 
 device.discovery_off: LAN discovery is off
-device.discovery_off_hint: Enable a protocol in Settings → LAN discovery, or add a connection manually.
+device.discovery_off_hint: Discover nearby Removent, VNC and RDP devices, or add a connection manually.
+device.enable_discovery: Enable discovery
+device.discovery_enabled: LAN discovery enabled
 
 # Connection sync
 sync.title: "iCloud"
@@ -379,3 +384,9 @@ trust.waiting: "Confirm the first connection"
 
 trust.connect: "Trust and connect"
 permissions.request: Request permission
+
+viewer.network_offline: "Network disconnected"
+viewer.network_reconnecting: "Reconnecting…"
+viewer.network_retry_hint: "The session will reconnect automatically when the network is available."
+
+connection.relay_credential_destination_changed: "The destination changed. Enter the access password again."

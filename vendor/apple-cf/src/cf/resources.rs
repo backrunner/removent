@@ -9,7 +9,7 @@
 //!     CFTimeZone, CFURL, CFUUID, CFXML,
 //! };
 //!
-//! let url = CFURL::from_file_system_path("/System/Library", true);
+//! let url = CFURL::from_file_system_path("/System/Library", true).expect("file URL");
 //! assert!(url.has_directory_path());
 //!
 //! let locale = CFLocale::current();
@@ -45,10 +45,6 @@ use super::base::{impl_cf_type_wrapper, AsCFType, CFType};
 use super::{CFDate, CFNumber, CFString, CFUUID};
 use crate::ffi;
 use std::ffi::CString;
-
-fn to_cstring(value: &str) -> CString {
-    CString::new(value).expect("Core Foundation strings may not contain interior NUL bytes")
-}
 
 impl_cf_type_wrapper!(CFURL, cf_url_get_type_id);
 impl_cf_type_wrapper!(CFBundle, cf_bundle_get_type_id);
@@ -86,32 +82,32 @@ pub enum CFDateFormatterStyle {
 impl CFURL {
     /// Create a URL from an absolute string.
     #[must_use]
-    pub fn from_string(value: &str) -> Self {
-        let value = to_cstring(value);
+    pub fn from_string(value: &str) -> Option<Self> {
+        let value = CString::new(value).ok()?;
         let ptr = unsafe { ffi::cf_url_create_with_string(value.as_ptr()) };
-        Self::from_raw(ptr).expect("CFURLCreateWithString returned NULL")
+        unsafe { Self::from_raw(ptr) }
     }
 
     /// Create a file URL from a POSIX path.
     #[must_use]
-    pub fn from_file_system_path(path: &str, is_directory: bool) -> Self {
-        let path = to_cstring(path);
+    pub fn from_file_system_path(path: &str, is_directory: bool) -> Option<Self> {
+        let path = CString::new(path).ok()?;
         let ptr = unsafe { ffi::cf_url_create_file_path(path.as_ptr(), is_directory) };
-        Self::from_raw(ptr).expect("CFURLCreateWithFileSystemPath returned NULL")
+        unsafe { Self::from_raw(ptr) }
     }
 
     /// Absolute string form of the URL.
     #[must_use]
     pub fn absolute_string(&self) -> CFString {
         let ptr = unsafe { ffi::cf_url_copy_absolute_string(self.as_ptr()) };
-        CFString::from_raw(ptr).expect("CFURLCopyAbsoluteString returned NULL")
+        unsafe { CFString::from_raw(ptr) }.expect("CFURLCopyAbsoluteString returned NULL")
     }
 
     /// File-system path (POSIX style) for file URLs.
     #[must_use]
-    pub fn file_system_path(&self) -> CFString {
+    pub fn file_system_path(&self) -> Option<CFString> {
         let ptr = unsafe { ffi::cf_url_copy_file_system_path(self.as_ptr()) };
-        CFString::from_raw(ptr).expect("CFURLCopyFileSystemPath returned NULL")
+        unsafe { CFString::from_raw(ptr) }
     }
 
     /// Whether the URL ends with a directory path separator.
@@ -126,28 +122,28 @@ impl CFBundle {
     #[must_use]
     pub fn main() -> Option<Self> {
         let ptr = unsafe { ffi::cf_bundle_get_main() };
-        Self::from_raw(ptr)
+        unsafe { Self::from_raw(ptr) }
     }
 
     /// Create a bundle wrapper from a bundle URL.
     #[must_use]
     pub fn from_url(url: &CFURL) -> Option<Self> {
         let ptr = unsafe { ffi::cf_bundle_create(url.as_ptr()) };
-        Self::from_raw(ptr)
+        unsafe { Self::from_raw(ptr) }
     }
 
     /// Bundle identifier, if present.
     #[must_use]
     pub fn identifier(&self) -> Option<CFString> {
         let ptr = unsafe { ffi::cf_bundle_copy_identifier(self.as_ptr()) };
-        CFString::from_raw(ptr)
+        unsafe { CFString::from_raw(ptr) }
     }
 
     /// Bundle URL.
     #[must_use]
     pub fn bundle_url(&self) -> CFURL {
         let ptr = unsafe { ffi::cf_bundle_copy_bundle_url(self.as_ptr()) };
-        CFURL::from_raw(ptr).expect("CFBundleCopyBundleURL returned NULL")
+        unsafe { CFURL::from_raw(ptr) }.expect("CFBundleCopyBundleURL returned NULL")
     }
 
     /// Locate a resource by name and optional extension/subdirectory.
@@ -158,9 +154,9 @@ impl CFBundle {
         extension: Option<&str>,
         subdir: Option<&str>,
     ) -> Option<CFURL> {
-        let name = to_cstring(name);
-        let extension = extension.map(to_cstring);
-        let subdir = subdir.map(to_cstring);
+        let name = CString::new(name).ok()?;
+        let extension = extension.map(CString::new).transpose().ok()?;
+        let subdir = subdir.map(CString::new).transpose().ok()?;
         let ptr = unsafe {
             ffi::cf_bundle_copy_resource_url(
                 self.as_ptr(),
@@ -169,7 +165,7 @@ impl CFBundle {
                 subdir.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
             )
         };
-        CFURL::from_raw(ptr)
+        unsafe { CFURL::from_raw(ptr) }
     }
 }
 
@@ -178,22 +174,22 @@ impl CFLocale {
     #[must_use]
     pub fn current() -> Self {
         let ptr = unsafe { ffi::cf_locale_copy_current() };
-        Self::from_raw(ptr).expect("CFLocaleCopyCurrent returned NULL")
+        unsafe { Self::from_raw(ptr) }.expect("CFLocaleCopyCurrent returned NULL")
     }
 
     /// Create a locale from an identifier such as `en_US`.
     #[must_use]
     pub fn new(identifier: &str) -> Self {
-        let identifier = to_cstring(identifier);
+        let identifier = crate::utils::ffi_string::cstring_until_nul(identifier);
         let ptr = unsafe { ffi::cf_locale_create(identifier.as_ptr()) };
-        Self::from_raw(ptr).expect("CFLocaleCreate returned NULL")
+        unsafe { Self::from_raw(ptr) }.expect("CFLocaleCreate returned NULL")
     }
 
     /// Locale identifier.
     #[must_use]
     pub fn identifier(&self) -> CFString {
         let ptr = unsafe { ffi::cf_locale_copy_identifier(self.as_ptr()) };
-        CFString::from_raw(ptr).expect("CFLocale identifier should be non-null")
+        unsafe { CFString::from_raw(ptr) }.expect("CFLocale identifier should be non-null")
     }
 }
 
@@ -202,29 +198,29 @@ impl CFCalendar {
     #[must_use]
     pub fn current() -> Self {
         let ptr = unsafe { ffi::cf_calendar_copy_current() };
-        Self::from_raw(ptr).expect("CFCalendarCopyCurrent returned NULL")
+        unsafe { Self::from_raw(ptr) }.expect("CFCalendarCopyCurrent returned NULL")
     }
 
     /// Create a calendar by identifier (for example `gregorian`).
     #[must_use]
-    pub fn new(identifier: &str) -> Self {
-        let identifier = to_cstring(identifier);
+    pub fn new(identifier: &str) -> Option<Self> {
+        let identifier = CString::new(identifier).ok()?;
         let ptr = unsafe { ffi::cf_calendar_create(identifier.as_ptr()) };
-        Self::from_raw(ptr).expect("CFCalendarCreateWithIdentifier returned NULL")
+        unsafe { Self::from_raw(ptr) }
     }
 
     /// Calendar identifier.
     #[must_use]
     pub fn identifier(&self) -> CFString {
         let ptr = unsafe { ffi::cf_calendar_copy_identifier(self.as_ptr()) };
-        CFString::from_raw(ptr).expect("CFCalendar identifier should be non-null")
+        unsafe { CFString::from_raw(ptr) }.expect("CFCalendar identifier should be non-null")
     }
 
     /// Time zone attached to the calendar.
     #[must_use]
     pub fn time_zone(&self) -> CFTimeZone {
         let ptr = unsafe { ffi::cf_calendar_copy_time_zone(self.as_ptr()) };
-        CFTimeZone::from_raw(ptr).expect("CFCalendarCopyTimeZone returned NULL")
+        unsafe { CFTimeZone::from_raw(ptr) }.expect("CFCalendarCopyTimeZone returned NULL")
     }
 
     /// Update the calendar's time zone.
@@ -238,22 +234,22 @@ impl CFTimeZone {
     #[must_use]
     pub fn current() -> Self {
         let ptr = unsafe { ffi::cf_time_zone_copy_current() };
-        Self::from_raw(ptr).expect("CFTimeZoneCopyCurrent returned NULL")
+        unsafe { Self::from_raw(ptr) }.expect("CFTimeZoneCopyCurrent returned NULL")
     }
 
     /// Create a time zone by name, for example `UTC`.
     #[must_use]
-    pub fn new(name: &str) -> Self {
-        let name = to_cstring(name);
+    pub fn new(name: &str) -> Option<Self> {
+        let name = CString::new(name).ok()?;
         let ptr = unsafe { ffi::cf_time_zone_create(name.as_ptr()) };
-        Self::from_raw(ptr).expect("CFTimeZoneCreateWithName returned NULL")
+        unsafe { Self::from_raw(ptr) }
     }
 
     /// Time zone name.
     #[must_use]
     pub fn name(&self) -> CFString {
         let ptr = unsafe { ffi::cf_time_zone_copy_name(self.as_ptr()) };
-        CFString::from_raw(ptr).expect("CFTimeZoneGetName returned NULL")
+        unsafe { CFString::from_raw(ptr) }.expect("CFTimeZoneGetName returned NULL")
     }
 
     /// Offset from GMT in seconds for the supplied date.
@@ -269,14 +265,15 @@ impl CFCharacterSet {
     pub fn from_characters_in_string(string: &CFString) -> Self {
         let ptr =
             unsafe { ffi::cf_character_set_create_with_characters_in_string(string.as_ptr()) };
-        Self::from_raw(ptr).expect("CFCharacterSetCreateWithCharactersInString returned NULL")
+        unsafe { Self::from_raw(ptr) }
+            .expect("CFCharacterSetCreateWithCharactersInString returned NULL")
     }
 
     /// Invert the character set.
     #[must_use]
     pub fn inverted(&self) -> Self {
         let ptr = unsafe { ffi::cf_character_set_create_inverted_set(self.as_ptr()) };
-        Self::from_raw(ptr).expect("CFCharacterSetCreateInvertedSet returned NULL")
+        unsafe { Self::from_raw(ptr) }.expect("CFCharacterSetCreateInvertedSet returned NULL")
     }
 
     /// Whether `character` is a member of the set.
@@ -296,7 +293,7 @@ impl CFNumberFormatter {
                 style as i32,
             )
         };
-        Self::from_raw(ptr).expect("CFNumberFormatterCreate returned NULL")
+        unsafe { Self::from_raw(ptr) }.expect("CFNumberFormatterCreate returned NULL")
     }
 
     /// Format a number into a string.
@@ -305,7 +302,8 @@ impl CFNumberFormatter {
         let ptr = unsafe {
             ffi::cf_number_formatter_create_string_with_number(self.as_ptr(), number.as_ptr())
         };
-        CFString::from_raw(ptr).expect("CFNumberFormatterCreateStringWithNumber returned NULL")
+        unsafe { CFString::from_raw(ptr) }
+            .expect("CFNumberFormatterCreateStringWithNumber returned NULL")
     }
 
     /// Parse a string into a Core Foundation number.
@@ -314,7 +312,7 @@ impl CFNumberFormatter {
         let ptr = unsafe {
             ffi::cf_number_formatter_create_number_from_string(self.as_ptr(), string.as_ptr())
         };
-        CFNumber::from_raw(ptr)
+        unsafe { CFNumber::from_raw(ptr) }
     }
 }
 
@@ -333,7 +331,7 @@ impl CFDateFormatter {
                 time_style as i32,
             )
         };
-        Self::from_raw(ptr).expect("CFDateFormatterCreate returned NULL")
+        unsafe { Self::from_raw(ptr) }.expect("CFDateFormatterCreate returned NULL")
     }
 
     /// Format a date into a localized string.
@@ -341,7 +339,8 @@ impl CFDateFormatter {
     pub fn format_date(&self, date: &CFDate) -> CFString {
         let ptr =
             unsafe { ffi::cf_date_formatter_create_string_with_date(self.as_ptr(), date.as_ptr()) };
-        CFString::from_raw(ptr).expect("CFDateFormatterCreateStringWithDate returned NULL")
+        unsafe { CFString::from_raw(ptr) }
+            .expect("CFDateFormatterCreateStringWithDate returned NULL")
     }
 }
 
@@ -350,14 +349,14 @@ impl CFFileSecurity {
     #[must_use]
     pub fn new() -> Self {
         let ptr = unsafe { ffi::cf_file_security_create() };
-        Self::from_raw(ptr).expect("CFFileSecurityCreate returned NULL")
+        unsafe { Self::from_raw(ptr) }.expect("CFFileSecurityCreate returned NULL")
     }
 
     /// Owner UUID, if present.
     #[must_use]
     pub fn owner_uuid(&self) -> Option<CFUUID> {
         let ptr = unsafe { ffi::cf_file_security_copy_owner_uuid(self.as_ptr()) };
-        CFUUID::from_raw(ptr)
+        unsafe { CFUUID::from_raw(ptr) }
     }
 
     /// Set the owner UUID.
@@ -370,7 +369,7 @@ impl CFFileSecurity {
     #[must_use]
     pub fn mode(&self) -> Option<u32> {
         let mut mode = 0_u32;
-        let ok = unsafe { ffi::cf_file_security_get_mode(self.as_ptr(), &mut mode) };
+        let ok = unsafe { ffi::cf_file_security_get_mode(self.as_ptr(), &raw mut mode) };
         ok.then_some(mode)
     }
 
@@ -407,7 +406,7 @@ impl CFPreferences {
     #[must_use]
     pub fn app_value(key: &CFString, app_id: &CFString) -> Option<CFType> {
         let ptr = unsafe { ffi::cf_preferences_copy_app_value(key.as_ptr(), app_id.as_ptr()) };
-        CFType::from_raw(ptr)
+        unsafe { CFType::from_raw(ptr) }
     }
 
     /// Flush pending preference changes.
@@ -423,16 +422,20 @@ pub struct CFXML;
 
 impl CFXML {
     /// Escape XML entities in `value`.
+    #[cfg(target_os = "macos")]
     #[must_use]
     pub fn escape_entities(value: &CFString) -> CFString {
         let ptr = unsafe { ffi::cf_xml_create_string_by_escaping_entities(value.as_ptr()) };
-        CFString::from_raw(ptr).expect("CFXMLCreateStringByEscapingEntities returned NULL")
+        unsafe { CFString::from_raw(ptr) }
+            .expect("CFXMLCreateStringByEscapingEntities returned NULL")
     }
 
     /// Unescape XML entities in `value`.
+    #[cfg(target_os = "macos")]
     #[must_use]
     pub fn unescape_entities(value: &CFString) -> CFString {
         let ptr = unsafe { ffi::cf_xml_create_string_by_unescaping_entities(value.as_ptr()) };
-        CFString::from_raw(ptr).expect("CFXMLCreateStringByUnescapingEntities returned NULL")
+        unsafe { CFString::from_raw(ptr) }
+            .expect("CFXMLCreateStringByUnescapingEntities returned NULL")
     }
 }

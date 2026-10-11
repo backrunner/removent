@@ -275,7 +275,12 @@ mod tests {
             entry("no identity", "", Some("192.168.1.5:48688")),
         ]
         .into_iter()
-        .map(|e| (e.instance.clone(), e))
+        .enumerate()
+        .map(|(i, mut e)| {
+            // Clock resolution must not decide which test advertisement is newer.
+            e.seen_at += Duration::from_millis(i as u64);
+            (e.instance.clone(), e)
+        })
         .collect();
         let visible = visible_devices(ConnectionProtocol::Removent, "mine", &table);
         assert_eq!(visible.len(), 1);
@@ -294,7 +299,12 @@ mod tests {
             entry("scan:192.168.1.2:3389", "", Some("192.168.1.2:3389")),
         ]
         .into_iter()
-        .map(|e| (e.instance.clone(), e))
+        .enumerate()
+        .map(|(i, mut e)| {
+            // Clock resolution must not decide which test advertisement is newer.
+            e.seen_at += Duration::from_millis(i as u64);
+            (e.instance.clone(), e)
+        })
         .collect();
         let rdp = visible_devices(ConnectionProtocol::Rdp, "", &table);
         let vnc = visible_devices(ConnectionProtocol::Vnc, "", &table);

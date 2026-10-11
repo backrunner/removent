@@ -173,11 +173,19 @@ impl fmt::Display for CMSampleTimingInfo {
 }
 
 impl CMTime {
+    const FLAG_VALID: u32 = 1 << 0;
+    const FLAG_HAS_BEEN_ROUNDED: u32 = 1 << 1;
+    const FLAG_POSITIVE_INFINITY: u32 = 1 << 2;
+    const FLAG_NEGATIVE_INFINITY: u32 = 1 << 3;
+    const FLAG_INDEFINITE: u32 = 1 << 4;
+    const FLAG_IMPLIED_VALUE_MASK: u32 =
+        Self::FLAG_POSITIVE_INFINITY | Self::FLAG_NEGATIVE_INFINITY | Self::FLAG_INDEFINITE;
+
     /// Core Media's zero time value (`kCMTimeZero`).
     pub const ZERO: Self = Self {
         value: 0,
-        timescale: 0,
-        flags: 1,
+        timescale: 1,
+        flags: Self::FLAG_VALID,
         epoch: 0,
     };
 
@@ -189,60 +197,67 @@ impl CMTime {
         epoch: 0,
     };
 
-    /// Creates a valid `CMTime` with the supplied value and timescale.
+    /// Creates a numeric `CMTime`, or [`Self::INVALID`] for a nonpositive timescale.
     #[must_use]
     pub const fn new(value: i64, timescale: i32) -> Self {
-        Self {
-            value,
-            timescale,
-            flags: 1,
-            epoch: 0,
+        if timescale > 0 {
+            Self {
+                value,
+                timescale,
+                flags: Self::FLAG_VALID,
+                epoch: 0,
+            }
+        } else {
+            Self::INVALID
         }
     }
 
     /// Returns whether this time carries Core Media's valid flag.
     #[must_use]
     pub const fn is_valid(&self) -> bool {
-        self.flags & 0x1 != 0
+        self.flags & Self::FLAG_VALID != 0
+    }
+
+    /// Check if this time is finite and numeric.
+    #[must_use]
+    pub const fn is_numeric(&self) -> bool {
+        self.flags & (Self::FLAG_VALID | Self::FLAG_IMPLIED_VALUE_MASK) == Self::FLAG_VALID
     }
 
     /// Check if this time represents zero
     #[must_use]
-    pub const fn is_zero(&self) -> bool {
-        self.value == 0 && self.is_valid()
+    pub fn is_zero(&self) -> bool {
+        self.compare(Self::ZERO).is_eq()
     }
 
     /// Check if this time is indefinite
     #[must_use]
     pub const fn is_indefinite(&self) -> bool {
-        self.flags & 0x2 != 0
+        self.is_valid() && self.flags & Self::FLAG_INDEFINITE != 0
     }
 
     /// Check if this time is positive infinity
     #[must_use]
     pub const fn is_positive_infinity(&self) -> bool {
-        self.flags & 0x4 != 0
+        self.is_valid() && self.flags & Self::FLAG_POSITIVE_INFINITY != 0
     }
 
     /// Check if this time is negative infinity
     #[must_use]
     pub const fn is_negative_infinity(&self) -> bool {
-        self.flags & 0x8 != 0
+        self.is_valid() && self.flags & Self::FLAG_NEGATIVE_INFINITY != 0
     }
 
     /// Check if this time has been rounded
     #[must_use]
     pub const fn has_been_rounded(&self) -> bool {
-        self.flags & 0x10 != 0
+        self.is_numeric() && self.flags & Self::FLAG_HAS_BEEN_ROUNDED != 0
     }
 
-    /// Compare two times for equality (value and timescale)
+    /// Compare two times using Core Media's time semantics.
     #[must_use]
-    pub const fn equals(&self, other: &Self) -> bool {
-        if !self.is_valid() || !other.is_valid() {
-            return false;
-        }
-        self.value == other.value && self.timescale == other.timescale
+    pub fn equals(&self, other: &Self) -> bool {
+        self.compare(*other).is_eq()
     }
 
     /// Create a time representing positive infinity
@@ -251,7 +266,7 @@ impl CMTime {
         Self {
             value: 0,
             timescale: 0,
-            flags: 0x5, // kCMTimeFlags_Valid | kCMTimeFlags_PositiveInfinity
+            flags: Self::FLAG_VALID | Self::FLAG_POSITIVE_INFINITY,
             epoch: 0,
         }
     }
@@ -262,7 +277,7 @@ impl CMTime {
         Self {
             value: 0,
             timescale: 0,
-            flags: 0x9, // kCMTimeFlags_Valid | kCMTimeFlags_NegativeInfinity
+            flags: Self::FLAG_VALID | Self::FLAG_NEGATIVE_INFINITY,
             epoch: 0,
         }
     }
@@ -273,15 +288,15 @@ impl CMTime {
         Self {
             value: 0,
             timescale: 0,
-            flags: 0x3, // kCMTimeFlags_Valid | kCMTimeFlags_Indefinite
+            flags: Self::FLAG_VALID | Self::FLAG_INDEFINITE,
             epoch: 0,
         }
     }
 
-    /// Converts this time to seconds when it is valid and has a non-zero timescale.
+    /// Converts a finite numeric time with a positive timescale to seconds.
     #[must_use]
     pub fn as_seconds(&self) -> Option<f64> {
-        if self.is_valid() && self.timescale != 0 {
+        if self.is_numeric() && self.timescale > 0 {
             // Precision loss is acceptable for time conversion to seconds
             #[allow(clippy::cast_precision_loss)]
             Some(self.value as f64 / f64::from(self.timescale))
@@ -360,7 +375,7 @@ impl CMTime {
         extern "C" {
             fn CMTimeConvertScale(time: CMTime, newTimescale: i32, method: u32) -> CMTime;
         }
-        unsafe { CMTimeConvertScale(self, new_timescale, 0) }
+        unsafe { CMTimeConvertScale(self, new_timescale, 1) }
     }
 }
 
@@ -372,7 +387,13 @@ impl Default for CMTime {
 
 impl fmt::Display for CMTime {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(seconds) = self.as_seconds() {
+        if self.is_indefinite() {
+            f.write_str("indefinite")
+        } else if self.is_positive_infinity() {
+            f.write_str("+infinity")
+        } else if self.is_negative_infinity() {
+            f.write_str("-infinity")
+        } else if let Some(seconds) = self.as_seconds() {
             write!(f, "{seconds:.3}s")
         } else {
             write!(f, "invalid")
@@ -497,13 +518,38 @@ impl std::hash::Hash for CMClock {
 }
 
 impl CMClock {
-    /// Wraps a +1 retained `CMClockRef` and returns `None` for null.
+    /// Adopts a +1 retained `CMClockRef` and returns `None` for null.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CMClockRef` of the exact type carrying
+    /// one retain transferred to this wrapper. The caller must not release or
+    /// separately adopt that transferred retain.
     #[must_use]
-    pub fn from_raw(ptr: *const c_void) -> Option<Self> {
+    pub unsafe fn from_raw(ptr: *const c_void) -> Option<Self> {
         if ptr.is_null() {
             None
         } else {
             Some(Self { ptr })
+        }
+    }
+
+    /// Retains a +0 borrowed `CMClockRef` and returns an owned wrapper.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CMClockRef` of the exact type for the
+    /// duration of the retain call.
+    #[must_use]
+    pub unsafe fn from_raw_borrowed(ptr: *const c_void) -> Option<Self> {
+        if ptr.is_null() {
+            None
+        } else {
+            extern "C" {
+                fn CFRetain(cf: *const c_void) -> *const c_void;
+            }
+            let retained = unsafe { CFRetain(ptr) };
+            unsafe { Self::from_raw(retained) }
         }
     }
 
@@ -523,27 +569,29 @@ impl CMClock {
     /// Wraps a raw `CMClockRef` by taking ownership without retaining it.
     ///
     /// # Safety
-    /// The caller must ensure `ptr` is a valid +1 retained `CMClockRef`.
+    /// `ptr` must be a non-null, live `CMClockRef` of the exact type carrying
+    /// one retain transferred to this wrapper.
     #[allow(dead_code)]
-    pub(crate) const fn from_ptr(ptr: *const c_void) -> Self {
+    pub(crate) const unsafe fn from_ptr(ptr: *const c_void) -> Self {
         Self { ptr }
     }
 
-    /// Returns the raw pointer to the underlying `CMClock`
+    /// Borrow the raw +0 `CMClockRef` while `self` remains alive.
     #[must_use]
     pub const fn as_ptr(&self) -> *const c_void {
         self.ptr
     }
 
     /// Get the current time from this clock
-    ///
-    /// Note: Returns invalid time. Use `as_ptr()` with Core Media APIs directly
-    /// for full clock functionality.
     #[must_use]
-    pub const fn time(&self) -> CMTime {
-        // This would require FFI to CMClockGetTime - for now return invalid
-        // Users can use the pointer directly with Core Media APIs
-        CMTime::INVALID
+    pub fn time(&self) -> CMTime {
+        extern "C" {
+            fn CMClockGetTime(clock: *const c_void) -> CMTime;
+        }
+        if self.ptr.is_null() {
+            return CMTime::INVALID;
+        }
+        unsafe { CMClockGetTime(self.ptr) }
     }
 }
 

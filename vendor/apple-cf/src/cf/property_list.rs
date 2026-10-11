@@ -93,7 +93,8 @@ pub enum CFPropertyListError {
     /// Core Foundation produced a `CFErrorRef` describing the failure.
     CoreFoundation(CoreFoundationError),
     /// The API returned `NULL` without populating a Core Foundation error.
-    Null(crate::CFError),
+    Null(crate::NullPointerError),
+    UnknownFormat(isize),
 }
 
 impl fmt::Display for CFPropertyListError {
@@ -101,6 +102,7 @@ impl fmt::Display for CFPropertyListError {
         match self {
             Self::CoreFoundation(error) => fmt::Display::fmt(error, f),
             Self::Null(error) => fmt::Display::fmt(error, f),
+            Self::UnknownFormat(raw) => write!(f, "unknown CFPropertyListFormat {raw}"),
         }
     }
 }
@@ -111,15 +113,21 @@ fn property_list_error(
     operation: &'static str,
     error_ptr: *mut std::ffi::c_void,
 ) -> CFPropertyListError {
-    CoreFoundationError::from_raw(error_ptr).map_or_else(
-        || CFPropertyListError::Null(crate::CFError::new(operation)),
+    unsafe { CoreFoundationError::from_raw(error_ptr) }.map_or_else(
+        || CFPropertyListError::Null(crate::NullPointerError::new(operation)),
         CFPropertyListError::CoreFoundation,
     )
 }
 
-fn property_list_format(raw: isize) -> CFPropertyListFormat {
-    CFPropertyListFormat::try_from(raw)
-        .expect("Core Foundation returned an unknown CFPropertyListFormat")
+fn decoded_property_list(
+    ptr: *mut std::ffi::c_void,
+    format: isize,
+    operation: &'static str,
+    error: *mut std::ffi::c_void,
+) -> Result<(CFType, CFPropertyListFormat), CFPropertyListError> {
+    let value = unsafe { CFType::from_raw(ptr) }.ok_or_else(|| property_list_error(operation, error))?;
+    let format = CFPropertyListFormat::try_from(format).map_err(CFPropertyListError::UnknownFormat)?;
+    Ok((value, format))
 }
 
 /// Namespace for property-list parse / serialize helpers.
@@ -131,11 +139,11 @@ impl CFPropertyList {
     pub fn create_deep_copy(
         property_list: &dyn AsCFType,
         options: CFPropertyListMutabilityOptions,
-    ) -> Result<CFType, crate::CFError> {
+    ) -> Result<CFType, crate::NullPointerError> {
         let ptr = unsafe {
             ffi::cf_property_list_create_deep_copy(property_list.as_ptr(), options.as_u64())
         };
-        CFType::from_raw(ptr).ok_or(crate::CFError::new("CFPropertyListCreateDeepCopy"))
+        unsafe { CFType::from_raw(ptr) }.ok_or(crate::NullPointerError::new("CFPropertyListCreateDeepCopy"))
     }
 
     /// Decode a property list from an in-memory data blob.
@@ -149,13 +157,11 @@ impl CFPropertyList {
             ffi::cf_property_list_create_with_data(
                 data.as_ptr(),
                 options.as_u64(),
-                &mut format,
-                &mut error,
+                &raw mut format,
+                &raw mut error,
             )
         };
-        CFType::from_raw(ptr)
-            .map(|value| (value, property_list_format(format)))
-            .ok_or_else(|| property_list_error("CFPropertyListCreateWithData", error))
+        decoded_property_list(ptr, format, "CFPropertyListCreateWithData", error)
     }
 
     /// Decode a property list from an already-open Core Foundation read stream.
@@ -172,13 +178,11 @@ impl CFPropertyList {
                 stream.as_ptr(),
                 stream_length,
                 options.as_u64(),
-                &mut format,
-                &mut error,
+                &raw mut format,
+                &raw mut error,
             )
         };
-        CFType::from_raw(ptr)
-            .map(|value| (value, property_list_format(format)))
-            .ok_or_else(|| property_list_error("CFPropertyListCreateWithStream", error))
+        decoded_property_list(ptr, format, "CFPropertyListCreateWithStream", error)
     }
 
     /// Serialize a property list into a `CFData` blob.
@@ -193,10 +197,11 @@ impl CFPropertyList {
                 property_list.as_ptr(),
                 format as isize,
                 options,
-                &mut error,
+                &raw mut error,
             )
         };
-        CFData::from_raw(ptr).ok_or_else(|| property_list_error("CFPropertyListCreateData", error))
+        unsafe { CFData::from_raw(ptr) }
+            .ok_or_else(|| property_list_error("CFPropertyListCreateData", error))
     }
 
     /// Write a serialized property list to an already-open Core Foundation write stream.
@@ -213,12 +218,12 @@ impl CFPropertyList {
                 stream.as_ptr(),
                 format as isize,
                 options,
-                &mut error,
+                &raw mut error,
             )
         };
         if written > 0 {
             usize::try_from(written).map_err(|_| {
-                CFPropertyListError::Null(crate::CFError::new("CFPropertyListWrite overflow"))
+                CFPropertyListError::Null(crate::NullPointerError::new("CFPropertyListWrite overflow"))
             })
         } else {
             Err(property_list_error("CFPropertyListWrite", error))

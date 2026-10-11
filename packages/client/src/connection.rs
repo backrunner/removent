@@ -160,6 +160,7 @@ impl std::fmt::Display for ConnectionAddress {
 /// Credentials are per connection and deliberately excluded from Debug and persistence.
 /// For native relay connections `password` is the relay credential; native RVP
 /// authentication uses the host-selected policy and device identity.
+#[derive(Clone)]
 pub struct ConnectionRequest {
     pub pairing_code: Option<removent_core::pairing_invitation::PairingCode>,
     pub protocol: ConnectionProtocol,

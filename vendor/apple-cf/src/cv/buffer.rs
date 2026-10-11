@@ -70,9 +70,15 @@ pub struct CVImageRect {
 pub struct CVBuffer(*mut c_void);
 
 impl CVBuffer {
-    /// Wraps a +1 retained `CVBufferRef` and returns `None` for null.
+    /// Adopts a +1 retained `CVBufferRef` and returns `None` for null.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CVBufferRef` of the exact type carrying
+    /// one retain transferred to this wrapper. The caller must not release or
+    /// separately adopt that transferred retain.
     #[must_use]
-    pub fn from_raw(ptr: *mut c_void) -> Option<Self> {
+    pub unsafe fn from_raw(ptr: *mut c_void) -> Option<Self> {
         if ptr.is_null() {
             None
         } else {
@@ -80,28 +86,29 @@ impl CVBuffer {
         }
     }
 
-    /// Retains a +0 borrowed `CVBufferRef` and wraps the resulting +1 reference.
+    /// Retains a +0 borrowed `CVBufferRef` and returns an owned wrapper.
     ///
     /// # Safety
     ///
-    /// `ptr` must be NULL or a valid `CVBufferRef`.
+    /// A non-null `ptr` must be a live `CVBufferRef` of the exact type for the
+    /// duration of the retain call.
     #[must_use]
-    pub unsafe fn from_raw_retained(ptr: *mut c_void) -> Option<Self> {
+    pub unsafe fn from_raw_borrowed(ptr: *mut c_void) -> Option<Self> {
         if ptr.is_null() {
             None
         } else {
             let retained = unsafe { CVBufferRetain(ptr) };
-            Self::from_raw(retained)
+            unsafe { Self::from_raw(retained) }
         }
     }
 
     /// Wrap a pixel buffer as a generic `CVBuffer`.
     #[must_use]
     pub fn from_pixel_buffer(pixel_buffer: &CVPixelBuffer) -> Option<Self> {
-        unsafe { Self::from_raw_retained(pixel_buffer.as_ptr()) }
+        unsafe { Self::from_raw_borrowed(pixel_buffer.as_ptr()) }
     }
 
-    /// Borrow the raw `CVBufferRef`.
+    /// Borrow the raw +0 `CVBufferRef` while `self` remains alive.
     #[must_use]
     pub const fn as_ptr(&self) -> *mut c_void {
         self.0
@@ -116,15 +123,15 @@ impl CVBuffer {
     #[must_use]
     pub fn attachment(&self, key: &CFString) -> Option<CFType> {
         let mut attachment_mode = 0_u32;
-        let ptr = unsafe { CVBufferCopyAttachment(self.0, key.as_ptr(), &mut attachment_mode) };
-        CFType::from_raw(ptr)
+        let ptr = unsafe { CVBufferCopyAttachment(self.0, key.as_ptr(), &raw mut attachment_mode) };
+        unsafe { CFType::from_raw(ptr) }
     }
 
     /// Copy all attachments for the requested propagation mode.
     #[must_use]
     pub fn attachments(&self, mode: CVAttachmentMode) -> Option<CFDictionary> {
         let ptr = unsafe { CVBufferCopyAttachments(self.0, mode as u32) };
-        CFDictionary::from_raw(ptr)
+        unsafe { CFDictionary::from_raw(ptr) }
     }
 
     /// Remove all attachments.
@@ -133,18 +140,12 @@ impl CVBuffer {
     }
 }
 
-impl Clone for CVBuffer {
-    fn clone(&self) -> Self {
-        let retained = unsafe { CVBufferRetain(self.0) };
-        Self(retained)
-    }
-}
-
-impl Drop for CVBuffer {
-    fn drop(&mut self) {
-        unsafe { CVBufferRelease(self.0) };
-    }
-}
+crate::utils::retained::cf_retained!(
+    CVBuffer,
+    retain = CVBufferRetain,
+    release = CVBufferRelease,
+    drop = unchecked,
+);
 
 impl PartialEq for CVBuffer {
     fn eq(&self, other: &Self) -> bool {
@@ -170,9 +171,15 @@ impl fmt::Debug for CVBuffer {
 pub struct CVImageBuffer(*mut c_void);
 
 impl CVImageBuffer {
-    /// Wraps a +1 retained `CVImageBufferRef` and returns `None` for null.
+    /// Adopts a +1 retained `CVImageBufferRef` and returns `None` for null.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CVImageBufferRef` of the exact type
+    /// carrying one retain transferred to this wrapper. The caller must not
+    /// release or separately adopt that transferred retain.
     #[must_use]
-    pub fn from_raw(ptr: *mut c_void) -> Option<Self> {
+    pub unsafe fn from_raw(ptr: *mut c_void) -> Option<Self> {
         if ptr.is_null() {
             None
         } else {
@@ -180,14 +187,29 @@ impl CVImageBuffer {
         }
     }
 
+    /// Retains a +0 borrowed `CVImageBufferRef` and returns an owned wrapper.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CVImageBufferRef` of the exact type for
+    /// the duration of the retain call.
+    #[must_use]
+    pub unsafe fn from_raw_borrowed(ptr: *mut c_void) -> Option<Self> {
+        if ptr.is_null() {
+            None
+        } else {
+            let retained = unsafe { CVBufferRetain(ptr) };
+            unsafe { Self::from_raw(retained) }
+        }
+    }
+
     /// Wrap a pixel buffer as a generic image buffer.
     #[must_use]
     pub fn from_pixel_buffer(pixel_buffer: &CVPixelBuffer) -> Option<Self> {
-        let retained = unsafe { CVBufferRetain(pixel_buffer.as_ptr()) };
-        Self::from_raw(retained)
+        unsafe { Self::from_raw_borrowed(pixel_buffer.as_ptr()) }
     }
 
-    /// Borrow the raw `CVImageBufferRef`.
+    /// Borrow the raw +0 `CVImageBufferRef` while `self` remains alive.
     #[must_use]
     pub const fn as_ptr(&self) -> *mut c_void {
         self.0
@@ -212,18 +234,12 @@ impl CVImageBuffer {
     }
 }
 
-impl Clone for CVImageBuffer {
-    fn clone(&self) -> Self {
-        let retained = unsafe { CVBufferRetain(self.0) };
-        Self(retained)
-    }
-}
-
-impl Drop for CVImageBuffer {
-    fn drop(&mut self) {
-        unsafe { CVBufferRelease(self.0) };
-    }
-}
+crate::utils::retained::cf_retained!(
+    CVImageBuffer,
+    retain = CVBufferRetain,
+    release = CVBufferRelease,
+    drop = unchecked,
+);
 
 impl PartialEq for CVImageBuffer {
     fn eq(&self, other: &Self) -> bool {

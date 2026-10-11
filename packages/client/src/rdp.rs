@@ -113,8 +113,8 @@ async fn handshake(
         .context("RDP server certificate missing")?;
     let cert = x509_cert::Certificate::from_der(&cert.to_der()?)?;
     let public_key = cert
-        .tbs_certificate
-        .subject_public_key_info
+        .tbs_certificate()
+        .subject_public_key_info()
         .subject_public_key
         .as_bytes()
         .context("RDP server public key is not byte-aligned")?

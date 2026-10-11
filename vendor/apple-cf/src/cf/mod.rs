@@ -1,6 +1,6 @@
 //! Safe Core Foundation wrappers.
 //!
-//! This module provides lightweight, dependency-free wrappers for the most
+//! This module provides lightweight wrappers for the most
 //! common Core Foundation value, collection, locale, formatter, and runtime
 //! types used throughout the Apple media stack.
 
@@ -25,8 +25,8 @@ pub use resources::{
     CFLocale, CFNumberFormatter, CFNumberFormatterStyle, CFPreferences, CFTimeZone, CFURL, CFXML,
 };
 pub use runtime::{
-    CFFileDescriptor, CFMessagePort, CFNotificationCenter, CFReadStream, CFRunLoop,
-    CFRunLoopRunResult, CFSocket, CFStreamPair, CFTimer, CFWriteStream,
+    CFFileDescriptor, CFMessagePort, CFNotificationCenter, CFNotificationObserver, CFReadStream,
+    CFRunLoop, CFRunLoopRunResult, CFSocket, CFStreamPair, CFTimer, CFWriteStream,
 };
 
 /// Convenience alias for the bound read/write stream pair.

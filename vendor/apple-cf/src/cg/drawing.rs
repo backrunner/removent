@@ -26,21 +26,13 @@ pub struct CGColorSpace {
 unsafe impl Send for CGColorSpace {}
 unsafe impl Sync for CGColorSpace {}
 
-impl Drop for CGColorSpace {
-    fn drop(&mut self) {
-        if !self.ptr.is_null() {
-            unsafe { cg_ffi::CGColorSpaceRelease(self.ptr) };
-            self.ptr = ptr::null_mut();
-        }
-    }
-}
-
-impl Clone for CGColorSpace {
-    fn clone(&self) -> Self {
-        let p = unsafe { cg_ffi::CGColorSpaceRetain(self.ptr) };
-        Self { ptr: p }
-    }
-}
+crate::utils::retained::cf_retained!(
+    CGColorSpace,
+    field = ptr,
+    retain = cg_ffi::CGColorSpaceRetain,
+    release = cg_ffi::CGColorSpaceRelease,
+    drop = null_out,
+);
 
 impl std::fmt::Debug for CGColorSpace {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -82,7 +74,7 @@ impl CGColorSpace {
     #[must_use]
     pub fn srgb() -> Self {
         unsafe {
-            let n = CFStringCreateWithCStringLite(b"kCGColorSpaceSRGB\0".as_ptr());
+            let n = CFStringCreateWithCStringLite(c"kCGColorSpaceSRGB".as_ptr().cast());
             let p = cg_ffi::CGColorSpaceCreateWithName(n);
             CFReleaseLite(n);
             Self { ptr: p }
@@ -93,7 +85,7 @@ impl CGColorSpace {
     #[must_use]
     pub fn display_p3() -> Self {
         unsafe {
-            let n = CFStringCreateWithCStringLite(b"kCGColorSpaceDisplayP3\0".as_ptr());
+            let n = CFStringCreateWithCStringLite(c"kCGColorSpaceDisplayP3".as_ptr().cast());
             let p = cg_ffi::CGColorSpaceCreateWithName(n);
             CFReleaseLite(n);
             Self { ptr: p }
@@ -124,21 +116,13 @@ pub struct CGImage {
 unsafe impl Send for CGImage {}
 unsafe impl Sync for CGImage {}
 
-impl Drop for CGImage {
-    fn drop(&mut self) {
-        if !self.ptr.is_null() {
-            unsafe { cg_ffi::CGImageRelease(self.ptr) };
-            self.ptr = ptr::null_mut();
-        }
-    }
-}
-
-impl Clone for CGImage {
-    fn clone(&self) -> Self {
-        let p = unsafe { cg_ffi::CGImageRetain(self.ptr) };
-        Self { ptr: p }
-    }
-}
+crate::utils::retained::cf_retained!(
+    CGImage,
+    field = ptr,
+    retain = cg_ffi::CGImageRetain,
+    release = cg_ffi::CGImageRelease,
+    drop = null_out,
+);
 
 impl std::fmt::Debug for CGImage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

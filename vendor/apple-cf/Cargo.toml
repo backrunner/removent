@@ -11,9 +11,9 @@
 
 [package]
 edition = "2021"
-rust-version = "1.76"
+rust-version = "1.82"
 name = "apple-cf"
-version = "0.9.3"
+version = "0.11.0"
 authors = ["Per Johansson <per@doom.fish>"]
 build = "build.rs"
 include = [
@@ -173,8 +173,20 @@ name = "cf_runtime_tests"
 path = "tests/cf_runtime_tests.rs"
 
 [[test]]
+name = "cg_context_tests"
+path = "tests/cg_context_tests.rs"
+
+[[test]]
+name = "cm_audio_tests"
+path = "tests/cm_audio_tests.rs"
+
+[[test]]
 name = "cm_metadata_format_description_tests"
 path = "tests/cm_metadata_format_description_tests.rs"
+
+[[test]]
+name = "cm_sample_buffer_tests"
+path = "tests/cm_sample_buffer_tests.rs"
 
 [[test]]
 name = "cm_time_tests"
@@ -189,11 +201,19 @@ name = "dispatch_primitives_tests"
 path = "tests/dispatch_primitives_tests.rs"
 
 [[test]]
+name = "ffi_layout_tests"
+path = "tests/ffi_layout_tests.rs"
+
+[[test]]
+name = "iosurface_tests"
+path = "tests/iosurface_tests.rs"
+
+[[test]]
 name = "raw_bindings_tests"
 path = "tests/raw_bindings_tests.rs"
 
 [dependencies.doom-fish-utils]
-version = ">=0.1, <0.4"
+version = ">=0.4.1, <0.5"
 
 [dev-dependencies.apple_cf_compat_04]
 version = "0.4.0"
@@ -203,7 +223,7 @@ package = "apple-cf"
 version = "0.1"
 
 [dev-dependencies.videotoolbox]
-version = "0.10.0"
+version = "=0.10.0"
 
 [lints.clippy.cargo]
 level = "warn"

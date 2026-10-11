@@ -14,7 +14,7 @@ use std::fmt;
 /// Raw audio buffer containing sample data
 ///
 /// An `AudioBuffer` represents a single channel or interleaved audio data.
-/// Access the raw bytes via [`data()`](Self::data) or [`data_mut()`](Self::data_mut).
+/// Access the raw bytes via [`data()`](Self::data).
 #[repr(C)]
 pub struct AudioBuffer {
     /// Number of audio channels in this buffer
@@ -62,20 +62,6 @@ impl AudioBuffer {
             unsafe {
                 std::slice::from_raw_parts(
                     self.data_ptr as *const u8,
-                    self.data_bytes_size as usize,
-                )
-            }
-        }
-    }
-
-    /// Get the raw audio data as a mutable byte slice
-    pub fn data_mut(&mut self) -> &mut [u8] {
-        if self.data_ptr.is_null() || self.data_bytes_size == 0 {
-            &mut []
-        } else {
-            unsafe {
-                std::slice::from_raw_parts_mut(
-                    self.data_ptr.cast::<u8>(),
                     self.data_bytes_size as usize,
                 )
             }
@@ -150,6 +136,26 @@ pub struct AudioBufferList {
 }
 
 impl AudioBufferList {
+    pub(crate) unsafe fn from_bridge(
+        num_buffers: u32,
+        buffers_ptr: *mut AudioBuffer,
+        buffers_len: usize,
+        block_buffer_ptr: *mut std::ffi::c_void,
+    ) -> Option<Self> {
+        let list = Self {
+            inner: AudioBufferListRaw {
+                num_buffers,
+                buffers_ptr,
+                buffers_len,
+            },
+            block_buffer_ptr,
+        };
+        let consistent = !buffers_ptr.is_null()
+            && !block_buffer_ptr.is_null()
+            && usize::try_from(num_buffers).is_ok_and(|count| count == buffers_len);
+        consistent.then_some(list)
+    }
+
     /// Get the number of buffers in the list
     #[must_use]
     pub const fn num_buffers(&self) -> usize {
@@ -172,15 +178,6 @@ impl AudioBufferList {
         self.get(index).map(|buffer| AudioBufferRef { buffer })
     }
 
-    /// Get a mutable buffer by index
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut AudioBuffer> {
-        if index >= self.num_buffers() {
-            None
-        } else {
-            unsafe { Some(&mut *self.inner.buffers_ptr.add(index)) }
-        }
-    }
-
     /// Iterate over the audio buffers
     #[must_use]
     pub const fn iter(&self) -> AudioBufferListIter<'_> {
@@ -193,18 +190,8 @@ impl AudioBufferList {
 
 impl Drop for AudioBufferList {
     fn drop(&mut self) {
-        // Free the buffers array allocated in Swift via UnsafeMutablePointer.allocate().
-        // Must use the system allocator (not Rust's global allocator) because Swift
-        // allocates with the system malloc. Using Vec::from_raw_parts here would route
-        // through the global allocator, which crashes when a custom allocator like
-        // mimalloc is active.
         if !self.inner.buffers_ptr.is_null() {
-            unsafe {
-                use std::alloc::{GlobalAlloc, Layout, System};
-                let layout = Layout::array::<AudioBuffer>(self.inner.buffers_len)
-                    .expect("AudioBufferList layout overflow");
-                System.dealloc(self.inner.buffers_ptr.cast::<u8>(), layout);
-            }
+            unsafe { ffi::acf_cm_audio_buffer_array_free(self.inner.buffers_ptr.cast()) };
         }
         // Release the block buffer that owns the audio data
         if !self.block_buffer_ptr.is_null() {

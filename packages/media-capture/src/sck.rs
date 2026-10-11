@@ -6,10 +6,10 @@
 //! Requires Screen Recording TCC permission (requirements.md §6).
 
 use crate::sck_ffi as ffi;
-use core_foundation::base::TCFType;
 use core_foundation::error::CFError;
-use core_media_rs::cm_sample_buffer::CMSampleBuffer;
-use core_media_rs::cm_time::CMTime;
+use screencapturekit::cm::CMSampleBuffer;
+use screencapturekit::cm::CMTime;
+use screencapturekit::error::SCError;
 use screencapturekit::{
     shareable_content::SCShareableContent,
     stream::{
@@ -45,6 +45,12 @@ pub fn request_screen_capture_access() -> Result<(), CaptureError> {
 
 impl From<CFError> for CaptureError {
     fn from(e: CFError) -> Self {
+        CaptureError::Sc(e.to_string())
+    }
+}
+
+impl From<SCError> for CaptureError {
+    fn from(e: SCError) -> Self {
         CaptureError::Sc(e.to_string())
     }
 }
@@ -127,7 +133,7 @@ struct SckOutput {
 unsafe fn pixel_ptr(sb: &CMSampleBuffer) -> Option<ffi::CVPixelBufferRef> {
     // SAFETY: sb is valid; the returned reference is owned by sb and used only
     // during the read-only lock.
-    let p = unsafe { ffi::CMSampleBufferGetImageBuffer(sb.as_concrete_TypeRef().cast()) };
+    let p = unsafe { ffi::CMSampleBufferGetImageBuffer(sb.as_ptr().cast()) };
     (!p.is_null()).then_some(p)
 }
 
@@ -135,7 +141,7 @@ unsafe fn pixel_ptr(sb: &CMSampleBuffer) -> Option<ffi::CVPixelBufferRef> {
 const K_CM_TIME_FLAGS_VALID: u32 = 1;
 
 unsafe fn pts_us(sb: &CMSampleBuffer) -> Option<i64> {
-    let t = unsafe { ffi::CMSampleBufferGetPresentationTimeStamp(sb.as_concrete_TypeRef().cast()) };
+    let t = unsafe { ffi::CMSampleBufferGetPresentationTimeStamp(sb.as_ptr().cast()) };
     if t.flags & K_CM_TIME_FLAGS_VALID == 0 || t.timescale == 0 {
         None
     } else {
@@ -182,7 +188,7 @@ fn copy_screen_bgra(sb: &CMSampleBuffer) -> Option<(Vec<u8>, i64)> {
 /// (returns None on unexpected formats).
 fn audio_is_f32_interleaved(sb: &CMSampleBuffer) -> bool {
     // SAFETY: sb is valid; the returned reference is owned by sb, read-only use.
-    let desc = unsafe { ffi::CMSampleBufferGetFormatDescription(sb.as_concrete_TypeRef().cast()) };
+    let desc = unsafe { ffi::CMSampleBufferGetFormatDescription(sb.as_ptr().cast()) };
     if desc.is_null() {
         return false;
     }
@@ -209,7 +215,7 @@ fn copy_audio_samples(sb: &CMSampleBuffer) -> Option<Vec<f32>> {
         return None;
     }
     // SAFETY: valid sample buffer; the data block reference is owned by sb.
-    let bb = unsafe { CMSampleBufferGetDataBuffer(sb.as_concrete_TypeRef().cast()) };
+    let bb = unsafe { CMSampleBufferGetDataBuffer(sb.as_ptr().cast()) };
     if bb.is_null() {
         return None;
     }
@@ -268,6 +274,7 @@ impl SCStreamOutputTrait for SckOutput {
         match of_type {
             SCStreamOutputType::Screen => self.on_video(&sample_buffer),
             SCStreamOutputType::Audio => self.on_audio(&sample_buffer),
+            SCStreamOutputType::Microphone => {}
         }
     }
 }
@@ -279,7 +286,7 @@ struct StoppedDelegate {
 }
 
 impl SCStreamDelegateTrait for StoppedDelegate {
-    fn did_stop_with_error(&self, _stream: SCStream, error: CFError) {
+    fn did_stop_with_error(&self, error: SCError) {
         let msg = error.to_string();
         tracing::error!(error = %msg, "screen capture stream stopped with error");
         let _ = self.stopped_tx.try_send(msg);
@@ -323,7 +330,6 @@ pub fn start_display_capture(
         .find(|d| d.display_id() == display_id)
         .ok_or(CaptureError::DisplayNotFound(display_id))?;
 
-    let filter = SCContentFilter::new();
     // Exclude the Removent app's windows (matched by bundle id) to avoid
     // recursive capture of the viewer window; also exclude this process's own
     // windows (harmless for the headless daemon, but keeps the guard correct
@@ -335,35 +341,33 @@ pub fn start_display_capture(
         .into_iter()
         .filter(|w| {
             let app = w.owning_application();
-            app.process_id() == own_pid || app.bundle_identifier() == "com.alkinum.removent"
+            app.is_some_and(|app| {
+                app.process_id() == own_pid || app.bundle_identifier() == "com.alkinum.removent"
+            })
         })
         .collect();
     let own_window_refs: Vec<&_> = own_windows.iter().collect();
-    let filter = filter.with_display_excluding_windows(&display, &own_window_refs);
-    let frame_interval_60fps = CMTime {
-        value: 1,
-        timescale: 60,
-        flags: 1,
-        epoch: 0,
-    };
-    let config = SCStreamConfiguration::new();
-    let config = match config
+    let filter = SCContentFilter::create()
+        .with_display(&display)
+        .with_excluding_windows(&own_window_refs)
+        .build()
+        .map_err(CaptureError::from)?;
+    let frame_interval_60fps = CMTime::new(1, 60);
+    let mut config = SCStreamConfiguration::new();
+    config
         .set_width(width)
-        .and_then(|c| c.set_height(height))
-        .and_then(|c| c.set_pixel_format(PixelFormat::BGRA))
-        .and_then(|c| c.set_queue_depth(3))
-        .and_then(|c| c.set_minimum_frame_interval(&frame_interval_60fps))
-        .and_then(|c| c.set_captures_audio(audio_tx.is_some()))
-        .and_then(|c| c.set_excludes_current_process_audio(true))
-        .and_then(|c| c.set_sample_rate(48_000))
-        .and_then(|c| c.set_channel_count(2))
-    {
-        Ok(c) => c,
-        Err(e) => return Err(CaptureError::Sc(e.to_string())),
-    };
+        .set_height(height)
+        .set_pixel_format(PixelFormat::BGRA)
+        .set_queue_depth(3)
+        .set_minimum_frame_interval(&frame_interval_60fps)
+        .set_captures_audio(audio_tx.is_some())
+        .set_excludes_current_process_audio(true)
+        .set_sample_rate(48_000)
+        .set_channel_count(2);
 
     let (stopped_tx, stopped_rx) = mpsc::channel(1);
-    let mut stream = SCStream::new_with_delegate(&filter, &config, StoppedDelegate { stopped_tx });
+    let mut stream = SCStream::new_with_delegate(&filter, &config, StoppedDelegate { stopped_tx })
+        .map_err(CaptureError::from)?;
     let screen_output = SckOutput {
         video_tx: video_tx.clone(),
         audio_tx: None,
@@ -374,7 +378,9 @@ pub fn start_display_capture(
         }),
     };
 
-    stream.add_output_handler(screen_output, SCStreamOutputType::Screen);
+    stream
+        .add_output_handler(screen_output, SCStreamOutputType::Screen)
+        .map_err(CaptureError::from)?;
     if let Some(audio_tx) = audio_tx {
         let audio_output = SckOutput {
             video_tx,
@@ -385,7 +391,9 @@ pub fn start_display_capture(
                 last_drop_warn: None,
             }),
         };
-        stream.add_output_handler(audio_output, SCStreamOutputType::Audio);
+        stream
+            .add_output_handler(audio_output, SCStreamOutputType::Audio)
+            .map_err(CaptureError::from)?;
     }
 
     stream.start_capture().map_err(CaptureError::from)?;

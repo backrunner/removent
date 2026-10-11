@@ -3,7 +3,7 @@
 use core::ffi::c_void;
 use core::ptr;
 
-use crate::CFError;
+use crate::NullPointerError;
 
 use super::drawing::{CGColorSpace, CGImage};
 use super::ffi;
@@ -17,27 +17,21 @@ const RGBA8_BITMAP_INFO: u32 = CG_IMAGE_ALPHA_PREMULTIPLIED_LAST | CG_BITMAP_BYT
 const GRAYSCALE8_BITMAP_INFO: u32 = CG_IMAGE_ALPHA_NONE;
 
 /// Reference-counted `CGContextRef` backed by a bitmap.
+///
+/// Clones retain the same mutable native context; they are not independent
+/// drawing surfaces.
 #[derive(Debug)]
 pub struct CGContext {
     ptr: *mut c_void,
 }
 
-impl Drop for CGContext {
-    fn drop(&mut self) {
-        if !self.ptr.is_null() {
-            unsafe { ffi::CGContextRelease(self.ptr) };
-            self.ptr = ptr::null_mut();
-        }
-    }
-}
-
-impl Clone for CGContext {
-    fn clone(&self) -> Self {
-        Self {
-            ptr: unsafe { ffi::CGContextRetain(self.ptr) },
-        }
-    }
-}
+crate::utils::retained::cf_retained!(
+    CGContext,
+    field = ptr,
+    retain = ffi::CGContextRetain,
+    release = ffi::CGContextRelease,
+    drop = null_out,
+);
 
 impl CGContext {
     /// Wrap a raw `CGContextRef` pointer — takes ownership without retaining.
@@ -56,7 +50,7 @@ impl CGContext {
         height: usize,
         color_space: &CGColorSpace,
         bitmap_info: u32,
-    ) -> Result<Self, CFError> {
+    ) -> Result<Self, NullPointerError> {
         let context = unsafe {
             ffi::CGBitmapContextCreate(
                 ptr::null_mut(),
@@ -70,9 +64,15 @@ impl CGContext {
         };
 
         if context.is_null() {
-            Err(CFError::new("CGBitmapContextCreate"))
+            Err(NullPointerError::new("CGBitmapContextCreate"))
         } else {
-            Ok(Self { ptr: context })
+            let context = Self { ptr: context };
+            let data = context.data();
+            let len = context.buffer_len();
+            if !data.is_null() && len != 0 {
+                unsafe { data.write_bytes(0, len) };
+            }
+            Ok(context)
         }
     }
 
@@ -80,8 +80,8 @@ impl CGContext {
     ///
     /// # Errors
     ///
-    /// Returns [`CFError`] if Core Graphics fails to create the bitmap context.
-    pub fn new_rgba8(width: usize, height: usize) -> Result<Self, CFError> {
+    /// Returns [`NullPointerError`] if Core Graphics fails to create the bitmap context.
+    pub fn new_rgba8(width: usize, height: usize) -> Result<Self, NullPointerError> {
         let color_space = CGColorSpace::device_rgb();
         Self::new_bitmap(width, height, &color_space, RGBA8_BITMAP_INFO)
     }
@@ -90,8 +90,8 @@ impl CGContext {
     ///
     /// # Errors
     ///
-    /// Returns [`CFError`] if Core Graphics fails to create the bitmap context.
-    pub fn new_grayscale(width: usize, height: usize) -> Result<Self, CFError> {
+    /// Returns [`NullPointerError`] if Core Graphics fails to create the bitmap context.
+    pub fn new_grayscale(width: usize, height: usize) -> Result<Self, NullPointerError> {
         let color_space = CGColorSpace::device_gray();
         Self::new_bitmap(width, height, &color_space, GRAYSCALE8_BITMAP_INFO)
     }
@@ -131,6 +131,9 @@ impl CGContext {
     }
 
     /// Raw bitmap data pointer.
+    ///
+    /// Dereferencing the pointer is unsafe because retained aliases and native
+    /// drawing operations can mutate the same storage.
     #[must_use]
     pub fn data(&self) -> *mut u8 {
         unsafe { ffi::CGBitmapContextGetData(self.ptr).cast::<u8>() }
@@ -156,11 +159,18 @@ impl CGContext {
     }
 
     /// The bitmap storage as immutable bytes.
+    ///
+    /// # Safety
+    ///
+    /// Every byte in the range must already be initialized. For the returned
+    /// reference's lifetime, the bitmap allocation must remain live and
+    /// immovable, and no retained alias or native call may draw into, clear,
+    /// replace, or otherwise mutate the context storage.
     #[must_use]
-    pub fn as_bytes(&self) -> &[u8] {
+    pub unsafe fn as_bytes(&self) -> &[u8] {
         let data = self.data();
         let len = self.buffer_len();
-        if data.is_null() || len == 0 {
+        if data.is_null() || len == 0 || isize::try_from(len).is_err() {
             &[]
         } else {
             unsafe { std::slice::from_raw_parts(data.cast_const(), len) }
@@ -168,11 +178,18 @@ impl CGContext {
     }
 
     /// The bitmap storage as mutable bytes.
+    ///
+    /// # Safety
+    ///
+    /// Every byte in the range must already be initialized. For the returned
+    /// reference's lifetime, the caller must have unique access to the bitmap
+    /// storage across every retained wrapper and native alias, and no drawing
+    /// or snapshot operation may access the context.
     #[must_use]
-    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
+    pub unsafe fn as_bytes_mut(&mut self) -> &mut [u8] {
         let data = self.data();
         let len = self.buffer_len();
-        if data.is_null() || len == 0 {
+        if data.is_null() || len == 0 || isize::try_from(len).is_err() {
             &mut []
         } else {
             unsafe { std::slice::from_raw_parts_mut(data, len) }

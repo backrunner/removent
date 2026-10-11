@@ -6,7 +6,7 @@ use crate::ui::widgets::*;
 use gpui::{
     AnimationExt, App, Bounds, Context, ElementId, FocusHandle, Keystroke, ModifiersChangedEvent,
     MouseButton, ObjectFit, Point, Render, RenderImage, Subscription, Task, TouchPhase, Window,
-    WindowOptions, actions, div, img, prelude::*, px, size,
+    WindowOptions, actions, div, prelude::*, px, size,
 };
 use gpui_component::{ActiveTheme, TITLE_BAR_HEIGHT, TitleBar};
 use removent_core::latest::Receiver;
@@ -65,6 +65,9 @@ pub struct ViewerView {
     /// element id so the entry transition replays on every appearance.
     toolbar_seq: u64,
     ended: bool,
+    recovery: removent_client::recovery::Recovery,
+    input_epoch: u64,
+    canvas_bounds: std::rc::Rc<std::cell::Cell<Option<Bounds<gpui::Pixels>>>>,
     focus: FocusHandle,
     /// Currently held remote mouse buttons (bit0 left, bit1 right, bit2 middle),
     /// mirrored into every outbound mouse event.

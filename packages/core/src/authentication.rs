@@ -2,7 +2,7 @@
 pub use removent_proto::AuthenticationMode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use totp_rs::{Algorithm, Secret, TOTP};
+use totp_rs::{Algorithm, Builder, Secret, Totp};
 
 #[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -39,22 +39,20 @@ impl AuthenticationSettings {
         }
     }
     pub fn generate_otp_secret() -> String {
-        Secret::generate_secret().to_encoded().to_string()
+        Secret::generate().to_base32()
     }
-    pub fn totp(&self) -> std::result::Result<TOTP, String> {
-        let secret = Secret::Encoded(self.otp_secret.clone())
-            .to_bytes()
-            .map_err(|_| "Invalid OTP secret")?;
-        TOTP::new(
-            Algorithm::SHA1,
-            6,
-            1,
-            30,
-            secret,
-            Some("Removent".into()),
-            "Remote access".into(),
-        )
-        .map_err(|_| "Invalid OTP secret".into())
+    pub fn totp(&self) -> std::result::Result<Totp, String> {
+        let secret = Secret::try_from_base32(&self.otp_secret).map_err(|_| "Invalid OTP secret")?;
+        Builder::new()
+            .with_algorithm(Algorithm::SHA1)
+            .with_digits(6)
+            .with_skew(1)
+            .with_step_duration(30)
+            .with_secret(secret)
+            .with_issuer(Some("Removent"))
+            .with_account_name("Remote access")
+            .build()
+            .map_err(|_| "Invalid OTP secret".into())
     }
     /// Bind resumption to the current credentials; changing them invalidates old tokens.
     pub fn policy_fingerprint(&self) -> [u8; 32] {
@@ -95,12 +93,11 @@ mod tests {
     fn totp_matches_rfc6238_vector_and_replay_state_survives_reload() {
         let auth = AuthenticationSettings {
             mode: AuthenticationMode::Otp,
-            otp_secret: Secret::Raw(b"12345678901234567890".to_vec())
-                .to_encoded()
-                .to_string(),
+            otp_secret: Secret::new(b"12345678901234567890".to_vec().into_boxed_slice())
+                .to_base32(),
             ..Default::default()
         };
-        assert_eq!(auth.totp().unwrap().generate(59), "287082");
+        assert_eq!(auth.totp().unwrap().generate(59).to_string(), "287082");
         let dir = tempfile::tempdir().unwrap();
         let paths = crate::DataPaths {
             root: dir.path().into(),

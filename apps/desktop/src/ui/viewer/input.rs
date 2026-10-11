@@ -13,27 +13,22 @@ impl ViewerView {
     pub(super) fn frame_px(
         &self,
         pos: Point<gpui::Pixels>,
-        window: &Window,
+        _window: &Window,
         clamp: bool,
     ) -> Option<(f32, f32)> {
         if !self.input_active() {
             return None;
         }
-        let vp = window.viewport_size();
-        let title = f32::from(TITLE_BAR_HEIGHT);
-        let content_w = f32::from(vp.width);
-        // BUG FIX: viewport_size() actually returns the content area size (not including titlebar),
-        // even though the toolbar.rs code suggests otherwise. The original code was double-subtracting
-        // the titlebar height, causing incorrect mouse coordinates.
-        let content_h = f32::from(vp.height);
+        let bounds = self.canvas_bounds.get()?;
+        let content_w = f32::from(bounds.size.width);
+        let content_h = f32::from(bounds.size.height);
         if content_w <= 0. || content_h <= 0. {
             return None;
         }
         let (fw, fh) = (self.width as f32, self.height as f32);
-        // Contain scale (window points per frame pixel), then the letterbox offsets.
         let scale = (content_w / fw).min(content_h / fh);
-        let ox = (content_w - fw * scale) / 2.;
-        let oy = title + (content_h - fh * scale) / 2.;
+        let ox = f32::from(bounds.origin.x) + (content_w - fw * scale) / 2.;
+        let oy = f32::from(bounds.origin.y) + (content_h - fh * scale) / 2.;
         let x = (f32::from(pos.x) - ox) / scale;
         let y = (f32::from(pos.y) - oy) / scale;
         if clamp {

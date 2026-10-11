@@ -1,9 +1,12 @@
 //! `CVPixelBuffer` - Video pixel buffer
 
-use crate::ffi;
+use crate::cf::{AsCFType, CFDictionary, CFNumber, CFString};
 use crate::iosurface::IOSurface;
+use crate::{ffi, raw};
+use std::collections::HashMap;
 use std::fmt;
 use std::io::{self, Read, Seek, SeekFrom};
+use std::sync::Arc;
 
 /// Lock flags for `CVPixelBuffer`
 ///
@@ -22,8 +25,9 @@ use std::io::{self, Read, Seek, SeekFrom};
 /// let flags = CVPixelBufferLockFlags::NONE;
 /// assert!(!flags.is_read_only());
 /// ```
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct CVPixelBufferLockFlags(u32);
+pub struct CVPixelBufferLockFlags(u64);
 
 impl CVPixelBufferLockFlags {
     /// No special options (read-write lock)
@@ -33,15 +37,15 @@ impl CVPixelBufferLockFlags {
     /// This allows Core Video to keep caches valid.
     pub const READ_ONLY: Self = Self(0x0000_0001);
 
-    /// Create from a raw u32 value
+    /// Create from a raw `CVOptionFlags` value.
     #[must_use]
-    pub const fn from_bits(bits: u32) -> Self {
+    pub const fn from_bits(bits: u64) -> Self {
         Self(bits)
     }
 
-    /// Convert to u32 for FFI
+    /// Return the raw `CVOptionFlags` bits.
     #[must_use]
-    pub const fn as_u32(self) -> u32 {
+    pub const fn bits(self) -> u64 {
         self.0
     }
 
@@ -58,7 +62,7 @@ impl CVPixelBufferLockFlags {
     }
 }
 
-impl From<CVPixelBufferLockFlags> for u32 {
+impl From<CVPixelBufferLockFlags> for u64 {
     fn from(flags: CVPixelBufferLockFlags) -> Self {
         flags.0
     }
@@ -86,8 +90,14 @@ impl std::hash::Hash for CVPixelBuffer {
 }
 
 impl CVPixelBuffer {
-    /// Wraps a +1 retained `CVPixelBufferRef` and returns `None` for null.
-    pub fn from_raw(ptr: *mut std::ffi::c_void) -> Option<Self> {
+    /// Adopts a +1 retained `CVPixelBufferRef` and returns `None` for null.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CVPixelBufferRef` of the exact type
+    /// carrying one retain transferred to this wrapper. The caller must not
+    /// release or separately adopt that transferred retain.
+    pub unsafe fn from_raw(ptr: *mut std::ffi::c_void) -> Option<Self> {
         if ptr.is_null() {
             None
         } else {
@@ -95,15 +105,32 @@ impl CVPixelBuffer {
         }
     }
 
+    /// Retains a +0 borrowed `CVPixelBufferRef` and returns an owned wrapper.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CVPixelBufferRef` of the exact type for
+    /// the duration of the retain call.
+    #[must_use]
+    pub unsafe fn from_raw_borrowed(ptr: *mut std::ffi::c_void) -> Option<Self> {
+        if ptr.is_null() {
+            None
+        } else {
+            let retained = unsafe { ffi::cv_pixel_buffer_retain(ptr) };
+            unsafe { Self::from_raw(retained) }
+        }
+    }
+
     /// Wraps a raw `CVPixelBufferRef` by taking ownership without retaining it.
     ///
     /// # Safety
-    /// The caller must ensure `ptr` is a valid +1 retained `CVPixelBufferRef`.
+    /// `ptr` must be a non-null, live `CVPixelBufferRef` of the exact type
+    /// carrying one retain transferred to this wrapper.
     pub const unsafe fn from_ptr(ptr: *mut std::ffi::c_void) -> Self {
         Self(ptr)
     }
 
-    /// Returns the wrapped raw `CVPixelBufferRef`.
+    /// Borrows the raw +0 `CVPixelBufferRef` while `self` remains alive.
     #[must_use]
     pub const fn as_ptr(&self) -> *mut std::ffi::c_void {
         self.0
@@ -138,7 +165,7 @@ impl CVPixelBuffer {
         unsafe {
             let mut pixel_buffer_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
             let status =
-                ffi::cv_pixel_buffer_create(width, height, pixel_format, &mut pixel_buffer_ptr);
+                ffi::cv_pixel_buffer_create(width, height, pixel_format, &raw mut pixel_buffer_ptr);
 
             if status == 0 && !pixel_buffer_ptr.is_null() {
                 Ok(Self(pixel_buffer_ptr))
@@ -220,7 +247,7 @@ impl CVPixelBuffer {
             pixel_format,
             base_address,
             bytes_per_row,
-            &mut pixel_buffer_ptr,
+            &raw mut pixel_buffer_ptr,
         );
 
         if status == 0 && !pixel_buffer_ptr.is_null() {
@@ -287,7 +314,7 @@ impl CVPixelBuffer {
             plane_widths.as_ptr(),
             plane_heights.as_ptr(),
             plane_bytes_per_row.as_ptr(),
-            &mut pixel_buffer_ptr,
+            &raw mut pixel_buffer_ptr,
         );
 
         if status == 0 && !pixel_buffer_ptr.is_null() {
@@ -307,7 +334,7 @@ impl CVPixelBuffer {
             let mut pixel_buffer_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
             let status = ffi::cv_pixel_buffer_create_with_io_surface(
                 surface.as_ptr(),
-                &mut pixel_buffer_ptr,
+                &raw mut pixel_buffer_ptr,
             );
 
             if status == 0 && !pixel_buffer_ptr.is_null() {
@@ -385,10 +412,10 @@ impl CVPixelBuffer {
             let mut bottom: usize = 0;
             ffi::cv_pixel_buffer_get_extended_pixels(
                 self.0,
-                &mut left,
-                &mut right,
-                &mut top,
-                &mut bottom,
+                &raw mut left,
+                &raw mut right,
+                &raw mut top,
+                &raw mut bottom,
             );
             (left, right, top, bottom)
         }
@@ -424,35 +451,48 @@ impl CVPixelBuffer {
         unsafe { ffi::cv_pixel_buffer_get_bytes_per_row(self.0) }
     }
 
-    /// Lock the base address for raw access
+    /// Lock the base address for raw access.
+    ///
+    /// This is a native synchronization/mapping operation and does not grant
+    /// Rust-exclusive access to the backing bytes.
+    ///
+    /// # Safety
+    ///
+    /// Every successful call must be paired exactly once with
+    /// [`Self::unlock_raw`] using identical flags. The caller must not mix this
+    /// protocol with a live RAII guard or allow any derived access to outlive
+    /// the matching unlock.
     ///
     /// # Errors
     ///
     /// Returns a Core Video error code if the lock operation fails.
-    pub fn lock_raw(&self, flags: CVPixelBufferLockFlags) -> Result<(), i32> {
-        unsafe {
-            let result = ffi::cv_pixel_buffer_lock_base_address(self.0, flags.as_u32());
-            if result == 0 {
-                Ok(())
-            } else {
-                Err(result)
-            }
+    pub unsafe fn lock_raw(&self, flags: CVPixelBufferLockFlags) -> Result<(), i32> {
+        let result = unsafe { raw::CVPixelBufferLockBaseAddress(self.0.cast(), flags.bits()) };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(result)
         }
     }
 
-    /// Unlock the base address after raw access
+    /// Unlock the base address after raw access.
+    ///
+    /// # Safety
+    ///
+    /// This call must balance exactly one successful [`Self::lock_raw`] call
+    /// with identical flags. No pointer or reference derived from that mapping
+    /// may be accessed after this call, and the mapping must not belong to an
+    /// RAII guard.
     ///
     /// # Errors
     ///
     /// Returns a Core Video error code if the unlock operation fails.
-    pub fn unlock_raw(&self, flags: CVPixelBufferLockFlags) -> Result<(), i32> {
-        unsafe {
-            let result = ffi::cv_pixel_buffer_unlock_base_address(self.0, flags.as_u32());
-            if result == 0 {
-                Ok(())
-            } else {
-                Err(result)
-            }
+    pub unsafe fn unlock_raw(&self, flags: CVPixelBufferLockFlags) -> Result<(), i32> {
+        let result = unsafe { raw::CVPixelBufferUnlockBaseAddress(self.0.cast(), flags.bits()) };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(result)
         }
     }
 
@@ -497,13 +537,15 @@ impl CVPixelBuffer {
     ///
     /// fn read_buffer(buffer: &CVPixelBuffer) {
     ///     let guard = buffer.lock(CVPixelBufferLockFlags::READ_ONLY).unwrap();
-    ///     let data = guard.as_slice();
+    ///     // SAFETY: this scope excludes every native and retained alias that
+    ///     // could mutate or remap the pixel bytes.
+    ///     let data = unsafe { guard.as_slice() }.unwrap();
     ///     println!("Buffer has {} bytes", data.len());
     ///     // Buffer automatically unlocked when guard drops
     /// }
     /// ```
     pub fn lock(&self, flags: CVPixelBufferLockFlags) -> Result<CVPixelBufferLockGuard<'_>, i32> {
-        self.lock_raw(flags)?;
+        unsafe { self.lock_raw(flags)? };
         Ok(CVPixelBufferLockGuard {
             buffer: self,
             flags,
@@ -540,7 +582,18 @@ pub struct CVPixelBufferLockGuard<'a> {
 }
 
 impl CVPixelBufferLockGuard<'_> {
-    /// Get the base address of the locked buffer
+    fn non_planar_data_len(&self) -> Option<usize> {
+        if self.buffer.is_planar() {
+            return None;
+        }
+        let len = self.height().checked_mul(self.bytes_per_row())?;
+        (len <= self.data_size() && isize::try_from(len).is_ok()).then_some(len)
+    }
+
+    /// Get the base address of the locked buffer.
+    ///
+    /// Dereferencing the returned pointer is unsafe. The native lock keeps the
+    /// mapping synchronized but does not guarantee Rust aliasing or immutability.
     #[must_use]
     pub fn base_address(&self) -> *const u8 {
         self.buffer
@@ -549,9 +602,11 @@ impl CVPixelBufferLockGuard<'_> {
             .cast_const()
     }
 
-    /// Get mutable base address (only valid for read-write locks)
+    /// Get mutable base address (only valid for read-write locks).
     ///
     /// Returns `None` if this is a read-only lock.
+    /// Dereferencing the returned pointer requires unique access to the bytes
+    /// across all Rust, native, retained, GPU, and cross-process aliases.
     pub fn base_address_mut(&mut self) -> Option<*mut u8> {
         if self.flags.is_read_only() {
             None
@@ -560,22 +615,25 @@ impl CVPixelBufferLockGuard<'_> {
         }
     }
 
-    /// Get the base address of a specific plane
+    /// Get the base address of a specific plane.
     ///
     /// For multi-planar formats like YCbCr 4:2:0:
     /// - Plane 0: Y (luminance) data
     /// - Plane 1: `CbCr` (chrominance) data
     ///
-    /// Returns `None` if the plane index is out of bounds.
+    /// Returns `None` if the plane index is out of bounds. Dereferencing the
+    /// returned pointer is unsafe because the lock does not establish Rust
+    /// immutability.
     pub fn base_address_of_plane(&self, plane_index: usize) -> Option<*const u8> {
         self.buffer
             .base_address_of_plane_raw(plane_index)
             .map(<*mut u8>::cast_const)
     }
 
-    /// Get the mutable base address of a specific plane
+    /// Get the mutable base address of a specific plane.
     ///
-    /// Returns `None` if this is a read-only lock or the plane index is out of bounds.
+    /// Returns `None` if this is a read-only lock or the plane index is out of
+    /// bounds. Dereferencing requires unique access across every alias.
     pub fn base_address_of_plane_mut(&mut self, plane_index: usize) -> Option<*mut u8> {
         if self.flags.is_read_only() {
             return None;
@@ -633,51 +691,86 @@ impl CVPixelBufferLockGuard<'_> {
         self.buffer.bytes_per_row_of_plane(plane_index)
     }
 
-    /// Get data as a byte slice
+    /// Get non-planar data as a byte slice.
     ///
-    /// The lock guard ensures the buffer is locked for the lifetime of the slice.
+    /// Returns `None` for planar buffers, missing base addresses, or lengths
+    /// that cannot be represented by a Rust slice.
+    ///
+    /// # Safety
+    ///
+    /// For the returned reference's lifetime, the mapped range must remain
+    /// allocated, initialized, and immovable, and no Rust or native alias may
+    /// mutate or remap any byte in it. The caller must also prevent any manual
+    /// unlock of this mapping.
     #[must_use]
-    pub fn as_slice(&self) -> &[u8] {
+    pub unsafe fn as_slice(&self) -> Option<&[u8]> {
         let ptr = self.base_address();
-        let len = self.buffer.height() * self.buffer.bytes_per_row();
-        if ptr.is_null() || len == 0 {
-            &[]
-        } else {
-            unsafe { std::slice::from_raw_parts(ptr, len) }
+        let len = self.non_planar_data_len()?;
+        if len == 0 {
+            return Some(&[]);
         }
+        if ptr.is_null() {
+            return None;
+        }
+        Some(unsafe { std::slice::from_raw_parts(ptr, len) })
     }
 
-    /// Get data as a mutable byte slice (only valid for read-write locks)
+    /// Get non-planar data as a mutable byte slice.
     ///
-    /// Returns `None` if this is a read-only lock.
-    pub fn as_slice_mut(&mut self) -> Option<&mut [u8]> {
-        let ptr = self.base_address_mut()?;
-        let len = self.buffer.height() * self.buffer.bytes_per_row();
-        if ptr.is_null() || len == 0 {
-            Some(&mut [])
-        } else {
-            Some(unsafe { std::slice::from_raw_parts_mut(ptr, len) })
+    /// Returns `None` for read-only locks, planar buffers, missing base
+    /// addresses, or lengths that cannot be represented by a Rust slice.
+    ///
+    /// # Safety
+    ///
+    /// For the returned reference's lifetime, this caller must have unique
+    /// access to the full mapped range across every Rust, native, retained,
+    /// GPU, and cross-process alias. The mapping must remain allocated,
+    /// initialized, and locked.
+    pub unsafe fn as_slice_mut(&mut self) -> Option<&mut [u8]> {
+        let len = self.non_planar_data_len()?;
+        if len == 0 {
+            return Some(&mut []);
         }
+        let ptr = self.base_address_mut()?;
+        Some(unsafe { std::slice::from_raw_parts_mut(ptr, len) })
     }
 
-    /// Get a slice of plane data
+    /// Get a slice of plane data.
     ///
     /// Returns the data for a specific plane as a byte slice.
     ///
-    /// Returns `None` if the plane index is out of bounds.
+    /// Returns `None` if the plane index is out of bounds or its byte length
+    /// cannot be represented.
+    ///
+    /// # Safety
+    ///
+    /// For the returned reference's lifetime, the plane must remain allocated,
+    /// initialized, locked, and immutable through every Rust and native alias.
     #[must_use]
-    pub fn plane_data(&self, plane_index: usize) -> Option<&[u8]> {
+    pub unsafe fn plane_data(&self, plane_index: usize) -> Option<&[u8]> {
+        if !self.buffer.is_planar() || plane_index >= self.buffer.plane_count() {
+            return None;
+        }
         let base = self.base_address_of_plane(plane_index)?;
         let height = self.buffer.height_of_plane(plane_index);
         let bytes_per_row = self.buffer.bytes_per_row_of_plane(plane_index);
-        Some(unsafe { std::slice::from_raw_parts(base, height * bytes_per_row) })
+        let len = height.checked_mul(bytes_per_row)?;
+        if isize::try_from(len).is_err() {
+            return None;
+        }
+        Some(unsafe { std::slice::from_raw_parts(base, len) })
     }
 
-    /// Get a specific row from a plane as a slice
+    /// Get a specific row from a plane as a slice.
     ///
     /// Returns `None` if the plane or row index is out of bounds.
+    ///
+    /// # Safety
+    ///
+    /// For the returned reference's lifetime, the row must remain allocated,
+    /// initialized, locked, and immutable through every Rust and native alias.
     #[must_use]
-    pub fn plane_row(&self, plane_index: usize, row_index: usize) -> Option<&[u8]> {
+    pub unsafe fn plane_row(&self, plane_index: usize, row_index: usize) -> Option<&[u8]> {
         if !self.buffer.is_planar() || plane_index >= self.buffer.plane_count() {
             return None;
         }
@@ -687,27 +780,40 @@ impl CVPixelBufferLockGuard<'_> {
         }
         let base = self.base_address_of_plane(plane_index)?;
         let bytes_per_row = self.buffer.bytes_per_row_of_plane(plane_index);
-        Some(unsafe {
-            std::slice::from_raw_parts(base.add(row_index * bytes_per_row), bytes_per_row)
-        })
+        let plane_len = height.checked_mul(bytes_per_row)?;
+        let offset = row_index.checked_mul(bytes_per_row)?;
+        let end = offset.checked_add(bytes_per_row)?;
+        if end > plane_len || isize::try_from(bytes_per_row).is_err() {
+            return None;
+        }
+        Some(unsafe { std::slice::from_raw_parts(base.add(offset), bytes_per_row) })
     }
 
-    /// Get a specific row as a slice
+    /// Get a specific non-planar row as a slice.
     ///
     /// Returns `None` if the row index is out of bounds.
+    ///
+    /// # Safety
+    ///
+    /// For the returned reference's lifetime, the row must remain allocated,
+    /// initialized, locked, and immutable through every Rust and native alias.
     #[must_use]
-    pub fn row(&self, row_index: usize) -> Option<&[u8]> {
+    pub unsafe fn row(&self, row_index: usize) -> Option<&[u8]> {
         if row_index >= self.height() {
             return None;
         }
+        let len = self.non_planar_data_len()?;
         let ptr = self.base_address();
         if ptr.is_null() {
             return None;
         }
-        unsafe {
-            let row_ptr = ptr.add(row_index * self.bytes_per_row());
-            Some(std::slice::from_raw_parts(row_ptr, self.bytes_per_row()))
+        let bytes_per_row = self.bytes_per_row();
+        let offset = row_index.checked_mul(bytes_per_row)?;
+        let end = offset.checked_add(bytes_per_row)?;
+        if end > len || isize::try_from(bytes_per_row).is_err() {
+            return None;
         }
+        Some(unsafe { std::slice::from_raw_parts(ptr.add(offset), bytes_per_row) })
     }
 
     /// Access buffer with a standard `std::io::Cursor`
@@ -722,7 +828,8 @@ impl CVPixelBufferLockGuard<'_> {
     ///
     /// fn read_buffer(buffer: &CVPixelBuffer) {
     ///     let guard = buffer.lock(CVPixelBufferLockFlags::READ_ONLY).unwrap();
-    ///     let mut cursor = guard.cursor();
+    ///     // SAFETY: no alias can mutate or remap the bytes while the cursor lives.
+    ///     let mut cursor = unsafe { guard.cursor() }.unwrap();
     ///
     ///     // Read first 4 bytes
     ///     let mut pixel = [0u8; 4];
@@ -733,9 +840,14 @@ impl CVPixelBufferLockGuard<'_> {
     ///     cursor.seek(SeekFrom::Start(offset as u64)).unwrap();
     /// }
     /// ```
+    ///
+    /// # Safety
+    ///
+    /// The same immutability and mapping guarantees as [`Self::as_slice`] must
+    /// hold for the cursor's lifetime.
     #[must_use]
-    pub fn cursor(&self) -> io::Cursor<&[u8]> {
-        io::Cursor::new(self.as_slice())
+    pub unsafe fn cursor(&self) -> Option<io::Cursor<&[u8]>> {
+        unsafe { self.as_slice() }.map(io::Cursor::new)
     }
 
     /// Get raw pointer to buffer data
@@ -772,7 +884,7 @@ impl CVPixelBufferLockGuard<'_> {
 
 impl Drop for CVPixelBufferLockGuard<'_> {
     fn drop(&mut self) {
-        let _ = self.buffer.unlock_raw(self.flags);
+        let _ = unsafe { self.buffer.unlock_raw(self.flags) };
     }
 }
 
@@ -785,36 +897,16 @@ impl std::fmt::Debug for CVPixelBufferLockGuard<'_> {
     }
 }
 
-impl std::ops::Deref for CVPixelBufferLockGuard<'_> {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        self.as_slice()
-    }
-}
-
-impl Clone for CVPixelBuffer {
-    fn clone(&self) -> Self {
-        unsafe {
-            let ptr = ffi::cv_pixel_buffer_retain(self.0);
-            Self(ptr)
-        }
-    }
-}
-
-impl Drop for CVPixelBuffer {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe {
-                ffi::cv_pixel_buffer_release(self.0);
-            }
-        }
-    }
-}
+crate::utils::retained::cf_retained!(
+    CVPixelBuffer,
+    retain = ffi::cv_pixel_buffer_retain,
+    release = ffi::cv_pixel_buffer_release,
+);
 
 // SAFETY: `CVPixelBufferRef` is a Core Foundation type whose retain/release
-// operations are thread-safe.  Our wrapper only holds the opaque pointer; pixel
-// data access is gated behind a lock guard, so sharing across threads is safe.
+// operations are thread-safe. Our wrapper only holds the opaque pointer, and
+// native mapping operations are thread-safe. Byte dereferencing has a separate
+// unsafe contract because a lock does not establish Rust aliasing guarantees.
 unsafe impl Send for CVPixelBuffer {}
 unsafe impl Sync for CVPixelBuffer {}
 
@@ -830,14 +922,157 @@ impl fmt::Display for CVPixelBuffer {
     }
 }
 
-/// Opaque handle to `CVPixelBufferPool`
+/// Flags controlling which unused buffers a pool flushes.
 #[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct CVPixelBufferPoolFlushFlags(u64);
+
+impl CVPixelBufferPoolFlushFlags {
+    /// Flush only buffers that have aged out.
+    pub const NONE: Self = Self(0);
+
+    /// Flush every unused buffer regardless of age.
+    pub const EXCESS_BUFFERS: Self = Self(1);
+
+    /// Create flags from raw `CVOptionFlags` bits.
+    #[must_use]
+    pub const fn from_bits(bits: u64) -> Self {
+        Self(bits)
+    }
+
+    /// Return the raw `CVOptionFlags` bits.
+    #[must_use]
+    pub const fn bits(self) -> u64 {
+        self.0
+    }
+}
+
+impl std::ops::BitOr for CVPixelBufferPoolFlushFlags {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign for CVPixelBufferPoolFlushFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl From<CVPixelBufferPoolFlushFlags> for u64 {
+    fn from(flags: CVPixelBufferPoolFlushFlags) -> Self {
+        flags.bits()
+    }
+}
+
+const CV_RETURN_WOULD_EXCEED_ALLOCATION_THRESHOLD: i32 = -6689;
+const PARAM_ERR: i32 = -50;
+
 #[derive(Debug)]
-pub struct CVPixelBufferPool(*mut std::ffi::c_void);
+struct CVPixelBufferPoolPolicy {
+    max_buffers: Option<usize>,
+    allocation_attributes: Option<CFDictionary>,
+}
+
+// SAFETY: The policy is immutable after construction. Its cached dictionary is
+// immutable and only shared for Core Foundation reads and retain/release.
+#[allow(clippy::non_send_fields_in_send_ty)]
+unsafe impl Send for CVPixelBufferPoolPolicy {}
+unsafe impl Sync for CVPixelBufferPoolPolicy {}
+
+impl CVPixelBufferPoolPolicy {
+    const fn unlimited() -> Self {
+        Self {
+            max_buffers: None,
+            allocation_attributes: None,
+        }
+    }
+
+    fn new(max_buffers: usize) -> Result<Self, i32> {
+        if max_buffers == 0 {
+            return Ok(Self::unlimited());
+        }
+
+        let threshold = i64::try_from(max_buffers).map_err(|_| PARAM_ERR)?;
+        let key = retained_cf_string(
+            unsafe { raw::kCVPixelBufferPoolAllocationThresholdKey },
+            "kCVPixelBufferPoolAllocationThresholdKey",
+        );
+        let value = CFNumber::from_i64(threshold);
+        let attributes = CFDictionary::from_pairs(&[(&key, &value)]);
+
+        Ok(Self {
+            max_buffers: Some(max_buffers),
+            allocation_attributes: Some(attributes),
+        })
+    }
+
+    const fn max_buffers(&self) -> usize {
+        match self.max_buffers {
+            Some(max_buffers) => max_buffers,
+            None => 0,
+        }
+    }
+}
+
+fn retained_cf_string(ptr: raw::CFStringRef, symbol: &'static str) -> CFString {
+    unsafe { CFString::from_raw_borrowed(ptr.cast_mut().cast()) }
+        .unwrap_or_else(|| panic!("{symbol} was NULL"))
+}
+
+fn pool_pixel_buffer_attributes(
+    width: usize,
+    height: usize,
+    pixel_format: u32,
+) -> Result<CFDictionary, i32> {
+    let width = u64::try_from(width).map_err(|_| PARAM_ERR)?;
+    let height = u64::try_from(height).map_err(|_| PARAM_ERR)?;
+    let width_key = retained_cf_string(
+        unsafe { raw::kCVPixelBufferWidthKey },
+        "kCVPixelBufferWidthKey",
+    );
+    let height_key = retained_cf_string(
+        unsafe { raw::kCVPixelBufferHeightKey },
+        "kCVPixelBufferHeightKey",
+    );
+    let pixel_format_key = retained_cf_string(
+        unsafe { raw::kCVPixelBufferPixelFormatTypeKey },
+        "kCVPixelBufferPixelFormatTypeKey",
+    );
+    let io_surface_key = retained_cf_string(
+        unsafe { raw::kCVPixelBufferIOSurfacePropertiesKey },
+        "kCVPixelBufferIOSurfacePropertiesKey",
+    );
+    let width_value = CFNumber::from_u64(width);
+    let height_value = CFNumber::from_u64(height);
+    let pixel_format_value = CFNumber::from_u64(u64::from(pixel_format));
+    let io_surface_properties = CFDictionary::from_pairs(&[]);
+    let pairs: [(&dyn AsCFType, &dyn AsCFType); 4] = [
+        (&width_key, &width_value),
+        (&height_key, &height_value),
+        (&pixel_format_key, &pixel_format_value),
+        (&io_surface_key, &io_surface_properties),
+    ];
+    Ok(CFDictionary::from_pairs(&pairs))
+}
+
+/// Opaque handle to a native `CVPixelBufferPoolRef`.
+pub struct CVPixelBufferPool {
+    ptr: *mut std::ffi::c_void,
+    policy: Arc<CVPixelBufferPoolPolicy>,
+}
+
+// SAFETY: Core Video pool retain/release, allocation, and flush operations are
+// thread-safe. The wrapper's shared allocation policy is immutable and
+// thread-safe.
+unsafe impl Send for CVPixelBufferPool {}
+unsafe impl Sync for CVPixelBufferPool {}
 
 impl PartialEq for CVPixelBufferPool {
     fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
+        self.ptr == other.ptr
     }
 }
 
@@ -845,35 +1080,120 @@ impl Eq for CVPixelBufferPool {}
 
 impl std::hash::Hash for CVPixelBufferPool {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        unsafe {
-            let hash_value = ffi::cv_pixel_buffer_pool_hash(self.0);
-            hash_value.hash(state);
-        }
+        unsafe { ffi::cf_type_hash(self.ptr) }.hash(state);
     }
 }
 
 impl CVPixelBufferPool {
-    /// Wraps a +1 retained `CVPixelBufferPoolRef` and returns `None` for null.
-    pub fn from_raw(ptr: *mut std::ffi::c_void) -> Option<Self> {
+    /// Adopts a +1 retained native pool with no wrapper allocation threshold.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CVPixelBufferPoolRef` carrying one
+    /// retain transferred to this wrapper. The caller must not release or
+    /// separately adopt that transferred retain.
+    pub unsafe fn from_raw(ptr: *mut std::ffi::c_void) -> Option<Self> {
         if ptr.is_null() {
             None
         } else {
-            Some(Self(ptr))
+            Some(Self {
+                ptr,
+                policy: Arc::new(CVPixelBufferPoolPolicy::unlimited()),
+            })
         }
+    }
+
+    /// Adopts a +1 retained native pool and applies `max_buffers` to wrapper allocations.
+    ///
+    /// A zero threshold means unlimited. Native callers using [`Self::as_ptr`]
+    /// can bypass this wrapper policy.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CVPixelBufferPoolRef` carrying one
+    /// retain transferred to this wrapper. On an error, ownership remains with
+    /// the caller.
+    ///
+    /// # Errors
+    ///
+    /// Returns `paramErr` if `max_buffers` cannot be represented by Core Video.
+    pub unsafe fn from_raw_with_max_buffers(
+        ptr: *mut std::ffi::c_void,
+        max_buffers: usize,
+    ) -> Result<Option<Self>, i32> {
+        if ptr.is_null() {
+            return Ok(None);
+        }
+        let policy = Arc::new(CVPixelBufferPoolPolicy::new(max_buffers)?);
+        Ok(Some(Self { ptr, policy }))
+    }
+
+    /// Retains a +0 borrowed native pool with no wrapper allocation threshold.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CVPixelBufferPoolRef` for the duration
+    /// of the retain call.
+    #[must_use]
+    pub unsafe fn from_raw_borrowed(ptr: *mut std::ffi::c_void) -> Option<Self> {
+        if ptr.is_null() {
+            None
+        } else {
+            let retained = unsafe { raw::CVPixelBufferPoolRetain(ptr.cast()) };
+            unsafe { Self::from_raw(retained.cast()) }
+        }
+    }
+
+    /// Retains a +0 borrowed native pool and applies `max_buffers` to wrapper allocations.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CVPixelBufferPoolRef` for the duration
+    /// of the retain call.
+    ///
+    /// # Errors
+    ///
+    /// Returns `paramErr` if `max_buffers` cannot be represented by Core Video.
+    pub unsafe fn from_raw_borrowed_with_max_buffers(
+        ptr: *mut std::ffi::c_void,
+        max_buffers: usize,
+    ) -> Result<Option<Self>, i32> {
+        if ptr.is_null() {
+            return Ok(None);
+        }
+        let policy = Arc::new(CVPixelBufferPoolPolicy::new(max_buffers)?);
+        let retained = unsafe { raw::CVPixelBufferPoolRetain(ptr.cast()) };
+        Ok(Some(Self {
+            ptr: retained.cast(),
+            policy,
+        }))
     }
 
     /// Wraps a raw `CVPixelBufferPoolRef` by taking ownership without retaining it.
     ///
     /// # Safety
-    /// The caller must ensure `ptr` is a valid +1 retained `CVPixelBufferPoolRef`.
-    pub const unsafe fn from_ptr(ptr: *mut std::ffi::c_void) -> Self {
-        Self(ptr)
+    /// `ptr` must be a non-null, live `CVPixelBufferPoolRef` carrying one retain
+    /// transferred to this wrapper.
+    pub unsafe fn from_ptr(ptr: *mut std::ffi::c_void) -> Self {
+        Self {
+            ptr,
+            policy: Arc::new(CVPixelBufferPoolPolicy::unlimited()),
+        }
     }
 
-    /// Returns the wrapped raw `CVPixelBufferPoolRef`.
+    /// Borrows the raw +0 native pool pointer while `self` remains alive.
+    ///
+    /// Allocations performed directly through this pointer bypass the wrapper's
+    /// configured [`Self::max_buffers`] threshold.
     #[must_use]
     pub const fn as_ptr(&self) -> *mut std::ffi::c_void {
-        self.0
+        self.ptr
+    }
+
+    /// Wrapper-enforced allocation threshold, or zero when unlimited.
+    #[must_use]
+    pub fn max_buffers(&self) -> usize {
+        self.policy.max_buffers()
     }
 
     /// Create a new pixel buffer pool
@@ -894,155 +1214,210 @@ impl CVPixelBufferPool {
         pixel_format: u32,
         max_buffers: usize,
     ) -> Result<Self, i32> {
+        let policy = Arc::new(CVPixelBufferPoolPolicy::new(max_buffers)?);
+        let pool_attributes = CFDictionary::from_pairs(&[]);
+        let pixel_buffer_attributes = pool_pixel_buffer_attributes(width, height, pixel_format)?;
+        let mut pool_ptr: raw::CVPixelBufferPoolRef = std::ptr::null_mut();
         unsafe {
-            let mut pool_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
-            let status = ffi::cv_pixel_buffer_pool_create(
-                width,
-                height,
-                pixel_format,
-                max_buffers,
-                &mut pool_ptr,
+            let status = raw::CVPixelBufferPoolCreate(
+                std::ptr::null(),
+                pool_attributes.as_ptr().cast(),
+                pixel_buffer_attributes.as_ptr().cast(),
+                &raw mut pool_ptr,
             );
 
             if status == 0 && !pool_ptr.is_null() {
-                Ok(Self(pool_ptr))
+                Ok(Self {
+                    ptr: pool_ptr.cast(),
+                    policy,
+                })
             } else {
                 Err(status)
             }
         }
     }
 
-    /// Create a pixel buffer from the pool
+    fn create_pixel_buffer_with_dictionary(
+        &self,
+        auxiliary_attributes: Option<&CFDictionary>,
+    ) -> Result<CVPixelBuffer, i32> {
+        let mut pixel_buffer_ptr: raw::CVPixelBufferRef = std::ptr::null_mut();
+        let status = unsafe {
+            if let Some(attributes) = auxiliary_attributes {
+                raw::CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
+                    std::ptr::null(),
+                    self.ptr.cast(),
+                    attributes.as_ptr().cast(),
+                    &raw mut pixel_buffer_ptr,
+                )
+            } else {
+                raw::CVPixelBufferPoolCreatePixelBuffer(
+                    std::ptr::null(),
+                    self.ptr.cast(),
+                    &raw mut pixel_buffer_ptr,
+                )
+            }
+        };
+
+        if status == 0 && !pixel_buffer_ptr.is_null() {
+            unsafe { CVPixelBuffer::from_raw(pixel_buffer_ptr.cast()) }.ok_or(status)
+        } else {
+            Err(status)
+        }
+    }
+
+    /// Create a pixel buffer while enforcing the configured allocation threshold.
     ///
     /// # Errors
     ///
     /// Returns a Core Video error code if the buffer creation fails.
     pub fn create_pixel_buffer(&self) -> Result<CVPixelBuffer, i32> {
-        unsafe {
-            let mut pixel_buffer_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
-            let status =
-                ffi::cv_pixel_buffer_pool_create_pixel_buffer(self.0, &mut pixel_buffer_ptr);
-
-            if status == 0 && !pixel_buffer_ptr.is_null() {
-                Ok(CVPixelBuffer(pixel_buffer_ptr))
-            } else {
-                Err(status)
-            }
-        }
+        self.create_pixel_buffer_with_dictionary(self.policy.allocation_attributes.as_ref())
     }
 
-    /// Flush the pixel buffer pool
-    ///
-    /// Releases all available pixel buffers in the pool
+    /// Flush buffers that have aged out of the pool.
     pub fn flush(&self) {
-        unsafe {
-            ffi::cv_pixel_buffer_pool_flush(self.0);
-        }
+        self.flush_with_flags(CVPixelBufferPoolFlushFlags::NONE);
+    }
+
+    /// Flush unused buffers according to native Core Video flags.
+    pub fn flush_with_flags(&self, flags: CVPixelBufferPoolFlushFlags) {
+        unsafe { raw::CVPixelBufferPoolFlush(self.ptr.cast(), flags.bits()) };
+    }
+
+    /// Flush every unused buffer regardless of age.
+    pub fn flush_excess_buffers(&self) {
+        self.flush_with_flags(CVPixelBufferPoolFlushFlags::EXCESS_BUFFERS);
     }
 
     /// Get the Core Foundation type ID for `CVPixelBufferPool`
     #[must_use]
     pub fn type_id() -> usize {
-        unsafe { ffi::cv_pixel_buffer_pool_get_type_id() }
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            unsafe { raw::CVPixelBufferPoolGetTypeID() as usize }
+        }
     }
 
-    /// Create a pixel buffer from the pool with auxiliary attributes
+    /// Create a pixel buffer from the pool with per-call auxiliary attributes.
     ///
-    /// This allows specifying additional attributes for the created buffer
+    /// String keys become `CFString` keys and values become `CFNumber` values.
+    /// A per-call allocation threshold can tighten but not loosen the
+    /// threshold configured when the wrapper was created.
     ///
     /// # Errors
     ///
-    /// Returns a Core Video error code if the buffer creation fails.
+    /// Returns `paramErr` for an attribute key containing a NUL byte or an
+    /// unrepresentable threshold, otherwise returns the Core Video allocation
+    /// status.
     pub fn create_pixel_buffer_with_aux_attributes(
         &self,
-        aux_attributes: Option<&std::collections::HashMap<String, u32>>,
+        aux_attributes: Option<&HashMap<String, u32>>,
     ) -> Result<CVPixelBuffer, i32> {
-        // For now, ignore aux_attributes since we don't have a way to pass them through
-        // In a full implementation, this would convert the HashMap to a CFDictionary
-        let _ = aux_attributes;
-        self.create_pixel_buffer()
-    }
+        let Some(aux_attributes) = aux_attributes.filter(|attributes| !attributes.is_empty())
+        else {
+            return self.create_pixel_buffer();
+        };
 
-    /// Try to create a pixel buffer from the pool without blocking
-    ///
-    /// Returns None if no buffers are available
-    #[must_use]
-    pub fn try_create_pixel_buffer(&self) -> Option<CVPixelBuffer> {
-        self.create_pixel_buffer().ok()
-    }
+        let threshold_key = retained_cf_string(
+            unsafe { raw::kCVPixelBufferPoolAllocationThresholdKey },
+            "kCVPixelBufferPoolAllocationThresholdKey",
+        );
+        let mut keys = Vec::with_capacity(aux_attributes.len() + 1);
+        let mut values = Vec::with_capacity(aux_attributes.len() + 1);
+        let mut requested_threshold = None;
 
-    /// Flush the pool with specific options
-    ///
-    /// Releases buffers based on the provided flags
-    pub fn flush_with_options(&self, _flags: u32) {
-        // For now, just call regular flush
-        // In a full implementation, this would pass flags to the Swift side
-        self.flush();
-    }
-
-    /// Check if the pool is empty (no available buffers)
-    ///
-    /// Note: This is an approximation based on whether we can create a buffer
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.try_create_pixel_buffer().is_none()
-    }
-
-    /// Get the pool attributes
-    ///
-    /// Returns the raw pointer to the `CFDictionary` containing pool attributes
-    #[must_use]
-    pub fn attributes(&self) -> Option<*const std::ffi::c_void> {
-        unsafe {
-            let ptr = ffi::cv_pixel_buffer_pool_get_attributes(self.0);
-            if ptr.is_null() {
-                None
-            } else {
-                Some(ptr)
+        for (key, value) in aux_attributes {
+            if key.as_bytes().contains(&0) {
+                return Err(PARAM_ERR);
             }
+            let key = CFString::new(key);
+            if key == threshold_key {
+                requested_threshold = Some(usize::try_from(*value).map_err(|_| PARAM_ERR)?);
+            } else {
+                keys.push(key);
+                values.push(CFNumber::from_u64(u64::from(*value)));
+            }
+        }
+
+        let effective_threshold = match (self.policy.max_buffers, requested_threshold) {
+            (Some(configured), Some(requested)) => Some(configured.min(requested)),
+            (Some(configured), None) => Some(configured),
+            (None, requested) => requested,
+        };
+
+        if let Some(threshold) = effective_threshold {
+            let threshold = i64::try_from(threshold).map_err(|_| PARAM_ERR)?;
+            keys.push(threshold_key);
+            values.push(CFNumber::from_i64(threshold));
+        }
+
+        let pairs: Vec<(&dyn AsCFType, &dyn AsCFType)> = keys
+            .iter()
+            .zip(&values)
+            .map(|(key, value)| (key as &dyn AsCFType, value as &dyn AsCFType))
+            .collect();
+        let attributes = CFDictionary::from_pairs(&pairs);
+        self.create_pixel_buffer_with_dictionary(Some(&attributes))
+    }
+
+    /// Try to create a pixel buffer without exceeding the allocation threshold.
+    ///
+    /// Only `kCVReturnWouldExceedAllocationThreshold` maps to `Ok(None)`;
+    /// every other Core Video error is preserved.
+    ///
+    /// # Errors
+    ///
+    /// Returns any Core Video allocation error other than threshold exhaustion.
+    pub fn try_create_pixel_buffer(&self) -> Result<Option<CVPixelBuffer>, i32> {
+        match self.create_pixel_buffer() {
+            Ok(buffer) => Ok(Some(buffer)),
+            Err(CV_RETURN_WOULD_EXCEED_ALLOCATION_THRESHOLD) => Ok(None),
+            Err(status) => Err(status),
         }
     }
 
-    /// Get the pixel buffer attributes
-    ///
-    /// Returns the raw pointer to the `CFDictionary` containing pixel buffer attributes
+    /// Copy the pool attributes into an independently owned dictionary.
     #[must_use]
-    pub fn pixel_buffer_attributes(&self) -> Option<*const std::ffi::c_void> {
-        unsafe {
-            let ptr = ffi::cv_pixel_buffer_pool_get_pixel_buffer_attributes(self.0);
-            if ptr.is_null() {
-                None
-            } else {
-                Some(ptr)
-            }
-        }
+    pub fn attributes(&self) -> Option<CFDictionary> {
+        let ptr = unsafe { raw::CVPixelBufferPoolGetAttributes(self.ptr.cast()) };
+        unsafe { CFDictionary::from_raw_borrowed(ptr.cast_mut().cast()) }
+    }
+
+    /// Copy the pixel-buffer attributes into an independently owned dictionary.
+    #[must_use]
+    pub fn pixel_buffer_attributes(&self) -> Option<CFDictionary> {
+        let ptr = unsafe { raw::CVPixelBufferPoolGetPixelBufferAttributes(self.ptr.cast()) };
+        unsafe { CFDictionary::from_raw_borrowed(ptr.cast_mut().cast()) }
     }
 }
 
 impl Clone for CVPixelBufferPool {
     fn clone(&self) -> Self {
-        unsafe {
-            let ptr = ffi::cv_pixel_buffer_pool_retain(self.0);
-            Self(ptr)
+        let ptr = unsafe { raw::CVPixelBufferPoolRetain(self.ptr.cast()) };
+        Self {
+            ptr: ptr.cast(),
+            policy: Arc::clone(&self.policy),
         }
     }
 }
 
 impl Drop for CVPixelBufferPool {
     fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe {
-                ffi::cv_pixel_buffer_pool_release(self.0);
-            }
+        if !self.ptr.is_null() {
+            unsafe { raw::CVPixelBufferPoolRelease(self.ptr.cast()) };
         }
     }
 }
 
-// SAFETY: `CVPixelBufferPoolRef` is a Core Foundation type whose retain/release
-// operations are thread-safe.  Pool creation and pixel-buffer allocation use
-// Apple's thread-safe primitives.
-unsafe impl Send for CVPixelBufferPool {}
-unsafe impl Sync for CVPixelBufferPool {}
+impl fmt::Debug for CVPixelBufferPool {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CVPixelBufferPool")
+            .field("ptr", &self.ptr)
+            .field("max_buffers", &self.max_buffers())
+            .finish_non_exhaustive()
+    }
+}
 
 impl fmt::Display for CVPixelBufferPool {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

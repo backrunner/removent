@@ -64,6 +64,9 @@ pub enum UiEvent {
         generation: usize,
         stage: ConnectionStage,
     },
+    ClientRecovery {
+        generation: usize,
+    },
     SessionReady {
         generation: usize,
         codec: String,
@@ -126,6 +129,7 @@ impl UiEvent {
             | Self::ClientNeedsPin { generation, .. }
             | Self::ConfirmCertificate { generation, .. }
             | Self::ConnectionProgress { generation, .. }
+            | Self::ClientRecovery { generation, .. }
             | Self::SessionReady { generation, .. }
             | Self::ConnectFailed { generation, .. }
             | Self::SessionClosed { generation, .. } => *generation == current,
@@ -141,6 +145,8 @@ struct ClientChannels {
     generation: usize,
     geometry: Option<(u32, u32)>,
     frames: Option<removent_core::latest::Receiver<VideoFrame>>,
+    frames_tx: Option<removent_core::latest::Sender<VideoFrame>>,
+    recovery: removent_client::recovery::Recovery,
     cmd: Option<ClientCommands>,
     codec: String,
 }
@@ -190,6 +196,8 @@ impl ClientChannels {
     fn invalidate(&mut self) -> usize {
         self.generation += 1;
         self.frames = None;
+        self.frames_tx = None;
+        self.recovery = Default::default();
         self.geometry = None;
         self.cmd = None;
         self.codec.clear();
@@ -201,6 +209,7 @@ impl ClientChannels {
 struct ClientAttempt {
     generation: usize,
     started: std::time::Instant,
+    recovery: removent_client::recovery::Recovery,
     channels: Arc<Mutex<ClientChannels>>,
     events: std::sync::mpsc::Sender<UiEvent>,
 }
@@ -224,7 +233,9 @@ impl ClientAttempt {
         })
     }
     fn progress(&self, stage: ConnectionStage) {
-        if self.channels.lock().unwrap().generation == self.generation {
+        if self.channels.lock().unwrap().generation == self.generation
+            && !self.recovery.has_connected()
+        {
             tracing::info!(
                 attempt = self.generation,
                 ?stage,
@@ -252,12 +263,18 @@ impl ClientAttempt {
             channels.generation == self.generation,
             "Connection cancelled"
         );
-        let (tx, rx) = removent_core::latest::channel();
-        channels.frames = Some(rx);
+        let first = channels.frames_tx.is_none();
+        if first {
+            let (tx, rx) = removent_core::latest::channel();
+            channels.frames = Some(rx);
+            channels.frames_tx = Some(tx);
+        }
+        let tx = channels.frames_tx.as_ref().unwrap().clone();
         channels.geometry = None;
         channels.cmd = Some(cmd.into());
         channels.codec = codec.clone();
         tracing::info!(attempt = self.generation, elapsed_ms = self.started.elapsed().as_millis() as u64, %codec, "remote session ready");
+        self.recovery.connected();
         let _ = self.events.send(UiEvent::SessionReady {
             generation: self.generation,
             codec,
@@ -272,23 +289,14 @@ impl ClientAttempt {
         }
     }
 
-    fn resume(&self, cmd: impl Into<ClientCommands>) -> Result<()> {
-        let mut channels = self.channels.lock().unwrap();
-        anyhow::ensure!(
-            channels.generation == self.generation,
-            "Connection cancelled"
-        );
-        channels.geometry = None;
-        channels.cmd = Some(cmd.into());
-        Ok(())
-    }
-
     fn finish(&self, error: Option<String>) {
         let mut channels = self.channels.lock().unwrap();
         if channels.generation != self.generation {
             return;
         }
         channels.cmd = None;
+        self.recovery.finish(error.clone());
+        channels.frames_tx = None;
         let event = match error {
             Some(error) => {
                 tracing::warn!(attempt = self.generation, elapsed_ms = self.started.elapsed().as_millis() as u64, %error, "connection or session failed");
@@ -441,6 +449,19 @@ impl Engine {
             Settings::default(),
         );
         engine.client_channels.lock().unwrap().cmd = Some(ClientCommands::Standard(cmd));
+        engine.client_channels.lock().unwrap().recovery.connected();
+        engine
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_ui_test(
+        paths: DataPaths,
+        cmd: tokio::sync::mpsc::Sender<ControlMsg>,
+    ) -> Self {
+        let engine = Self::for_viewer_test(paths, cmd);
+        // Visual tests inject UiEvent directly. Keep OS/Tokio event producers
+        // out of GPUI's deterministic foreground scheduler.
+        engine.events_rx.lock().unwrap().take();
         engine
     }
 }
@@ -477,6 +498,8 @@ mod native;
 /// Audio forwarding must stop even when the UI aborts the connection task.
 /// Translate common VNC failures while keeping uncommon protocol details available.
 mod preferences;
+#[cfg(test)]
+mod recovery_tests;
 mod saved;
 #[cfg(test)]
 mod tests;

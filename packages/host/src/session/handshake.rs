@@ -537,7 +537,7 @@ pub(super) async fn run_pairing(
 
 pub(super) fn new_token() -> [u8; 16] {
     let mut t = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut t);
+    rand::rng().fill_bytes(&mut t);
     t
 }
 
@@ -578,7 +578,7 @@ async fn run_authentication(
         let totp = cfg.authentication.totp().map_err(HostError::Rejected)?;
         [step.saturating_sub(1), step, step + 1]
             .into_iter()
-            .map(|step| (step, totp.generate(step * 30)))
+            .map(|step| (step, totp.generate(step * 30).to_string()))
             .collect()
     };
     let mut states = Vec::new();

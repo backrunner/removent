@@ -6,7 +6,7 @@
 //! use apple_cf::cm::{CMClock, CMTime, CMTimebase};
 //!
 //! let clock = CMClock::host_time_clock();
-//! let timebase = CMTimebase::with_master_clock(&clock).expect("timebase");
+//! let timebase = CMTimebase::with_source_clock(&clock).expect("timebase");
 //! assert!(timebase.time().is_valid());
 //! assert_eq!(timebase.set_rate(1.0), 0);
 //! assert_eq!(timebase.set_time(CMTime::new(0, 600)), 0);
@@ -22,18 +22,18 @@ pub struct CMTimebase {
 }
 
 impl CMTimebase {
-    /// Create a timebase that uses `master_clock` as its time source.
-    pub fn with_master_clock(master_clock: &CMClock) -> Result<Self, i32> {
+    /// Create a timebase that uses `source_clock` as its time source.
+    pub fn with_source_clock(source_clock: &CMClock) -> Result<Self, i32> {
         extern "C" {
-            fn CMTimebaseCreateWithMasterClock(
+            fn CMTimebaseCreateWithSourceClock(
                 allocator: *const c_void,
-                masterClock: *const c_void,
+                sourceClock: *const c_void,
                 timebaseOut: *mut *const c_void,
             ) -> i32;
         }
         let mut ptr = std::ptr::null();
         let status = unsafe {
-            CMTimebaseCreateWithMasterClock(std::ptr::null(), master_clock.as_ptr(), &mut ptr)
+            CMTimebaseCreateWithSourceClock(std::ptr::null(), source_clock.as_ptr(), &raw mut ptr)
         };
         if status == 0 && !ptr.is_null() {
             Ok(Self { ptr })
@@ -42,9 +42,15 @@ impl CMTimebase {
         }
     }
 
-    /// Wraps a +1 retained `CMTimebaseRef` and returns `None` for null.
+    /// Adopts a +1 retained `CMTimebaseRef` and returns `None` for null.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CMTimebaseRef` of the exact type
+    /// carrying one retain transferred to this wrapper. The caller must not
+    /// release or separately adopt that transferred retain.
     #[must_use]
-    pub fn from_raw(ptr: *const c_void) -> Option<Self> {
+    pub unsafe fn from_raw(ptr: *const c_void) -> Option<Self> {
         if ptr.is_null() {
             None
         } else {
@@ -52,7 +58,26 @@ impl CMTimebase {
         }
     }
 
-    /// Borrow the underlying `CMTimebaseRef`.
+    /// Retains a +0 borrowed `CMTimebaseRef` and returns an owned wrapper.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CMTimebaseRef` of the exact type for
+    /// the duration of the retain call.
+    #[must_use]
+    pub unsafe fn from_raw_borrowed(ptr: *const c_void) -> Option<Self> {
+        if ptr.is_null() {
+            None
+        } else {
+            extern "C" {
+                fn CFRetain(cf: *const c_void) -> *const c_void;
+            }
+            let retained = unsafe { CFRetain(ptr) };
+            unsafe { Self::from_raw(retained) }
+        }
+    }
+
+    /// Borrow the underlying +0 `CMTimebaseRef` while `self` remains alive.
     #[must_use]
     pub const fn as_ptr(&self) -> *const c_void {
         self.ptr
@@ -76,7 +101,7 @@ impl CMTimebase {
         unsafe { CMTimebaseSetTime(self.ptr, time) }
     }
 
-    /// Playback rate relative to the master clock.
+    /// Playback rate relative to the source clock.
     #[must_use]
     pub fn rate(&self) -> f64 {
         extern "C" {
@@ -85,7 +110,7 @@ impl CMTimebase {
         unsafe { CMTimebaseGetRate(self.ptr) }
     }
 
-    /// Set the playback rate relative to the master clock.
+    /// Set the playback rate relative to the source clock.
     #[must_use]
     pub fn set_rate(&self, rate: f64) -> i32 {
         extern "C" {
@@ -94,14 +119,14 @@ impl CMTimebase {
         unsafe { CMTimebaseSetRate(self.ptr, rate) }
     }
 
-    /// Copy the master clock.
+    /// Copy the source clock.
     #[must_use]
-    pub fn master_clock(&self) -> Option<CMClock> {
+    pub fn source_clock(&self) -> Option<CMClock> {
         extern "C" {
-            fn CMTimebaseCopyMasterClock(timebase: *const c_void) -> *const c_void;
+            fn CMTimebaseCopySourceClock(timebase: *const c_void) -> *const c_void;
         }
-        let ptr = unsafe { CMTimebaseCopyMasterClock(self.ptr) };
-        CMClock::from_raw(ptr)
+        let ptr = unsafe { CMTimebaseCopySourceClock(self.ptr) };
+        unsafe { CMClock::from_raw(ptr) }
     }
 }
 

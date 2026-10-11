@@ -70,9 +70,12 @@ fn attempt(
     channels: &Arc<Mutex<ClientChannels>>,
     events: &std::sync::mpsc::Sender<UiEvent>,
 ) -> ClientAttempt {
+    let generation = channels.lock().unwrap().invalidate();
+    let recovery = channels.lock().unwrap().recovery.clone();
     ClientAttempt {
-        generation: channels.lock().unwrap().invalidate(),
+        generation,
         started: std::time::Instant::now(),
+        recovery,
         channels: channels.clone(),
         events: events.clone(),
     }
@@ -90,7 +93,7 @@ fn reconnect_pauses_input_without_invalidating_viewer_or_new_attempt() {
     assert!(channels.lock().unwrap().frames.is_some());
     let (cmd, _cmd_rx) = tokio::sync::mpsc::channel(4);
     channels.lock().unwrap().geometry = Some((160, 120));
-    old.resume(cmd).unwrap();
+    old.publish(cmd, "test".into()).unwrap();
     assert!(
         channels.lock().unwrap().geometry.is_none(),
         "resume must resend viewer geometry"
@@ -101,6 +104,51 @@ fn reconnect_pauses_input_without_invalidating_viewer_or_new_attempt() {
     let _frames = new.publish(cmd, "test".into()).unwrap();
     old.pause_input();
     assert!(channels.lock().unwrap().cmd.is_some());
+}
+
+#[test]
+fn reconnect_keeps_the_original_viewer_frame_channel_and_reports_final_error() {
+    let channels = Arc::new(Mutex::new(ClientChannels::default()));
+    let (events, _rx) = std::sync::mpsc::channel();
+    let attempt = attempt(&channels, &events);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let (cmd, _cmd_rx) = tokio::sync::mpsc::channel(4);
+        let original = attempt.publish(cmd, "VNC".into()).unwrap();
+        let mut frames = channels.lock().unwrap().frames.take().unwrap();
+        drop(original);
+        attempt.pause_input();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(10), frames.recv())
+                .await
+                .is_err()
+        );
+        let (cmd, _cmd_rx) = tokio::sync::mpsc::channel(4);
+        let replacement = attempt.publish(cmd, "VNC".into()).unwrap();
+        assert!(
+            channels.lock().unwrap().frames.is_none(),
+            "must not open a second viewer"
+        );
+        replacement
+            .send(VideoFrame {
+                width: 1,
+                height: 1,
+                data: vec![3; 4],
+                pts_us: 0,
+            })
+            .unwrap();
+        assert_eq!(frames.recv().await.unwrap().data, vec![3; 4]);
+        drop(replacement);
+        attempt.finish(Some("retry budget exhausted".into()));
+        assert!(matches!(
+            attempt.recovery.state(),
+            removent_client::recovery::State::Failed(_)
+        ));
+        assert!(frames.recv().await.is_none());
+    });
 }
 
 #[test]
@@ -177,6 +225,7 @@ fn cancellation_invalidates_queued_progress_ready_pin_and_failure_events() {
     let (events, rx) = std::sync::mpsc::channel();
     let old = attempt(&channels, &events);
     let (cmd, _) = tokio::sync::mpsc::channel(1);
+    old.progress(ConnectionStage::Authenticating);
     let frames = old.publish(cmd, "RDP".into()).unwrap();
     let (tx, _) = tokio::sync::oneshot::channel();
     events
@@ -186,7 +235,6 @@ fn cancellation_invalidates_queued_progress_ready_pin_and_failure_events() {
             tx,
         })
         .unwrap();
-    old.progress(ConnectionStage::Authenticating);
     old.finish(Some("old failure".into()));
 
     let cancelled = channels.lock().unwrap().invalidate();
@@ -210,7 +258,6 @@ fn cancelled_task_cannot_publish_or_clear_replacement_channels() {
     let (cmd, _) = tokio::sync::mpsc::channel(1);
     let current_frames = current.publish(cmd.clone(), "RDP".into()).unwrap();
     assert!(old.publish(cmd.clone(), "VNC".into()).is_err());
-    assert!(old.resume(cmd.clone()).is_err());
     old.progress(ConnectionStage::PreparingDesktop);
     old.finish(Some("cancelled task failed".into()));
     assert!(!current_frames.is_closed());

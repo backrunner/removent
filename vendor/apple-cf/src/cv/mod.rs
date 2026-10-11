@@ -13,5 +13,5 @@ pub use buffer::{CVAttachmentMode, CVBuffer, CVImageBuffer, CVImageRect, CVImage
 pub use metal_texture_cache::CVMetalTextureCache;
 pub use pixel_buffer::{
     CVPixelBuffer, CVPixelBufferLockFlags, CVPixelBufferLockGuard, CVPixelBufferPool,
-    PixelBufferCursorExt,
+    CVPixelBufferPoolFlushFlags, PixelBufferCursorExt,
 };

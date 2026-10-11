@@ -2,6 +2,72 @@ use super::*;
 use gpui::{AnyView, TestAppContext};
 
 #[gpui::test]
+fn quick_discovery_enable_persists_and_keeps_retry_available_on_save_failure(
+    cx: &mut TestAppContext,
+) {
+    cx.update(gpui_component::init);
+    let directory = tempfile::tempdir().unwrap();
+    let paths = removent_core::DataPaths {
+        root: directory.path().into(),
+    };
+    let (commands, _rx) = tokio::sync::mpsc::channel(1);
+    let engine = Engine::for_ui_test(paths.clone(), commands);
+    engine
+        .update_settings(|s| {
+            s.discovery.removent = false;
+            s.discovery.vnc = false;
+            s.discovery.rdp = false;
+            s.host_enabled = false;
+        })
+        .unwrap();
+    let before = engine.settings();
+    let slot = Rc::new(std::cell::RefCell::new(None));
+    let out = slot.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        let view = cx.new(|cx| HomeView::new(engine, window, cx));
+        *out.borrow_mut() = Some(view.clone());
+        gpui_component::Root::new(AnyView::from(view), window, cx)
+    });
+    let view = slot.borrow_mut().take().unwrap();
+    cx.simulate_resize(gpui::size(px(860.), px(600.)));
+    cx.run_until_parked();
+
+    // A failed disk write must leave the disabled state and its retry action intact.
+    std::fs::remove_file(paths.settings_file()).unwrap();
+    std::fs::create_dir(paths.settings_file()).unwrap();
+    let bounds = cx.debug_bounds("enable-discovery").unwrap();
+    assert!(bounds.left() >= px(16.) && bounds.right() <= px(212.));
+    assert!(bounds.bottom() <= px(600.));
+    cx.simulate_mouse_move(bounds.center(), None, Default::default());
+    cx.simulate_click(bounds.center(), Default::default());
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let state = view.read(cx);
+        assert_eq!(state.engine.settings().discovery, before.discovery);
+        assert!(matches!(state.status_tone, StatusTone::Err));
+    });
+    assert!(cx.debug_bounds("enable-discovery").is_some());
+
+    std::fs::remove_dir(paths.settings_file()).unwrap();
+    before.save(&paths).unwrap();
+    let bounds = cx.debug_bounds("enable-discovery").unwrap();
+    cx.simulate_mouse_move(bounds.center(), None, Default::default());
+    cx.simulate_click(bounds.center(), Default::default());
+    cx.run_until_parked();
+    let saved = removent_core::Settings::load(&paths).unwrap();
+    assert!(saved.discovery.removent && saved.discovery.vnc && saved.discovery.rdp);
+    assert_eq!(saved.host_enabled, before.host_enabled);
+    assert_eq!(saved.vnc_enabled, before.vnc_enabled);
+    assert!(cx.debug_bounds("enable-discovery").is_none());
+    cx.update(|_, cx| {
+        let state = view.read(cx);
+        assert_eq!(state.engine.settings().discovery, saved.discovery);
+        assert!(matches!(state.status_tone, StatusTone::Ok));
+        assert!(!state.settings_open);
+    });
+}
+
+#[gpui::test]
 fn settings_sidebar_switches_sections_and_preserves_device_selection(cx: &mut TestAppContext) {
     cx.update(gpui_component::init);
     let directory = tempfile::tempdir().unwrap();
@@ -9,7 +75,7 @@ fn settings_sidebar_switches_sections_and_preserves_device_selection(cx: &mut Te
         root: directory.path().into(),
     };
     let (commands, _rx) = tokio::sync::mpsc::channel(1);
-    let engine = Engine::for_viewer_test(paths, commands);
+    let engine = Engine::for_ui_test(paths, commands);
     let slot = Rc::new(std::cell::RefCell::new(None));
     let out = slot.clone();
     let (_, cx) = cx.add_window_view(move |window, cx| {
@@ -78,7 +144,7 @@ fn cloud_sync_switch_persists_without_requiring_cloud_access(cx: &mut TestAppCon
         root: directory.path().into(),
     };
     let (commands, _rx) = tokio::sync::mpsc::channel(1);
-    let engine = Engine::for_viewer_test(paths.clone(), commands);
+    let engine = Engine::for_ui_test(paths.clone(), commands);
     let (_, cx) = cx.add_window_view(move |window, cx| {
         let view = cx.new(|cx| HomeView::new(engine, window, cx));
         view.update(cx, |view, _| {
@@ -117,7 +183,7 @@ fn update_channel_controls_persist_and_ignore_obsolete_ready_events(cx: &mut Tes
         root: directory.path().into(),
     };
     let (commands, _rx) = tokio::sync::mpsc::channel(1);
-    let engine = Engine::for_viewer_test(paths.clone(), commands);
+    let engine = Engine::for_ui_test(paths.clone(), commands);
     // curl rejects non-HTTPS before connecting; UI tests never hit GitHub.
     engine
         .update_settings(|s| s.update_endpoint = "http://127.0.0.1:1/latest.json".into())
@@ -177,7 +243,7 @@ fn discovery_switches_persist_independently_and_remove_disabled_rows(cx: &mut Te
         root: directory.path().into(),
     };
     let (commands, _rx) = tokio::sync::mpsc::channel(1);
-    let engine = Engine::for_viewer_test(paths.clone(), commands);
+    let engine = Engine::for_ui_test(paths.clone(), commands);
     let slot = Rc::new(std::cell::RefCell::new(None));
     let out = slot.clone();
     let (_, cx) = cx.add_window_view(move |window, cx| {
@@ -273,7 +339,7 @@ fn authentication_settings_persist_each_mode_and_require_password(cx: &mut TestA
     };
     let read_paths = paths.clone();
     let (commands, _rx) = tokio::sync::mpsc::channel(1);
-    let engine = Engine::for_viewer_test(paths, commands);
+    let engine = Engine::for_ui_test(paths, commands);
     let slot = Rc::new(std::cell::RefCell::new(None));
     let out = slot.clone();
     let (_, cx) = cx.add_window_view(move |window, cx| {
@@ -342,7 +408,7 @@ fn certificate_confirmation_requires_a_click_and_rejects_stale_events(cx: &mut T
         root: directory.path().into(),
     };
     let (commands, _rx) = tokio::sync::mpsc::channel(1);
-    let engine = Engine::for_viewer_test(paths, commands);
+    let engine = Engine::for_ui_test(paths, commands);
     let slot = Rc::new(std::cell::RefCell::new(None));
     let out = slot.clone();
     let (_, cx) = cx.add_window_view(move |window, cx| {

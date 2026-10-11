@@ -68,8 +68,8 @@ public func cm_sample_buffer_get_format_description(
     return Unmanaged.passUnretained(fd).toOpaque()
 }
 
-@_cdecl("cm_sample_buffer_get_image_buffer")
-public func cm_sample_buffer_get_image_buffer(
+@_cdecl("cm_sample_buffer_copy_image_buffer")
+public func cm_sample_buffer_copy_image_buffer(
     _ buffer: UnsafeMutableRawPointer
 ) -> UnsafeMutableRawPointer? {
     let buf = Unmanaged<CMSampleBuffer>.fromOpaque(buffer).takeUnretainedValue()
@@ -142,6 +142,129 @@ public func cm_sample_buffer_is_valid(_ buffer: UnsafeMutableRawPointer) -> Bool
 public func cm_sample_buffer_data_is_ready(_ buffer: UnsafeMutableRawPointer) -> Bool {
     let buf = Unmanaged<CMSampleBuffer>.fromOpaque(buffer).takeUnretainedValue()
     return CMSampleBufferDataIsReady(buf)
+}
+
+@_cdecl("acf_cm_sample_buffer_copy_sample_attachments")
+public func acf_cm_sample_buffer_copy_sample_attachments(_ sampleBuffer: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer? {
+    let buffer = Unmanaged<CMSampleBuffer>.fromOpaque(sampleBuffer).takeUnretainedValue()
+    guard let attachments = CMSampleBufferGetSampleAttachmentsArray(buffer, createIfNecessary: false) else {
+        return nil
+    }
+    return Unmanaged.passRetained(attachments).toOpaque()
+}
+
+@_cdecl("acf_cm_sample_buffer_is_sync_sample")
+public func acf_cm_sample_buffer_is_sync_sample(_ sampleBuffer: UnsafeMutableRawPointer) -> Bool {
+    let buffer = Unmanaged<CMSampleBuffer>.fromOpaque(sampleBuffer).takeUnretainedValue()
+    guard let attachments = CMSampleBufferGetSampleAttachmentsArray(buffer, createIfNecessary: false),
+          CFArrayGetCount(attachments) > 0,
+          let first = CFArrayGetValueAtIndex(attachments, 0) else {
+        return true
+    }
+    let firstObject = Unmanaged<AnyObject>.fromOpaque(first).takeUnretainedValue()
+    guard CFGetTypeID(firstObject) == CFDictionaryGetTypeID() else { return true }
+    let dictionary = unsafeBitCast(firstObject, to: CFDictionary.self)
+    let key = Unmanaged.passUnretained(kCMSampleAttachmentKey_NotSync).toOpaque()
+    guard let value = CFDictionaryGetValue(dictionary, key) else { return true }
+    let valueObject = Unmanaged<AnyObject>.fromOpaque(value).takeUnretainedValue()
+    guard CFGetTypeID(valueObject) == CFBooleanGetTypeID() else { return false }
+    return !CFBooleanGetValue(unsafeBitCast(valueObject, to: CFBoolean.self))
+}
+
+@_cdecl("acf_cm_sample_buffer_copy_audio_buffer_list")
+public func acf_cm_sample_buffer_copy_audio_buffer_list(
+    _ sampleBuffer: UnsafeMutableRawPointer,
+    _ outNumBuffers: UnsafeMutablePointer<UInt32>,
+    _ outBuffers: UnsafeMutablePointer<UnsafeMutableRawPointer?>,
+    _ outBuffersLen: UnsafeMutablePointer<Int>,
+    _ outBlockBuffer: UnsafeMutablePointer<UnsafeMutableRawPointer?>
+) -> Int32 {
+    outNumBuffers.pointee = 0
+    outBuffers.pointee = nil
+    outBuffersLen.pointee = 0
+    outBlockBuffer.pointee = nil
+    let buffer = Unmanaged<CMSampleBuffer>.fromOpaque(sampleBuffer).takeUnretainedValue()
+    let parameterError: Int32 = -50
+
+    var sizeNeeded = 0
+    var status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+        buffer,
+        bufferListSizeNeededOut: &sizeNeeded,
+        bufferListOut: nil,
+        bufferListSize: 0,
+        blockBufferAllocator: nil,
+        blockBufferMemoryAllocator: nil,
+        flags: 0,
+        blockBufferOut: nil
+    )
+    guard status == noErr else { return status }
+    guard sizeNeeded >= MemoryLayout<AudioBufferList>.size,
+          let buffersOffset = MemoryLayout<AudioBufferList>.offset(of: \AudioBufferList.mBuffers) else {
+        return parameterError
+    }
+
+    let storage = UnsafeMutableRawPointer.allocate(byteCount: sizeNeeded, alignment: 16)
+    defer { storage.deallocate() }
+    let list = storage.bindMemory(to: AudioBufferList.self, capacity: 1)
+    var blockBuffer: CMBlockBuffer?
+    status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+        buffer,
+        bufferListSizeNeededOut: nil,
+        bufferListOut: list,
+        bufferListSize: sizeNeeded,
+        blockBufferAllocator: nil,
+        blockBufferMemoryAllocator: nil,
+        flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment,
+        blockBufferOut: &blockBuffer
+    )
+    guard status == noErr else { return status }
+    guard let blockBuffer else { return parameterError }
+
+    let count = Int(list.pointee.mNumberBuffers)
+    let stride = MemoryLayout<AudioBuffer>.stride
+    let (entriesBytes, entriesOverflow) = count.multipliedReportingOverflow(by: stride)
+    let (entriesEnd, endOverflow) = buffersOffset.addingReportingOverflow(entriesBytes)
+    guard count > 0, !entriesOverflow, !endOverflow, entriesEnd <= sizeNeeded else {
+        return parameterError
+    }
+
+    var lengthAtOffset = 0
+    var dataPointer: UnsafeMutablePointer<CChar>?
+    status = CMBlockBufferGetDataPointer(
+        blockBuffer,
+        atOffset: 0,
+        lengthAtOffsetOut: &lengthAtOffset,
+        totalLengthOut: nil,
+        dataPointerOut: &dataPointer
+    )
+    guard status == noErr else { return status }
+    let blockStart = UInt(bitPattern: dataPointer)
+    let (blockEnd, blockOverflow) = blockStart.addingReportingOverflow(UInt(clamping: lengthAtOffset))
+    guard dataPointer != nil, !blockOverflow else { return parameterError }
+
+    let bridged = UnsafeMutablePointer<AudioBufferBridge>.allocate(capacity: count)
+    let entries = UnsafeRawPointer(storage).advanced(by: buffersOffset)
+    for index in 0..<count {
+        let entry = entries.load(fromByteOffset: index * stride, as: AudioBuffer.self)
+        let start = UInt(bitPattern: entry.mData)
+        let available = entry.mData != nil && start >= blockStart && start <= blockEnd ? blockEnd - start : 0
+        bridged[index] = AudioBufferBridge(
+            number_channels: entry.mNumberChannels,
+            data_bytes_size: UInt32(clamping: min(UInt(entry.mDataByteSize), available)),
+            data_ptr: available == 0 ? nil : entry.mData
+        )
+    }
+
+    outNumBuffers.pointee = UInt32(clamping: count)
+    outBuffers.pointee = UnsafeMutableRawPointer(bridged)
+    outBuffersLen.pointee = count
+    outBlockBuffer.pointee = Unmanaged.passRetained(blockBuffer).toOpaque()
+    return noErr
+}
+
+@_cdecl("acf_cm_audio_buffer_array_free")
+public func acf_cm_audio_buffer_array_free(_ buffers: UnsafeMutableRawPointer?) {
+    buffers?.assumingMemoryBound(to: AudioBufferBridge.self).deallocate()
 }
 
 // MARK: - CMBlockBuffer
@@ -353,6 +476,60 @@ public func cm_format_description_get_audio_format_flags(
     let fd = Unmanaged<CMFormatDescription>.fromOpaque(formatDescription).takeUnretainedValue()
     guard let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fd) else { return 0 }
     return asbd.pointee.mFormatFlags
+}
+
+@_cdecl("acf_cm_video_format_description_get_dimensions")
+public func acf_cm_video_format_description_get_dimensions(
+    _ formatDescription: UnsafeMutableRawPointer,
+    _ outWidth: UnsafeMutablePointer<Int32>,
+    _ outHeight: UnsafeMutablePointer<Int32>
+) -> Bool {
+    let fd = Unmanaged<CMFormatDescription>.fromOpaque(formatDescription).takeUnretainedValue()
+    guard CMFormatDescriptionGetMediaType(fd) == kCMMediaType_Video else { return false }
+    let dimensions = CMVideoFormatDescriptionGetDimensions(fd)
+    outWidth.pointee = dimensions.width
+    outHeight.pointee = dimensions.height
+    return true
+}
+
+@_cdecl("acf_cm_video_format_description_copy_parameter_set")
+public func acf_cm_video_format_description_copy_parameter_set(
+    _ formatDescription: UnsafeMutableRawPointer,
+    _ hevc: Bool,
+    _ index: Int,
+    _ outCount: UnsafeMutablePointer<Int>,
+    _ outNalUnitHeaderLength: UnsafeMutablePointer<Int32>,
+    _ outStatus: UnsafeMutablePointer<Int32>
+) -> UnsafeMutableRawPointer? {
+    let fd = Unmanaged<CMFormatDescription>.fromOpaque(formatDescription).takeUnretainedValue()
+    var pointer: UnsafePointer<UInt8>?
+    var size = 0
+    var count = 0
+    var nalUnitHeaderLength: Int32 = 0
+    let status = hevc
+        ? CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+            fd,
+            parameterSetIndex: index,
+            parameterSetPointerOut: &pointer,
+            parameterSetSizeOut: &size,
+            parameterSetCountOut: &count,
+            nalUnitHeaderLengthOut: &nalUnitHeaderLength
+        )
+        : CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            fd,
+            parameterSetIndex: index,
+            parameterSetPointerOut: &pointer,
+            parameterSetSizeOut: &size,
+            parameterSetCountOut: &count,
+            nalUnitHeaderLengthOut: &nalUnitHeaderLength
+        )
+    outStatus.pointee = status
+    outCount.pointee = count
+    outNalUnitHeaderLength.pointee = nalUnitHeaderLength
+    guard status == noErr, let pointer, size >= 0, let data = CFDataCreate(nil, pointer, size) else {
+        return nil
+    }
+    return Unmanaged.passRetained(data).toOpaque()
 }
 
 private func acfRetainedCFStringConstant(_ value: CFString) -> UnsafeMutableRawPointer {

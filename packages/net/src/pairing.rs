@@ -6,7 +6,7 @@
 
 use crate::error::{NetError, Result};
 use ed25519_dalek::Verifier;
-use rand::RngCore;
+use rand::Rng;
 use removent_core::DeviceIdentity;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -91,7 +91,7 @@ const HOST_ROLE_ID: &[u8] = b"removent-host";
 
 pub fn generate_pin() -> String {
     let mut buf = [0u8; 4];
-    rand::thread_rng().fill_bytes(&mut buf);
+    rand::rng().fill_bytes(&mut buf);
     format!("{:06}", u32::from_le_bytes(buf) % 1_000_000)
 }
 
@@ -132,7 +132,7 @@ fn verify_sig(vk: &ed25519_dalek::VerifyingKey, confirm: &[u8; 32], sig: &[u8]) 
 /// Step 1: generate the Begin message (nonce_c must be kept for step 2 and the final check).
 pub fn client_begin(fp_self_full_hex: &str) -> (PairingMsg, [u8; 16]) {
     let mut nonce_c = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut nonce_c);
+    rand::rng().fill_bytes(&mut nonce_c);
     (
         PairingMsg::Begin {
             nonce_c,
@@ -239,7 +239,7 @@ pub fn host_on_begin_with_secret(begin: &PairingMsg, secret: &str) -> Result<Hos
         _ => return Err(NetError::Pairing("expected Begin".into())),
     };
     let mut nonce_h = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut nonce_h);
+    rand::rng().fill_bytes(&mut nonce_h);
     let pin = secret.to_owned();
     let (spake, msg_h) = Spake2::<Ed25519Group>::start_b(
         &Password::new(pin.as_bytes()),

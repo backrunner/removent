@@ -1,4 +1,5 @@
 use super::*;
+use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 
 /// Connection entry point and local sharing controls share one quiet content surface.
 impl HomeView {
@@ -274,10 +275,11 @@ impl HomeView {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .gap_1()
+                            .gap(px(2.))
                             .child(
                                 div()
                                     .text_size(px(20.))
+                                    .line_height(px(24.))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .truncate()
                                     .child(row.name.clone()),
@@ -287,6 +289,7 @@ impl HomeView {
                                     .flex()
                                     .items_center()
                                     .gap_2()
+                                    .line_height(px(16.))
                                     .child(dot(colors.success))
                                     .child(
                                         div()
@@ -295,28 +298,28 @@ impl HomeView {
                                             .child(t!("device.online").to_string()),
                                     ),
                             ),
+                    )
+                    .child(
+                        div().flex().items_center().flex_shrink_0().gap_2().child(
+                            // Cancel immediately releases the form and invalidates queued events.
+                            Button::new("connect-device")
+                                .icon(icon_16(if connecting { "x" } else { "monitor" }))
+                                .label(if connecting {
+                                    t!("action.cancel").to_string()
+                                } else {
+                                    t!("action.connect").to_string()
+                                })
+                                .when(!connecting, |b| b.primary())
+                                .when(connecting, |b| b.outline())
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    if this.connecting.is_some() {
+                                        this.cancel_connection(cx);
+                                    } else {
+                                        this.connect_device(&fp_c, window, cx);
+                                    }
+                                })),
+                        ),
                     ),
-            )
-            .child(
-                div().flex().gap_2().child(
-                    // Cancel immediately releases the form and invalidates queued events.
-                    Button::new("connect-device")
-                        .icon(icon_16(if connecting { "x" } else { "monitor" }))
-                        .label(if connecting {
-                            t!("action.cancel").to_string()
-                        } else {
-                            t!("action.connect").to_string()
-                        })
-                        .when(!connecting, |b| b.primary())
-                        .when(connecting, |b| b.outline())
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            if this.connecting.is_some() {
-                                this.cancel_connection(cx);
-                            } else {
-                                this.connect_device(&fp_c, window, cx);
-                            }
-                        })),
-                ),
             )
             .child(
                 // Device metadata shares the grouped surfaces used by settings.
@@ -383,6 +386,7 @@ impl HomeView {
         let id_connect = entry.id.clone();
         let id_edit = entry.id.clone();
         let id_remove = entry.id.clone();
+        let home = cx.entity().downgrade();
 
         let meta_row = |label: String, value: String| {
             div()
@@ -431,10 +435,11 @@ impl HomeView {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .gap_1()
+                            .gap(px(2.))
                             .child(
                                 div()
                                     .text_size(px(20.))
+                                    .line_height(px(24.))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .truncate()
                                     .child(entry.display_name()),
@@ -442,56 +447,80 @@ impl HomeView {
                             .child(
                                 div()
                                     .text_size(px(12.))
+                                    .line_height(px(16.))
                                     .text_color(colors.muted_foreground)
                                     .child(t!("saved.subtitle").to_string()),
                             ),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        Button::new("connect-saved")
-                            .icon(icon_16(if connecting { "x" } else { "monitor" }))
-                            .label(if connecting {
-                                t!("action.cancel").to_string()
-                            } else {
-                                t!("action.connect").to_string()
-                            })
-                            .when(!connecting, |b| b.primary())
-                            .when(connecting, |b| b.outline())
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                if this.connecting.is_some() {
-                                    this.cancel_connection(cx);
-                                } else {
-                                    this.connect_saved(&id_connect, window, cx);
-                                }
-                            })),
                     )
-                    .when(!connecting, |el| {
-                        el.child(
-                            Button::new("edit-saved")
-                                .label(t!("action.edit").to_string())
-                                .outline()
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    if let Some(entry) =
-                                        this.saved.iter().find(|s| s.id == id_edit).cloned()
-                                    {
-                                        this.open_connection_dialog(Some(&entry), window, cx);
-                                    }
-                                })),
-                        )
-                        .child(
-                            Button::new("remove-saved")
-                                .icon(icon_16("trash-2"))
-                                .ghost()
-                                .tooltip(t!("saved.remove").to_string())
-                                .on_click(cx.listener(move |this, _, _w, cx| {
-                                    this.remove_saved(&id_remove, cx)
-                                })),
-                        )
-                    }),
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .flex_shrink_0()
+                            .gap_2()
+                            .child(
+                                Button::new("connect-saved")
+                                    .icon(icon_16(if connecting { "x" } else { "monitor" }))
+                                    .label(if connecting {
+                                        t!("action.cancel").to_string()
+                                    } else {
+                                        t!("action.connect").to_string()
+                                    })
+                                    .when(!connecting, |b| b.primary())
+                                    .when(connecting, |b| b.outline())
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        if this.connecting.is_some() {
+                                            this.cancel_connection(cx);
+                                        } else {
+                                            this.connect_saved(&id_connect, window, cx);
+                                        }
+                                    })),
+                            )
+                            .when(!connecting, |el| {
+                                el.child(
+                                    Button::new("edit-saved")
+                                        .label(t!("action.edit").to_string())
+                                        .outline()
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            if let Some(entry) =
+                                                this.saved.iter().find(|s| s.id == id_edit).cloned()
+                                            {
+                                                this.open_connection_dialog(
+                                                    Some(&entry),
+                                                    window,
+                                                    cx,
+                                                );
+                                            }
+                                        })),
+                                )
+                                .child(
+                                    Button::new("saved-more")
+                                        .icon(icon_16("ellipsis"))
+                                        .ghost()
+                                        .tooltip(t!("action.more").to_string())
+                                        .dropdown_menu_with_anchor(
+                                            gpui::Anchor::TopRight,
+                                            move |menu, _, _| {
+                                                let home = home.clone();
+                                                let id_remove = id_remove.clone();
+                                                menu.item(
+                                                    PopupMenuItem::new(
+                                                        t!("saved.remove").to_string(),
+                                                    )
+                                                    .icon(icon_16("trash-2"))
+                                                    .on_click(move |_, _, cx| {
+                                                        let _ = home.update(cx, |this, cx| {
+                                                            if this.connecting.is_none() {
+                                                                this.remove_saved(&id_remove, cx);
+                                                            }
+                                                        });
+                                                    }),
+                                                )
+                                            },
+                                        ),
+                                )
+                            }),
+                    ),
             )
             .child(
                 div()

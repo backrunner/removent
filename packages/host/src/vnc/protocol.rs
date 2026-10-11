@@ -1,8 +1,8 @@
 use super::{DisplayTarget, MAX_FRAME_BYTES, RFB_VERSION, SEC_NONE, SEC_VNC_AUTH};
 use crate::session::fit_capture_dims;
 use des::Des;
-use des::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
-use rand::RngCore;
+use des::cipher::{BlockCipherEncrypt, KeyInit};
+use rand::Rng;
 use std::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -76,7 +76,7 @@ pub(super) async fn perform_handshake(
 
 async fn check_vnc_password(stream: &mut TcpStream, password: &[u8]) -> io::Result<bool> {
     let mut challenge = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut challenge);
+    rand::rng().fill_bytes(&mut challenge);
     stream.write_all(&challenge).await?;
     let mut response = [0u8; 16];
     stream.read_exact(&mut response).await?;
@@ -88,10 +88,10 @@ pub(super) fn vnc_response(password: &[u8], challenge: &[u8; 16]) -> [u8; 16] {
     for (i, byte) in password.iter().take(8).enumerate() {
         key[i] = byte.reverse_bits();
     }
-    let cipher = Des::new(GenericArray::from_slice(&key));
+    let cipher = Des::new((&key).into());
     let mut response = *challenge;
     for block in response.as_chunks_mut::<8>().0 {
-        cipher.encrypt_block(GenericArray::from_mut_slice(block));
+        cipher.encrypt_block(block.into());
     }
     response
 }

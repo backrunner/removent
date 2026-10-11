@@ -154,6 +154,10 @@ public func cv_pixel_buffer_create_with_planar_bytes(
     _ pixelBufferOut: UnsafeMutablePointer<UnsafeMutableRawPointer?>
 ) -> Int32 {
     var pixelBuffer: CVPixelBuffer?
+    guard numPlanes >= 0 else {
+        pixelBufferOut.pointee = nil
+        return kCVReturnInvalidArgument
+    }
 
     var planeBaseAddressesCopy = Array(UnsafeBufferPointer(start: planeBaseAddresses, count: numPlanes))
     var planeWidthsCopy = Array(UnsafeBufferPointer(start: planeWidths, count: numPlanes))
@@ -280,118 +284,10 @@ public func cv_pixel_buffer_get_extended_pixels(
                                    extraRowsOnBottom)
 }
 
-// MARK: - CVPixelBufferPool APIs
-
-@_cdecl("cv_pixel_buffer_pool_create")
-public func cv_pixel_buffer_pool_create(
-    _ width: Int,
-    _ height: Int,
-    _ pixelFormatType: UInt32,
-    _ maxBuffers: Int,
-    _ poolOut: UnsafeMutablePointer<UnsafeMutableRawPointer?>
-) -> Int32 {
-    var poolAttributes: [String: Any] = [:]
-    if maxBuffers > 0 {
-        poolAttributes[kCVPixelBufferPoolMinimumBufferCountKey as String] = maxBuffers
-    }
-
-    let pixelBufferAttributes: [String: Any] = [
-        kCVPixelBufferWidthKey as String: width,
-        kCVPixelBufferHeightKey as String: height,
-        kCVPixelBufferPixelFormatTypeKey as String: pixelFormatType,
-        kCVPixelBufferIOSurfacePropertiesKey as String: [:],
-    ]
-
-    var pool: CVPixelBufferPool?
-    let status = CVPixelBufferPoolCreate(
-        kCFAllocatorDefault,
-        poolAttributes as CFDictionary,
-        pixelBufferAttributes as CFDictionary,
-        &pool
-    )
-
-    if status == kCVReturnSuccess, let bufferPool = pool {
-        poolOut.pointee = Unmanaged.passRetained(bufferPool).toOpaque()
-    } else {
-        poolOut.pointee = nil
-    }
-
-    return status
-}
-
-@_cdecl("cv_pixel_buffer_pool_create_pixel_buffer")
-public func cv_pixel_buffer_pool_create_pixel_buffer(
-    _ pool: UnsafeMutableRawPointer,
-    _ pixelBufferOut: UnsafeMutablePointer<UnsafeMutableRawPointer?>
-) -> Int32 {
-    let bufferPool = Unmanaged<CVPixelBufferPool>.fromOpaque(pool).takeUnretainedValue()
-    var pixelBuffer: CVPixelBuffer?
-
-    let status = CVPixelBufferPoolCreatePixelBuffer(
-        kCFAllocatorDefault,
-        bufferPool,
-        &pixelBuffer
-    )
-
-    if status == kCVReturnSuccess, let buffer = pixelBuffer {
-        pixelBufferOut.pointee = Unmanaged.passRetained(buffer).toOpaque()
-    } else {
-        pixelBufferOut.pointee = nil
-    }
-
-    return status
-}
-
-@_cdecl("cv_pixel_buffer_pool_flush")
-public func cv_pixel_buffer_pool_flush(_ pool: UnsafeMutableRawPointer) {
-    let bufferPool = Unmanaged<CVPixelBufferPool>.fromOpaque(pool).takeUnretainedValue()
-    CVPixelBufferPoolFlush(bufferPool, [])
-}
-
-@_cdecl("cv_pixel_buffer_pool_get_type_id")
-public func cv_pixel_buffer_pool_get_type_id() -> Int {
-    Int(CVPixelBufferPoolGetTypeID())
-}
-
-@_cdecl("cv_pixel_buffer_pool_retain")
-public func cv_pixel_buffer_pool_retain(_ pool: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer {
-    let bufferPool = Unmanaged<CVPixelBufferPool>.fromOpaque(pool).takeUnretainedValue()
-    return Unmanaged.passRetained(bufferPool).toOpaque()
-}
-
-@_cdecl("cv_pixel_buffer_pool_release")
-public func cv_pixel_buffer_pool_release(_ pool: UnsafeMutableRawPointer) {
-    Unmanaged<CVPixelBufferPool>.fromOpaque(pool).release()
-}
-
-@_cdecl("cv_pixel_buffer_pool_get_attributes")
-public func cv_pixel_buffer_pool_get_attributes(_ pool: UnsafeMutableRawPointer) -> UnsafeRawPointer? {
-    let bufferPool = Unmanaged<CVPixelBufferPool>.fromOpaque(pool).takeUnretainedValue()
-    guard let attributes = CVPixelBufferPoolGetAttributes(bufferPool) else {
-        return nil
-    }
-    return UnsafeRawPointer(Unmanaged.passUnretained(attributes).toOpaque())
-}
-
-@_cdecl("cv_pixel_buffer_pool_get_pixel_buffer_attributes")
-public func cv_pixel_buffer_pool_get_pixel_buffer_attributes(_ pool: UnsafeMutableRawPointer) -> UnsafeRawPointer? {
-    let bufferPool = Unmanaged<CVPixelBufferPool>.fromOpaque(pool).takeUnretainedValue()
-    guard let attributes = CVPixelBufferPoolGetPixelBufferAttributes(bufferPool) else {
-        return nil
-    }
-    return UnsafeRawPointer(Unmanaged.passUnretained(attributes).toOpaque())
-}
-
 // MARK: - Hash Functions
 
 @_cdecl("cv_pixel_buffer_hash")
 public func cv_pixel_buffer_hash(_ pixelBuffer: UnsafeMutableRawPointer) -> Int {
     let buffer = Unmanaged<CVPixelBuffer>.fromOpaque(pixelBuffer).takeUnretainedValue()
     return buffer.hashValue
-}
-
-@_cdecl("cv_pixel_buffer_pool_hash")
-public func cv_pixel_buffer_pool_hash(_ pool: UnsafeMutableRawPointer) -> Int {
-    let bufferPool = Unmanaged<CVPixelBufferPool>.fromOpaque(pool).takeUnretainedValue()
-    return bufferPool.hashValue
 }

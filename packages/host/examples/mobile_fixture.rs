@@ -150,7 +150,7 @@ async fn main() -> anyhow::Result<()> {
                     _ => None,
                 }
             }).collect();
-            let body = serde_json::json!({"relay":std::env::var("REMOVENT_FIXTURE_RELAY").as_deref() == Ok("1"), "auth_mode":auth_mode, "otp":auth.totp().unwrap().generate(now), "pin":*status_pin.lock().unwrap(),
+            let body = serde_json::json!({"relay":std::env::var("REMOVENT_FIXTURE_RELAY").as_deref() == Ok("1"), "auth_mode":auth_mode, "otp":auth.totp().unwrap().generate(now).to_string(), "pin":*status_pin.lock().unwrap(),
                 "inputs":status_input.events.lock().unwrap().len(),
                 "typed_text":typed_text,
                 "keys":keys,

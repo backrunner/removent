@@ -79,7 +79,7 @@ impl TestServer {
         let cert_path = dir.path().join("cert.pem");
         let key_path = dir.path().join("key.pem");
         std::fs::write(&cert_path, cert.cert.pem()).unwrap();
-        std::fs::write(&key_path, cert.key_pair.serialize_pem()).unwrap();
+        std::fs::write(&key_path, cert.signing_key.serialize_pem()).unwrap();
         let identity = TlsIdentityCtx::init_from_paths(&cert_path, &key_path).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();

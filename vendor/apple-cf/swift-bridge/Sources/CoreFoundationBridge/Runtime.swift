@@ -16,19 +16,22 @@ public func cf_notification_center_get_type_id() -> Int {
 
 @_cdecl("cf_notification_center_get_local")
 public func cf_notification_center_get_local() -> UnsafeMutableRawPointer? {
-    Unmanaged.passRetained(CFNotificationCenterGetLocalCenter()).toOpaque()
+    guard let center = CFNotificationCenterGetLocalCenter() else { return nil }
+    return Unmanaged.passRetained(center).toOpaque()
 }
 
 #if os(macOS)
 @_cdecl("cf_notification_center_get_distributed")
 public func cf_notification_center_get_distributed() -> UnsafeMutableRawPointer? {
-    Unmanaged.passRetained(CFNotificationCenterGetDistributedCenter()).toOpaque()
+    guard let center = CFNotificationCenterGetDistributedCenter() else { return nil }
+    return Unmanaged.passRetained(center).toOpaque()
 }
 #endif
 
 @_cdecl("cf_notification_center_get_darwin")
 public func cf_notification_center_get_darwin() -> UnsafeMutableRawPointer? {
-    Unmanaged.passRetained(CFNotificationCenterGetDarwinNotifyCenter()).toOpaque()
+    guard let center = CFNotificationCenterGetDarwinNotifyCenter() else { return nil }
+    return Unmanaged.passRetained(center).toOpaque()
 }
 
 @_cdecl("cf_notification_center_post_notification")
@@ -52,17 +55,20 @@ public func cf_run_loop_get_type_id() -> Int {
 
 @_cdecl("cf_run_loop_get_current")
 public func cf_run_loop_get_current() -> UnsafeMutableRawPointer? {
-    Unmanaged.passRetained(CFRunLoopGetCurrent()).toOpaque()
+    guard let runLoop = CFRunLoopGetCurrent() else { return nil }
+    return Unmanaged.passRetained(runLoop).toOpaque()
 }
 
 @_cdecl("cf_run_loop_get_main")
 public func cf_run_loop_get_main() -> UnsafeMutableRawPointer? {
-    Unmanaged.passRetained(CFRunLoopGetMain()).toOpaque()
+    guard let runLoop = CFRunLoopGetMain() else { return nil }
+    return Unmanaged.passRetained(runLoop).toOpaque()
 }
 
 @_cdecl("cf_run_loop_run_in_default_mode")
 public func cf_run_loop_run_in_default_mode(_ seconds: Double, _ returnAfterSourceHandled: Bool) -> Int32 {
-    Int32(CFRunLoopRunInMode(CFRunLoopMode.defaultMode!, seconds, returnAfterSourceHandled).rawValue)
+    guard let mode = CFRunLoopMode.defaultMode else { return CFRunLoopRunResult.finished.rawValue }
+    return CFRunLoopRunInMode(mode, seconds, returnAfterSourceHandled).rawValue
 }
 
 @_cdecl("cf_run_loop_stop")
@@ -81,7 +87,8 @@ public func cf_run_loop_wake_up(_ value: UnsafeMutableRawPointer) {
 public func cf_run_loop_add_timer(_ value: UnsafeMutableRawPointer, _ timer: UnsafeMutableRawPointer) {
     let runLoop = Unmanaged<CFRunLoop>.fromOpaque(value).takeUnretainedValue()
     let timer = Unmanaged<CFRunLoopTimer>.fromOpaque(timer).takeUnretainedValue()
-    CFRunLoopAddTimer(runLoop, timer, CFRunLoopMode.defaultMode!)
+    guard let mode = CFRunLoopMode.defaultMode else { return }
+    CFRunLoopAddTimer(runLoop, timer, mode)
 }
 
 @_cdecl("cf_run_loop_timer_get_type_id")
@@ -129,8 +136,8 @@ public func cf_message_port_create_echo_local(_ name: UnsafePointer<CChar>) -> U
     guard let port = CFMessagePortCreateLocal(nil, name, acfEchoMessagePortCallback, nil, &shouldFreeInfo) else {
         return nil
     }
-    if let source = CFMessagePortCreateRunLoopSource(nil, port, 0) {
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, CFRunLoopMode.defaultMode!)
+    if let source = CFMessagePortCreateRunLoopSource(nil, port, 0), let mode = CFRunLoopMode.defaultMode {
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, mode)
     }
     return Unmanaged.passRetained(port).toOpaque()
 }

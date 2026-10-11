@@ -31,6 +31,9 @@ impl Engine {
     pub(super) fn try_send_cmd(&self, msg: ControlMsg) {
         let failed_generation = {
             let channels = self.client_channels.lock().unwrap();
+            if channels.recovery.state() != removent_client::recovery::State::Connected {
+                return;
+            }
             channels.cmd.as_ref().and_then(|tx| match tx.try_send(msg) {
                 // The frame bridge owns disconnect/retry handling. A closed
                 // old channel must not abort a reconnect that is starting.

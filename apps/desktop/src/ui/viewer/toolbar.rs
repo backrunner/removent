@@ -143,7 +143,8 @@ impl ViewerView {
                 ),
             ]);
         }
-        let max_height = (f32::from(window.viewport_size().height) - 32.).max(100.);
+        let max_height =
+            (f32::from(window.viewport_size().height - TITLE_BAR_HEIGHT) - 32.).max(100.);
         div()
             .id("viewer-info")
             .debug_selector(|| "viewer-info".into())
@@ -250,6 +251,48 @@ impl ViewerView {
             )
     }
 
+    pub(super) fn render_network_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let offline = self.recovery.state() == removent_client::recovery::State::Offline;
+        div()
+            .absolute()
+            .inset_0()
+            .bg(gpui::black().opacity(0.7))
+            .debug_selector(|| "viewer-network-overlay".into())
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_3()
+                    .max_w(px(360.))
+                    .p_5()
+                    .text_color(gpui::white())
+                    .child(icon_16(if offline { "wifi-off" } else { "loader-circle" }))
+                    .child(
+                        t!(if offline {
+                            "viewer.network_offline"
+                        } else {
+                            "viewer.network_reconnecting"
+                        })
+                        .to_string(),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(gpui::white().opacity(0.7))
+                            .child(t!("viewer.network_retry_hint").to_string()),
+                    )
+                    .child(
+                        Button::new("disconnect-offline")
+                            .label(t!("viewer.close_window").to_string())
+                            .on_click(cx.listener(|this, _, window, _| this.disconnect(window))),
+                    ),
+            )
+    }
+
     pub(super) fn render_ended_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors;
         div()
@@ -282,7 +325,10 @@ impl ViewerView {
                         div()
                             .text_size(px(12.))
                             .text_color(colors.muted_foreground)
-                            .child(t!("viewer.ended_desc").to_string()),
+                            .child(match self.recovery.state() {
+                                removent_client::recovery::State::Failed(error) => error,
+                                _ => t!("viewer.ended_desc").to_string(),
+                            }),
                     )
                     .child(
                         Button::new("close-viewer")

@@ -8,3 +8,6 @@ pub mod viewer;
 pub mod widgets;
 
 pub use home::HomeView;
+
+#[cfg(test)]
+mod typography_tests;

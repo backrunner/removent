@@ -1,12 +1,13 @@
 //! Application button styles. Keep GPUI's keyboard/focus/tooltip behavior while
 //! supplying complete normal, hover, pressed, selected, and disabled palettes.
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, IntoElement, RenderOnce, SharedString, StyleRefinement,
-    Window, div, prelude::*, relative,
+    AnyElement, App, ClickEvent, ElementId, Interactivity, IntoElement, RenderOnce, SharedString,
+    StyleRefinement, Window, div, prelude::*, relative,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, Sizable, Size,
+    ActiveTheme, Disableable, Icon, Selectable, Sizable, Size,
     button::{Button as NativeButton, ButtonCustomVariant, ButtonVariants},
+    menu::DropdownMenu,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -101,6 +102,21 @@ impl Styled for Button {
         self.inner.style()
     }
 }
+impl InteractiveElement for Button {
+    fn interactivity(&mut self) -> &mut Interactivity {
+        self.inner.interactivity()
+    }
+}
+impl Selectable for Button {
+    fn selected(mut self, selected: bool) -> Self {
+        self.inner = self.inner.selected(selected);
+        self
+    }
+    fn is_selected(&self) -> bool {
+        self.inner.is_selected()
+    }
+}
+impl DropdownMenu for Button {}
 impl Sizable for Button {
     fn with_size(mut self, size: impl Into<Size>) -> Self {
         self.inner = self.inner.with_size(size);
@@ -205,10 +221,18 @@ impl RenderOnce for Button {
             .hover(hover)
             .active(pressed)
             .foreground(foreground)
-            .border(border)
             .shadow(raised);
         self.inner
             .custom(style)
+            // The new component defaults custom normal backgrounds to 20%
+            // opacity. Preserve the app's solid semantic button palette.
+            .bg(if self.disabled {
+                normal.opacity(0.15)
+            } else {
+                normal
+            })
+            .border_1()
+            .border_color(border)
             .when(!self.disabled, |b| b.cursor_pointer())
             .when(self.disabled, |b| b.cursor_default())
             .when_some(self.icon.clone(), |b, icon| {
@@ -219,7 +243,7 @@ impl RenderOnce for Button {
                         .when(!self.disabled, |d| d.hover(|s| s.text_color(hover_fg))),
                 )
             })
-            // Explicit child colors also avoid gpui-component 0.5's hard-coded
+            // Explicit child colors also avoid gpui-component's hard-coded
             // red hover label. Only the interaction surface changes color.
             .when_some(self.label, |b, label| {
                 b.child(

@@ -38,8 +38,17 @@ pub(super) fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = std::fs::File::open(path)
         .map_err(|e| t!("update.err.download", err = e.to_string()).to_string())?;
     let mut hasher = Sha256::new();
-    std::io::copy(&mut file, &mut hasher)
-        .map_err(|e| t!("update.err.download", err = e.to_string()).to_string())?;
+    use std::io::Read;
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|e| t!("update.err.download", err = e.to_string()).to_string())?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
     Ok(hex::encode(hasher.finalize()))
 }
 

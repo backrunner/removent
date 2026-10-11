@@ -19,7 +19,29 @@ fn native_advertisement_has_one_dns_sd_instance_label() {
         .unwrap();
     assert!(!label.contains('.'));
     assert!(label.len() <= 63);
-    assert_eq!(info.get_property_val_str("name"), Some(name.as_str()));
+    let advertised_name = info.get_property_val_str("name").unwrap();
+    assert!(name.starts_with(advertised_name));
+    assert!(advertised_name.len() + "name=".len() <= 255);
+    let next_char = name[advertised_name.len()..].chars().next().unwrap();
+    assert!(advertised_name.len() + next_char.len_utf8() + "name=".len() > 255);
+}
+
+#[test]
+fn native_txt_name_preserves_valid_names_at_the_byte_limit() {
+    for name in ["电脑.工作站".to_owned(), "a".repeat(250), "a".repeat(251)] {
+        let info = Advertiser::build_info(
+            "host".into(),
+            &name,
+            "0123456789abcdef",
+            48688,
+            Caps::all(),
+            false,
+            None,
+        )
+        .unwrap();
+        let expected = &name[..name.len().min(250)];
+        assert_eq!(info.get_property_val_str("name"), Some(expected));
+    }
 }
 
 #[test]
@@ -38,7 +60,7 @@ fn locator_counts_device_identities_across_bonjour_aliases() {
         Some(&ad),
     )
     .unwrap();
-    let mut first = resolved_entry(DiscoveryProtocol::Removent, &info).unwrap();
+    let mut first = resolved_test_entry(DiscoveryProtocol::Removent, &info).unwrap();
     first.addr = Some("127.0.0.1:48688".parse().unwrap());
     let mut second = first.clone();
     second.instance += " (2)";
@@ -69,7 +91,7 @@ fn compatibility_records_do_not_require_or_inherit_native_identity() {
                 ][..],
             )
             .unwrap();
-            let entry = resolved_entry(protocol, &info).unwrap();
+            let entry = resolved_test_entry(protocol, &info).unwrap();
             assert_eq!(entry.name, "Office PC");
             assert_eq!(entry.addr.unwrap().port(), 3391);
             assert!(entry.short_fp.is_empty());
@@ -86,7 +108,7 @@ fn compatibility_records_do_not_require_or_inherit_native_identity() {
         None,
     )
     .unwrap();
-    assert!(resolved_entry(DiscoveryProtocol::Removent, &info).is_none());
+    assert!(resolved_test_entry(DiscoveryProtocol::Removent, &info).is_none());
     let spoofed = ServiceInfo::new(
         MDNS_SERVICE,
         "Invalid identity",
@@ -96,7 +118,7 @@ fn compatibility_records_do_not_require_or_inherit_native_identity() {
         &[("fp", "VNC:127.0.0.1:5900")][..],
     )
     .unwrap();
-    assert!(resolved_entry(DiscoveryProtocol::Removent, &spoofed).is_none());
+    assert!(resolved_test_entry(DiscoveryProtocol::Removent, &spoofed).is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -219,13 +241,18 @@ fn cap_string_roundtrip() {
 fn pick_addr_prefers_v4_and_keeps_v6_fallback() {
     let mut only_v6 = std::collections::HashSet::new();
     only_v6.insert("fe80::1".parse::<IpAddr>().unwrap());
-    let addr = pick_addr(&only_v6, 48688).expect("v6 fallback");
+    let addr = pick_scoped_addr(
+        &only_v6.iter().copied().map(ScopedIp::from).collect(),
+        48688,
+    )
+    .expect("v6 fallback");
     assert!(addr.is_ipv6());
     assert_eq!(addr.port(), 48688);
 
     let mut mixed = only_v6.clone();
     mixed.insert("192.168.1.2".parse::<IpAddr>().unwrap());
-    let addr = pick_addr(&mixed, 48688).expect("v4 preferred");
+    let addr = pick_scoped_addr(&mixed.iter().copied().map(ScopedIp::from).collect(), 48688)
+        .expect("v4 preferred");
     assert_eq!(addr.ip(), "192.168.1.2".parse::<IpAddr>().unwrap());
 }
 
@@ -326,4 +353,8 @@ async fn advertise_and_browse_loopback() {
     })
     .await
     .expect("goodbye must remove the stopped advertiser");
+}
+
+fn resolved_test_entry(protocol: DiscoveryProtocol, info: &ServiceInfo) -> Option<DeviceEntry> {
+    super::resolved_entry(protocol, &info.clone().as_resolved_service())
 }

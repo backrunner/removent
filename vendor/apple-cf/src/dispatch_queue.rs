@@ -27,7 +27,7 @@
 //! ```
 
 use crate::utils::panic_safe;
-use std::ffi::{c_void, CString};
+use std::ffi::c_void;
 use std::fmt;
 use std::time::Duration;
 
@@ -101,14 +101,40 @@ impl DispatchQueue {
     /// // Use the queue with SCStream's add_output_handler_with_queue
     /// ```
     ///
+    /// The label is truncated at its first NUL byte.
+    ///
     /// # Panics
     ///
-    /// Panics if the label contains null bytes or if queue creation fails
+    /// Panics if queue creation fails
     #[must_use]
     pub fn new(label: &str, qos: DispatchQoS) -> Self {
-        let c_label = CString::new(label).expect("Label contains null byte");
+        let c_label = crate::utils::ffi_string::cstring_until_nul(label);
         let ptr = unsafe { crate::ffi::acf_dispatch_queue_create(c_label.as_ptr(), qos as i32) };
         assert!(!ptr.is_null(), "Failed to create dispatch queue");
+        Self { ptr }
+    }
+
+    #[must_use]
+    pub fn concurrent(label: &str, qos: DispatchQoS) -> Self {
+        let c_label = crate::utils::ffi_string::cstring_until_nul(label);
+        let ptr = unsafe {
+            crate::ffi::acf_dispatch_queue_create_concurrent(c_label.as_ptr(), qos as i32)
+        };
+        assert!(!ptr.is_null(), "Failed to create dispatch queue");
+        Self { ptr }
+    }
+
+    #[must_use]
+    pub fn main() -> Self {
+        let ptr = unsafe { crate::ffi::acf_dispatch_queue_main() };
+        assert!(!ptr.is_null(), "dispatch main queue is NULL");
+        Self { ptr }
+    }
+
+    #[must_use]
+    pub fn global(qos: DispatchQoS) -> Self {
+        let ptr = unsafe { crate::ffi::acf_dispatch_queue_global(qos as i32) };
+        assert!(!ptr.is_null(), "dispatch global queue is NULL");
         Self { ptr }
     }
 
@@ -126,23 +152,13 @@ impl DispatchQueue {
     }
 }
 
-impl Clone for DispatchQueue {
-    fn clone(&self) -> Self {
-        unsafe {
-            Self {
-                ptr: crate::ffi::dispatch_queue_retain(self.ptr),
-            }
-        }
-    }
-}
-
-impl Drop for DispatchQueue {
-    fn drop(&mut self) {
-        unsafe {
-            crate::ffi::dispatch_queue_release(self.ptr);
-        }
-    }
-}
+crate::utils::retained::cf_retained!(
+    DispatchQueue,
+    field = ptr,
+    retain = crate::ffi::dispatch_queue_retain,
+    release = crate::ffi::dispatch_queue_release,
+    drop = unchecked,
+);
 
 impl fmt::Debug for DispatchQueue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -227,6 +243,25 @@ where
     }
 }
 
+pub fn dispatch_after<F>(delay: Duration, queue: &DispatchQueue, work: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    let task = Box::new(DispatchOnceTask {
+        site: "dispatch_after",
+        work: Some(Box::new(work)),
+    });
+    let delay_ns = u64::try_from(delay.as_nanos()).unwrap_or(u64::MAX);
+    unsafe {
+        crate::ffi::acf_dispatch_after_f(
+            delay_ns,
+            queue.as_mut_ptr(),
+            Box::into_raw(task).cast(),
+            dispatch_once_trampoline,
+        );
+    }
+}
+
 /// Run `work` for every `iteration` on `queue`, waiting for all iterations to finish.
 pub fn dispatch_apply<F>(iterations: usize, queue: &DispatchQueue, work: F)
 where
@@ -265,25 +300,25 @@ impl DispatchGroup {
     /// Create a new empty group.
     #[must_use]
     pub fn new() -> Self {
-        let ptr = unsafe { crate::ffi::acf_dispatch_group_create() };
+        let ptr = unsafe { crate::ffi::acf_dispatch_group_holder_create() };
         assert!(!ptr.is_null(), "failed to create DispatchGroup");
         Self { ptr }
     }
 
     /// Enter the group.
     pub fn enter(&self) {
-        unsafe { crate::ffi::acf_dispatch_group_enter(self.ptr) };
+        unsafe { crate::ffi::acf_dispatch_group_holder_enter(self.ptr) };
     }
 
     /// Leave the group.
     pub fn leave(&self) {
-        unsafe { crate::ffi::acf_dispatch_group_leave(self.ptr) };
+        unsafe { crate::ffi::acf_dispatch_group_holder_leave(self.ptr) };
     }
 
     /// Wait for the group to finish.
     #[must_use]
     pub fn wait(&self, timeout: Option<Duration>) -> bool {
-        unsafe { crate::ffi::acf_dispatch_group_wait(self.ptr, timeout_ms(timeout)) }
+        unsafe { crate::ffi::acf_dispatch_group_holder_wait(self.ptr, timeout_ms(timeout)) }
     }
 }
 
@@ -293,19 +328,13 @@ impl Default for DispatchGroup {
     }
 }
 
-impl Clone for DispatchGroup {
-    fn clone(&self) -> Self {
-        Self {
-            ptr: unsafe { crate::ffi::acf_object_retain(self.ptr) },
-        }
-    }
-}
-
-impl Drop for DispatchGroup {
-    fn drop(&mut self) {
-        unsafe { crate::ffi::acf_object_release(self.ptr) };
-    }
-}
+crate::utils::retained::cf_retained!(
+    DispatchGroup,
+    field = ptr,
+    retain = crate::ffi::acf_object_retain,
+    release = crate::ffi::acf_object_release,
+    drop = unchecked,
+);
 
 impl fmt::Debug for DispatchGroup {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -329,38 +358,38 @@ unsafe impl Sync for DispatchSemaphore {}
 impl DispatchSemaphore {
     /// Create a semaphore with an initial signal count.
     #[must_use]
-    pub fn new(value: i64) -> Self {
-        let ptr = unsafe { crate::ffi::acf_dispatch_semaphore_create(value) };
-        assert!(!ptr.is_null(), "failed to create DispatchSemaphore");
-        Self { ptr }
+    pub fn new(value: i64) -> Option<Self> {
+        if value < 0 {
+            return None;
+        }
+        let ptr = unsafe { crate::ffi::acf_dispatch_semaphore_holder_create(value) };
+        if ptr.is_null() {
+            None
+        } else {
+            Some(Self { ptr })
+        }
     }
 
     /// Signal the semaphore.
     #[must_use]
     pub fn signal(&self) -> i64 {
-        unsafe { crate::ffi::acf_dispatch_semaphore_signal(self.ptr) }
+        unsafe { crate::ffi::acf_dispatch_semaphore_holder_signal(self.ptr) }
     }
 
     /// Wait for the semaphore.
     #[must_use]
     pub fn wait(&self, timeout: Option<Duration>) -> bool {
-        unsafe { crate::ffi::acf_dispatch_semaphore_wait(self.ptr, timeout_ms(timeout)) }
+        unsafe { crate::ffi::acf_dispatch_semaphore_holder_wait(self.ptr, timeout_ms(timeout)) }
     }
 }
 
-impl Clone for DispatchSemaphore {
-    fn clone(&self) -> Self {
-        Self {
-            ptr: unsafe { crate::ffi::acf_object_retain(self.ptr) },
-        }
-    }
-}
-
-impl Drop for DispatchSemaphore {
-    fn drop(&mut self) {
-        unsafe { crate::ffi::acf_object_release(self.ptr) };
-    }
-}
+crate::utils::retained::cf_retained!(
+    DispatchSemaphore,
+    field = ptr,
+    retain = crate::ffi::acf_object_retain,
+    release = crate::ffi::acf_object_release,
+    drop = unchecked,
+);
 
 impl fmt::Debug for DispatchSemaphore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -376,9 +405,8 @@ pub struct DispatchSource {
     ptr: *mut c_void,
 }
 
-// SAFETY: `dispatch_source_t` is a thread-safe GCD primitive.  The bridge
-// wraps the opaque pointer without interior mutation; GCD ensures safe
-// cross-thread access.
+// SAFETY: `dispatch_source_t` is a thread-safe GCD primitive, and the bridge
+// holder synchronizes its activation, cancellation, and fire-count state.
 unsafe impl Send for DispatchSource {}
 unsafe impl Sync for DispatchSource {}
 
@@ -386,19 +414,25 @@ impl DispatchSource {
     /// Create a repeating timer source.
     #[must_use]
     pub fn timer(interval: Duration, leeway: Duration) -> Self {
-        let interval_ms = u64::try_from(interval.as_millis()).unwrap_or(u64::MAX);
-        let leeway_ms = u64::try_from(leeway.as_millis()).unwrap_or(u64::MAX);
-        let ptr = unsafe { crate::ffi::acf_dispatch_source_timer_create(interval_ms, leeway_ms) };
+        let interval_ns = u64::try_from(interval.as_nanos()).unwrap_or(u64::MAX);
+        let leeway_ns = u64::try_from(leeway.as_nanos()).unwrap_or(u64::MAX);
+        let ptr =
+            unsafe { crate::ffi::acf_dispatch_source_timer_create_ns(interval_ns, leeway_ns) };
         assert!(!ptr.is_null(), "failed to create DispatchSource timer");
         Self { ptr }
     }
 
-    /// Resume the timer source after creation.
+    /// Activate the timer source after creation.
+    ///
+    /// Repeated or concurrent calls are idempotent.
     pub fn resume(&self) {
         unsafe { crate::ffi::acf_dispatch_source_timer_resume(self.ptr) };
     }
 
     /// Cancel the source.
+    ///
+    /// Repeated or concurrent calls are idempotent. Activating after
+    /// cancellation is a no-op.
     pub fn cancel(&self) {
         unsafe { crate::ffi::acf_dispatch_source_timer_cancel(self.ptr) };
     }
@@ -410,19 +444,13 @@ impl DispatchSource {
     }
 }
 
-impl Clone for DispatchSource {
-    fn clone(&self) -> Self {
-        Self {
-            ptr: unsafe { crate::ffi::acf_object_retain(self.ptr) },
-        }
-    }
-}
-
-impl Drop for DispatchSource {
-    fn drop(&mut self) {
-        unsafe { crate::ffi::acf_object_release(self.ptr) };
-    }
-}
+crate::utils::retained::cf_retained!(
+    DispatchSource,
+    field = ptr,
+    retain = crate::ffi::acf_object_retain,
+    release = crate::ffi::acf_object_release,
+    drop = unchecked,
+);
 
 impl fmt::Debug for DispatchSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

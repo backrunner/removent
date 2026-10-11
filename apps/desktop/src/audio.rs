@@ -150,14 +150,14 @@ fn open_stream(state: Arc<Mutex<OutputState>>) -> Result<cpal::Stream, String> {
         .map_err(|e| format!("default output config: {e}"))?;
     let sample_format = supported.sample_format();
     let channels = usize::from(supported.channels());
-    let rate = supported.sample_rate().0;
+    let rate = supported.sample_rate();
     let config: cpal::StreamConfig = supported.into();
     let callback_state = state.clone();
     let mut scratch = Vec::<f32>::new();
     let err_fn = |err| tracing::warn!(err = %err, "audio output stream error");
     let stream = device
         .build_output_stream_raw(
-            &config,
+            config,
             sample_format,
             move |data: &mut Data, _| {
                 scratch.resize(data.len(), 0.0);
@@ -174,7 +174,7 @@ fn open_stream(state: Arc<Mutex<OutputState>>) -> Result<cpal::Stream, String> {
     stream
         .play()
         .map_err(|e| format!("start audio output stream: {e}"))?;
-    tracing::info!(device = ?device.name().ok(), channels, rate, ?sample_format, "audio output started");
+    tracing::info!(device = ?device.description().ok(), channels, rate, ?sample_format, "audio output started");
     Ok(stream)
 }
 

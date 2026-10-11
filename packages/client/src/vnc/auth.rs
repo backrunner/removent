@@ -7,10 +7,10 @@ use super::{
 };
 use crate::connection::{ConnectionProgress, ConnectionStage, report_progress};
 use aes::Aes128;
-use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
+use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use md5::{Digest, Md5};
 use num_bigint::BigUint;
-use rand::RngCore;
+use rand::Rng;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -314,7 +314,7 @@ async fn ard_auth(stream: &mut TcpStream, username: &str, password: &[u8]) -> Re
     }
 
     let mut private_bytes = vec![0u8; key_len.max(32)];
-    rand::thread_rng().fill_bytes(&mut private_bytes);
+    rand::rng().fill_bytes(&mut private_bytes);
     // Keep the exponent in the valid subgroup range [2, p-2].
     let private = (BigUint::from_bytes_be(&private_bytes) % (&prime - 3u8)) + 2u8;
     let client_public = generator.modpow(&private, &prime);
@@ -334,7 +334,7 @@ async fn ard_auth(stream: &mut TcpStream, username: &str, password: &[u8]) -> Re
     )?;
     copy_c_string(&mut credentials[64..], password, "Apple password")?;
     for chunk in credentials.as_chunks_mut::<16>().0 {
-        cipher.encrypt_block(GenericArray::from_mut_slice(chunk));
+        cipher.encrypt_block(chunk.into());
     }
     stream.write_all(&credentials).await?;
     let public_bytes = fixed_be_bytes(&client_public, key_len)?;
@@ -371,15 +371,15 @@ pub(super) fn copy_c_string(dst: &mut [u8], src: &[u8], label: &str) -> Result<(
 
 pub(super) fn vnc_response(password: &[u8], challenge: &[u8; 16]) -> [u8; 16] {
     use des::Des;
-    use des::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
+    use des::cipher::{BlockCipherEncrypt, KeyInit};
     let mut key = [0u8; 8];
     for (i, byte) in password.iter().take(8).enumerate() {
         key[i] = byte.reverse_bits();
     }
-    let cipher = Des::new(GenericArray::from_slice(&key));
+    let cipher = Des::new((&key).into());
     let mut response = *challenge;
     for block in response.as_chunks_mut::<8>().0 {
-        cipher.encrypt_block(GenericArray::from_mut_slice(block));
+        cipher.encrypt_block(block.into());
     }
     response
 }

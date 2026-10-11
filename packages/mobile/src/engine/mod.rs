@@ -102,6 +102,7 @@ pub struct State {
     pub audio: VecDeque<Vec<i16>>,
     pub audio_rate: u32,
     pub audio_channels: u8,
+    recovery: removent_client::recovery::Recovery,
     input: Option<InputChannel>,
     control: Option<mpsc::Sender<ControlMsg>>,
     pin: Option<oneshot::Sender<String>>,
@@ -160,6 +161,7 @@ impl InputChannel {
 struct Attempt {
     shared: Arc<Shared>,
     generation: u64,
+    recovery: removent_client::recovery::Recovery,
 }
 impl Attempt {
     fn update(&self, f: impl FnOnce(&mut State)) {
@@ -186,7 +188,9 @@ impl Attempt {
         })
     }
     fn progress(&self, stage: &str) {
-        self.event(json!({"type":"progress", "stage":stage}));
+        if !self.recovery.has_connected() {
+            self.event(json!({"type":"progress", "stage":stage}));
+        }
     }
     fn progress_sink(&self) -> ConnectionProgress {
         let attempt = self.clone();
@@ -278,12 +282,37 @@ impl Engine {
         clipboard: bool,
     ) -> Result<Value> {
         let generation = self.stop();
+        let recovery = removent_client::recovery::Recovery::default();
+        self.shared.state.lock().unwrap().recovery = recovery.clone();
         let attempt = Attempt {
             shared: self.shared.clone(),
             generation,
+            recovery,
         };
         self.task = Some(self.runtime.as_ref().unwrap().spawn(async move {
-            let result = run(request, audio, clipboard, attempt.clone()).await;
+            let mut changes = attempt.recovery.subscribe();
+            let monitor = async {
+                loop {
+                    let state = changes.borrow_and_update().clone();
+                    if matches!(state, removent_client::recovery::State::Offline | removent_client::recovery::State::Reconnecting { .. }) {
+                        attempt.update(|s| {
+                            s.input = None; s.control = None; s.audio.clear(); s.pin = None; s.certificate = None;
+                            s.event(json!({"generation":attempt.generation, "type":"recovery",
+                                "offline":state == removent_client::recovery::State::Offline,
+                                "visible":matches!(state, removent_client::recovery::State::Offline | removent_client::recovery::State::Reconnecting { after_offline: true })}));
+                        });
+                    }
+                    if changes.changed().await.is_err() { break; }
+                }
+            };
+            let recovery = attempt.recovery.clone();
+            let result = tokio::select! {
+                result = recovery.run(|| {
+                    let request = recovery.destination.lock().unwrap().clone().unwrap_or_else(|| request.clone());
+                    run(request, audio, clipboard, attempt.clone())
+                }) => result,
+                _ = monitor => unreachable!(),
+            };
             attempt.finish(result);
         }));
         Ok(json!({"generation":generation}))
@@ -460,6 +489,13 @@ impl Engine {
                 let result = {
                     let s = self.shared.state.lock().unwrap();
                     ensure!(s.generation == generation, "Connection was cancelled");
+                    if matches!(
+                        s.recovery.state(),
+                        removent_client::recovery::State::Offline
+                            | removent_client::recovery::State::Reconnecting { .. }
+                    ) {
+                        return Ok(Value::Null);
+                    }
                     let input = s.input.as_ref().context("Session is not ready")?;
                     messages.into_iter().try_for_each(|m| input.send(m))
                 };

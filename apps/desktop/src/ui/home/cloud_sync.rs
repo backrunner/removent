@@ -120,7 +120,7 @@ impl HomeView {
                         format!("{host}:{port}")
                     };
                     let mut parts = vec![format!(
-                        "{} · {} · {}",
+                        "{}\n{}: {}",
                         if text("name").is_empty() {
                             host
                         } else {
@@ -140,7 +140,7 @@ impl HomeView {
                         let field =
                             |key: &str| relay.get(key).and_then(|v| v.as_str()).unwrap_or("");
                         parts.push(format!(
-                            "{}: {} · {}",
+                            "{}: {} ({})",
                             t!("sync.relay"),
                             field("endpoint"),
                             field("transport").to_uppercase()

@@ -26,9 +26,9 @@ status.settings_save_failed: 设置保存失败：%{err}
 status.pairing_busy: 收到配对请求，请先完成当前 PIN 输入
 status.pairing_done: 已与 %{peer} 完成配对
 status.auto_admitted: 已自动允许 %{peer} (auto-admit)
-status.session_active: 会话进行中 · %{name} · %{codec}
+status.session_active: "会话进行中：%{name}（%{codec}）"
 status.viewer_open_failed: 打开会话窗口失败：%{err}，请查看日志
-status.peer_connected: 对端已接入 · 编码 %{codec}
+status.peer_connected: "对端已接入，编码：%{codec}"
 status.session_ended: 会话结束：%{reason}
 status.host_session_started: "%{peer} 已连入（%{codec}）"
 status.host_session_ended: 对端会话结束：%{reason}
@@ -62,7 +62,7 @@ device.unpaired: 未配对
 device.searching: "暂无附近设备"
 device.searching_hint: 检查局域网发现设置，并确认远端服务已在当前网络中运行。
 device.no_match: 没有匹配的设备
-device.online: 在线 · 可连接
+device.online: 在线，可连接
 device.info: 设备信息
 device.address: 地址
 device.fingerprint: 指纹
@@ -193,9 +193,12 @@ viewer.ended_desc: 对端关闭了会话，或网络连接中断。
 viewer.close_window: 关闭窗口
 
 device.section: "设备"
-device.nearby: "附近设备"
+device.nearby: "局域网发现"
 device.this_mac: "本机"
 saved.section: "已保存"
+action.more: "更多操作"
+saved.empty: "暂无已保存的连接"
+saved.no_match: "没有匹配的已保存连接"
 saved.subtitle: "已保存的连接"
 saved.protocol: "协议"
 saved.remove: "移除已保存的连接"
@@ -240,9 +243,9 @@ settings.sharing_scope_hint: "此开关仅控制本机的 VNC 服务。连接其
 settings.system_description: "管理本地数据、诊断日志与应用更新。"
 settings.data_hint: "设置、设备身份与诊断日志保存在本机。"
 connection.subtitle: "选择远端设备使用的连接方式。"
-connection.removent_hint: "Mac 之间的高速连接 · 安全配对"
-connection.vnc_hint: "macOS 屏幕共享 · 标准 VNC 服务"
-connection.rdp_hint: "Windows 远程桌面 · RDP 服务"
+connection.removent_hint: "Mac 之间的高速连接，支持安全配对"
+connection.vnc_hint: "macOS 屏幕共享或标准 VNC 服务"
+connection.rdp_hint: "Windows 远程桌面（RDP）"
 connection.credentials_hint: "连接 macOS 屏幕共享时，请填写远端 Mac 的账户短名称与登录密码。仅使用 VNC 专用密码时，用户名留空。"
 connection.welcome: "连接到设备"
 connection.welcome_hint: "连接局域网中的 Mac 或 PC，在这里开启远程工作。"
@@ -298,7 +301,9 @@ settings.discovery_hint: 通过 Bonjour/mDNS 和本地 IPv4 网络扫描发现�
 device.protocol: 协议
 
 device.discovery_off: 局域网发现已关闭
-device.discovery_off_hint: 在「设置 → 局域网发现」中开启协议，或手动添加连接。
+device.discovery_off_hint: 一键发现附近的 Removent、VNC 和 RDP 设备，也可手动添加连接。
+device.enable_discovery: 开启发现
+device.discovery_enabled: 局域网发现已开启
 
 # Connection sync
 sync.title: "iCloud"
@@ -379,3 +384,9 @@ trust.waiting: "请确认首次连接"
 
 trust.connect: "信任并连接"
 permissions.request: 申请权限
+
+viewer.network_offline: "网络已断开"
+viewer.network_reconnecting: "正在重新连接…"
+viewer.network_retry_hint: "网络恢复后将自动尝试重新连接。"
+
+connection.relay_credential_destination_changed: "连接目标已改变，请重新输入访问密码。"

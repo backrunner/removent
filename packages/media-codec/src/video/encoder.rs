@@ -334,9 +334,9 @@ pub(super) fn force_keyframe_properties() -> apple_cf::cf::CFDictionary {
     let key_ptr = unsafe { cm::kVTEncodeFrameOptionKey_ForceKeyFrame } as *mut std::ffi::c_void;
     let val_ptr = unsafe { apple_cf::raw::kCFBooleanTrue as *mut std::ffi::c_void };
     let key =
-        unsafe { apple_cf::cf::CFType::from_raw_retained(key_ptr) }.expect("force keyframe key");
+        unsafe { apple_cf::cf::CFType::from_raw_borrowed(key_ptr) }.expect("force keyframe key");
     let value =
-        unsafe { apple_cf::cf::CFType::from_raw_retained(val_ptr) }.expect("cf boolean true");
+        unsafe { apple_cf::cf::CFType::from_raw_borrowed(val_ptr) }.expect("cf boolean true");
     apple_cf::cf::CFDictionary::from_pairs(&[(&key, &value)])
 }
 

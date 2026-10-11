@@ -66,7 +66,7 @@ pub(crate) unsafe fn copy_property(
             status,
         });
     }
-    Ok(CFType::from_raw(value))
+    Ok(unsafe { CFType::from_raw(value) })
 }
 
 pub(crate) unsafe fn copy_supported_property_dictionary(
@@ -75,14 +75,14 @@ pub(crate) unsafe fn copy_supported_property_dictionary(
     let mut out: ffi::CFDictionaryRef = ptr::null();
     // SAFETY: `VTSessionCopySupportedPropertyDictionary` is a standard Apple SDK function.
     // The session pointer is validated by the caller. The out pointer is properly initialized.
-    let status = unsafe { ffi::VTSessionCopySupportedPropertyDictionary(session, &mut out) };
+    let status = unsafe { ffi::VTSessionCopySupportedPropertyDictionary(session, &raw mut out) };
     if status != 0 || out.is_null() {
         return Err(VTError::ApiFailed {
             api: "VTSessionCopySupportedPropertyDictionary",
             status,
         });
     }
-    CFDictionary::from_raw(out.cast_mut().cast()).ok_or(VTError::ApiFailed {
+    unsafe { CFDictionary::from_raw(out.cast_mut().cast()) }.ok_or(VTError::ApiFailed {
         api: "VTSessionCopySupportedPropertyDictionary",
         status,
     })
@@ -95,7 +95,7 @@ pub(crate) unsafe fn copy_serializable_properties(
     // SAFETY: `VTSessionCopySerializableProperties` is a standard Apple SDK function.
     // The session pointer is validated by the caller. The out pointer is properly initialized.
     let status = unsafe {
-        ffi::VTSessionCopySerializableProperties(session, ffi::kCFAllocatorDefault, &mut out)
+        ffi::VTSessionCopySerializableProperties(session, ffi::kCFAllocatorDefault, &raw mut out)
     };
     if status != 0 || out.is_null() {
         return Err(VTError::ApiFailed {
@@ -103,7 +103,7 @@ pub(crate) unsafe fn copy_serializable_properties(
             status,
         });
     }
-    CFDictionary::from_raw(out.cast_mut().cast()).ok_or(VTError::ApiFailed {
+    unsafe { CFDictionary::from_raw(out.cast_mut().cast()) }.ok_or(VTError::ApiFailed {
         api: "VTSessionCopySerializableProperties",
         status,
     })

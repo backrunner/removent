@@ -23,7 +23,7 @@ impl HomeView {
             s.set_value(settings.authentication.password.clone(), window, cx)
         });
         let focus = cx.focus_handle();
-        window.focus(&focus);
+        window.focus(&focus, cx);
 
         // std::mpsc → async bridge: only wakes the UI when an engine event arrives.
         // Previously this was per-frame polling + full re-render, which kept consuming frames

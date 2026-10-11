@@ -231,7 +231,7 @@ usable above the keyboard; forms and sheets retain full Dynamic Type. See the
 
 ## Build from source
 
-Requires a stable Rust toolchain (1.89+, required by IronRDP) and full Xcode with Swift and the Metal toolchain.
+Requires a stable Rust toolchain (1.92+, required by the updated GPUI dependency graph) and full Xcode with Swift and the Metal toolchain.
 
 ```bash
 git clone https://github.com/backrunner/removent.git

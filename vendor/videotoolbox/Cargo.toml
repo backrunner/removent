@@ -11,15 +11,18 @@
 
 [package]
 edition = "2021"
-rust-version = "1.76"
+rust-version = "1.82"
 name = "videotoolbox"
-version = "0.18.1"
+version = "0.21.0"
 authors = ["Per Johansson <per@doom.fish>"]
 build = "build.rs"
 include = [
     "src/**/*",
+    "examples/**/*",
+    "tests/**/*",
     "swift-bridge/Package.swift",
     "swift-bridge/Sources/**/*",
+    "swift-bridge/Tests/**/*",
     "build.rs",
     "Cargo.toml",
     "README.md",
@@ -72,7 +75,7 @@ all-features-flag = [
     "async",
     "frame_processor",
 ]
-async = ["dep:doom-fish-utils"]
+async = []
 compression = []
 decompression = []
 default = ["compression"]
@@ -83,9 +86,134 @@ name = "videotoolbox"
 crate-type = ["lib"]
 path = "src/lib.rs"
 
+[[example]]
+name = "01_encode_smoke"
+path = "examples/01_encode_smoke.rs"
+required-features = ["compression"]
+
+[[example]]
+name = "02_encode_sequence"
+path = "examples/02_encode_sequence.rs"
+required-features = ["compression"]
+
+[[example]]
+name = "03_async_encode"
+path = "examples/03_async_encode.rs"
+required-features = [
+    "compression",
+    "async",
+]
+
+[[example]]
+name = "04_transfer_rotate"
+path = "examples/04_transfer_rotate.rs"
+
+[[example]]
+name = "05_encoder_list"
+path = "examples/05_encoder_list.rs"
+
+[[example]]
+name = "06_frame_processor_caps"
+path = "examples/06_frame_processor_caps.rs"
+required-features = ["frame_processor"]
+
+[[example]]
+name = "07_multipass_hdr"
+path = "examples/07_multipass_hdr.rs"
+
+[[example]]
+name = "08_frame_processor_pipelines"
+path = "examples/08_frame_processor_pipelines.rs"
+required-features = ["frame_processor"]
+
+[[test]]
+name = "api_coverage"
+path = "tests/api_coverage.rs"
+
+[[test]]
+name = "async_api_compression_test"
+path = "tests/async_api_compression_test.rs"
+
+[[test]]
+name = "async_api_decompression_test"
+path = "tests/async_api_decompression_test.rs"
+
+[[test]]
+name = "async_compression_test"
+path = "tests/async_compression_test.rs"
+
+[[test]]
+name = "async_decompression_test"
+path = "tests/async_decompression_test.rs"
+
+[[test]]
+name = "async_raw_processing_test"
+path = "tests/async_raw_processing_test.rs"
+
+[[test]]
+name = "audit_gap_smoke"
+path = "tests/audit_gap_smoke.rs"
+
+[[test]]
+name = "callback_context_teardown"
+path = "tests/callback_context_teardown.rs"
+
+[[test]]
+name = "compression_frames"
+path = "tests/compression_frames.rs"
+
+[[test]]
+name = "compression_session_smoke"
+path = "tests/compression_session_smoke.rs"
+
+[[test]]
+name = "decompression_session_smoke"
+path = "tests/decompression_session_smoke.rs"
+
+[[test]]
+name = "ffi_layout_tests"
+path = "tests/ffi_layout_tests.rs"
+
+[[test]]
+name = "frame_processor_capabilities_smoke"
+path = "tests/frame_processor_capabilities_smoke.rs"
+
+[[test]]
+name = "frame_processor_command_buffer"
+path = "tests/frame_processor_command_buffer.rs"
+
+[[test]]
+name = "motion_estimation_smoke"
+path = "tests/motion_estimation_smoke.rs"
+
+[[test]]
+name = "multipass_storage_smoke"
+path = "tests/multipass_storage_smoke.rs"
+
+[[test]]
+name = "owned_results"
+path = "tests/owned_results.rs"
+
+[[test]]
+name = "pixel_rotation_session_smoke"
+path = "tests/pixel_rotation_session_smoke.rs"
+
+[[test]]
+name = "pixel_transfer_session_smoke"
+path = "tests/pixel_transfer_session_smoke.rs"
+
+[[test]]
+name = "thread_safety"
+path = "tests/thread_safety.rs"
+
+[[test]]
+name = "weak_linking"
+path = "tests/weak_linking.rs"
+
 [dependencies.apple-cf]
-version = ">=0.9, <0.10"
+version = ">=0.11, <0.12"
 features = [
+    "cg",
     "cm",
     "iosurface",
     "cv",
@@ -93,13 +221,12 @@ features = [
 default-features = false
 
 [dependencies.apple-metal]
-version = ">=0.6, <0.9"
+version = ">=0.10, <0.11"
 optional = true
 default-features = false
 
 [dependencies.doom-fish-utils]
-version = ">=0.1, <0.4"
-optional = true
+version = ">=0.4.1, <0.5"
 
 [dev-dependencies.pollster]
 version = "0.3"

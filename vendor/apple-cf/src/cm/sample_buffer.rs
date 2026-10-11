@@ -9,7 +9,8 @@
 //! `screencapturekit-rs`'s SC-attachment readers don't get pulled into
 //! `videotoolbox-rs`.
 
-use super::{CMBlockBuffer, CMFormatDescription, CMTime};
+use super::{AudioBufferList, CMBlockBuffer, CMFormatDescription, CMTime};
+use crate::cf::{CFArray, CFDictionary};
 use crate::ffi;
 use std::fmt;
 
@@ -32,23 +33,30 @@ impl CMSampleBuffer {
     ///
     /// # Safety
     ///
-    /// The caller must ensure `ptr` is a valid `CMSampleBufferRef` retained
-    /// at +1 (the wrapper will release on drop). For NULL-tolerant
-    /// construction prefer [`Self::from_raw`].
+    /// `ptr` must be a non-null, live `CMSampleBufferRef` of the exact type
+    /// carrying one retain transferred to this wrapper. The caller must not
+    /// release or separately adopt that retain. For NULL-tolerant construction
+    /// prefer [`Self::from_raw`].
     #[must_use]
     pub const unsafe fn from_ptr(ptr: *mut std::ffi::c_void) -> Self {
         Self(ptr)
     }
 
-    /// Wrap a raw `CMSampleBufferRef` without bumping its refcount.
+    /// Adopt a raw `CMSampleBufferRef` without bumping its refcount.
     ///
     /// Use this when the caller has just received a `+1` retained pointer
     /// (e.g. a Swift `Unmanaged.passRetained(...).toOpaque()`). The
     /// returned `CMSampleBuffer` will release the pointer when dropped.
     ///
     /// Returns `None` for a NULL pointer.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CMSampleBufferRef` of the exact type
+    /// carrying one retain transferred to this wrapper. The caller must not
+    /// release or separately adopt that transferred retain.
     #[must_use]
-    pub fn from_raw(ptr: *mut std::ffi::c_void) -> Option<Self> {
+    pub unsafe fn from_raw(ptr: *mut std::ffi::c_void) -> Option<Self> {
         if ptr.is_null() {
             None
         } else {
@@ -64,21 +72,20 @@ impl CMSampleBuffer {
     ///
     /// # Safety
     ///
-    /// `ptr` must be a valid `CMSampleBufferRef` (or NULL). Passing a
-    /// dangling or wrong-type pointer is undefined behaviour.
+    /// A non-null `ptr` must be a live `CMSampleBufferRef` of the exact type for
+    /// the duration of the retain call.
     #[must_use]
-    pub unsafe fn from_raw_retained(ptr: *mut std::ffi::c_void) -> Option<Self> {
+    pub unsafe fn from_raw_borrowed(ptr: *mut std::ffi::c_void) -> Option<Self> {
         if ptr.is_null() {
             None
         } else {
             let retained = unsafe { ffi::cm_sample_buffer_retain(ptr) };
-            Self::from_raw(retained)
+            unsafe { Self::from_raw(retained) }
         }
     }
 
-    /// Borrow the underlying `CMSampleBufferRef` for hand-off to other
-    /// Apple bindings without changing its refcount. The pointer remains
-    /// valid for the lifetime of `self`.
+    /// Borrow the underlying +0 `CMSampleBufferRef` without changing its
+    /// refcount. The pointer remains valid for the lifetime of `self`.
     #[must_use]
     pub const fn as_ptr(&self) -> *mut std::ffi::c_void {
         self.0
@@ -111,10 +118,10 @@ impl CMSampleBuffer {
         unsafe {
             ffi::cm_sample_buffer_get_presentation_timestamp(
                 self.0,
-                &mut t.value,
-                &mut t.timescale,
-                &mut t.flags,
-                &mut t.epoch,
+                &raw mut t.value,
+                &raw mut t.timescale,
+                &raw mut t.flags,
+                &raw mut t.epoch,
             );
         }
         t
@@ -128,10 +135,10 @@ impl CMSampleBuffer {
         unsafe {
             ffi::cm_sample_buffer_get_decode_timestamp(
                 self.0,
-                &mut t.value,
-                &mut t.timescale,
-                &mut t.flags,
-                &mut t.epoch,
+                &raw mut t.value,
+                &raw mut t.timescale,
+                &raw mut t.flags,
+                &raw mut t.epoch,
             );
         }
         t
@@ -144,10 +151,10 @@ impl CMSampleBuffer {
         unsafe {
             ffi::cm_sample_buffer_get_duration(
                 self.0,
-                &mut t.value,
-                &mut t.timescale,
-                &mut t.flags,
-                &mut t.epoch,
+                &raw mut t.value,
+                &raw mut t.timescale,
+                &raw mut t.flags,
+                &raw mut t.epoch,
             );
         }
         t
@@ -159,7 +166,7 @@ impl CMSampleBuffer {
     /// Video frames from `VTCompressionSession` always have a data buffer
     /// (the encoded NAL units / `ProRes` frame data). Decoded video frames
     /// from a capture pipeline typically use an image buffer instead — see
-    /// [`Self::image_buffer_ptr`].
+    /// [`Self::image_buffer_ptr_borrowed`].
     #[must_use]
     pub fn data_buffer(&self) -> Option<CMBlockBuffer> {
         let ptr = unsafe { ffi::cm_sample_buffer_get_data_buffer(self.0) };
@@ -169,7 +176,7 @@ impl CMSampleBuffer {
             // CMSampleBufferGetDataBuffer returns an unretained reference;
             // bump the refcount so our wrapper can release on drop.
             let retained = unsafe { ffi::cm_block_buffer_retain(ptr) };
-            CMBlockBuffer::from_raw(retained)
+            unsafe { CMBlockBuffer::from_raw(retained) }
         }
     }
 
@@ -182,36 +189,88 @@ impl CMSampleBuffer {
             None
         } else {
             let retained = unsafe { ffi::cm_format_description_retain(ptr) };
-            CMFormatDescription::from_raw(retained)
+            unsafe { CMFormatDescription::from_raw(retained) }
         }
     }
 
-    /// Raw `CVImageBufferRef` if the sample is image-bearing (decoded
-    /// video frames from a capture pipeline). Use a CV crate's wrapper to
-    /// turn this into a safe `CVPixelBuffer`.
+    /// Borrowed +0 `CVImageBufferRef` if the sample is image-bearing.
     ///
     /// Returns NULL for sample buffers that don't carry an image buffer
-    /// (e.g. compressed video from `VideoToolbox`, audio samples).
+    /// (for example, compressed video or audio samples). The pointer remains
+    /// valid only while `self` and the sample buffer's image association remain
+    /// alive. Retain it before storing or adopting it.
     #[must_use]
-    pub fn image_buffer_ptr(&self) -> *mut std::ffi::c_void {
-        unsafe { ffi::cm_sample_buffer_get_image_buffer(self.0) }
-    }
-}
-
-impl Clone for CMSampleBuffer {
-    fn clone(&self) -> Self {
-        let retained = unsafe { ffi::cm_sample_buffer_retain(self.0) };
-        Self(retained)
-    }
-}
-
-impl Drop for CMSampleBuffer {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { ffi::cm_sample_buffer_release(self.0) };
+    pub fn image_buffer_ptr_borrowed(&self) -> *mut std::ffi::c_void {
+        extern "C" {
+            fn CMSampleBufferGetImageBuffer(
+                sample_buffer: *mut std::ffi::c_void,
+            ) -> *mut std::ffi::c_void;
         }
+        unsafe { CMSampleBufferGetImageBuffer(self.0) }
+    }
+
+    #[must_use]
+    pub fn sample_attachments(&self) -> Vec<CFDictionary> {
+        let ptr = unsafe { ffi::acf_cm_sample_buffer_copy_sample_attachments(self.0) };
+        let Some(attachments) = (unsafe { CFArray::from_raw(ptr) }) else {
+            return Vec::new();
+        };
+        attachments
+            .values()
+            .into_iter()
+            .filter(|value| value.type_id() == CFDictionary::type_id())
+            .filter_map(|value| unsafe { CFDictionary::from_raw_borrowed(value.as_ptr()) })
+            .collect()
+    }
+
+    #[must_use]
+    pub fn is_sync_sample(&self) -> bool {
+        unsafe { ffi::acf_cm_sample_buffer_is_sync_sample(self.0) }
+    }
+
+    #[allow(clippy::missing_errors_doc)]
+    pub fn audio_buffer_list(&self) -> Result<AudioBufferList, i32> {
+        let mut num_buffers = 0_u32;
+        let mut buffers_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+        let mut buffers_len = 0_usize;
+        let mut block_buffer_ptr = std::ptr::null_mut();
+        let status = unsafe {
+            ffi::acf_cm_sample_buffer_copy_audio_buffer_list(
+                self.0,
+                &raw mut num_buffers,
+                &raw mut buffers_ptr,
+                &raw mut buffers_len,
+                &raw mut block_buffer_ptr,
+            )
+        };
+        let list = unsafe {
+            AudioBufferList::from_bridge(
+                num_buffers,
+                buffers_ptr.cast(),
+                buffers_len,
+                block_buffer_ptr,
+            )
+        };
+        if status != 0 {
+            return Err(status);
+        }
+        list.ok_or(-50)
+    }
+
+    /// Copy the sample buffer's image buffer into an independently owned wrapper.
+    #[cfg(feature = "cv")]
+    #[must_use]
+    pub fn image_buffer(&self) -> Option<crate::cv::CVImageBuffer> {
+        let ptr = unsafe { ffi::cm_sample_buffer_copy_image_buffer(self.0) };
+        unsafe { crate::cv::CVImageBuffer::from_raw(ptr) }
     }
 }
+
+crate::utils::retained::cf_retained!(
+    CMSampleBuffer,
+    retain = ffi::cm_sample_buffer_retain,
+    release = ffi::cm_sample_buffer_release,
+);
 
 impl PartialEq for CMSampleBuffer {
     fn eq(&self, other: &Self) -> bool {

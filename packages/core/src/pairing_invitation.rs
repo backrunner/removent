@@ -1,6 +1,6 @@
 //! Private, single-use invitations. Only the public locator may be advertised.
 use crate::DataPaths;
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
 pub const TTL_SECS: u64 = 300;
@@ -80,8 +80,8 @@ impl Invitation {
         let invitation = Self {
             code: format!(
                 "{:06}{:06}",
-                rand::thread_rng().gen_range(0..1_000_000),
-                rand::thread_rng().gen_range(0..1_000_000)
+                rand::rng().random_range(0..1_000_000),
+                rand::rng().random_range(0..1_000_000)
             ),
             expires_at_unix: now() + TTL_SECS,
         };

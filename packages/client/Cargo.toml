@@ -22,15 +22,17 @@ rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
+libc = { workspace = true }
 ironrdp = { version = "0.17", features = ["connector", "session", "graphics", "input"] }
 ironrdp-tokio = { version = "0.10", features = ["reqwest-native-tls"] }
 ironrdp-bulk = "0.1"
 tokio-native-tls = "0.3"
-x509-cert = "0.2"
+x509-cert = "0.3"
 url = "2"
 hex = { workspace = true }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 ironrdp-server = { version = "0.13", default-features = false, features = ["helper"] }
 async-trait = "0.1"
 rcgen = { workspace = true }

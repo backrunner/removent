@@ -49,6 +49,7 @@ pub(super) async fn run(
             .await
             .context("VNC connection timed out")??;
             attempt.update(|s| s.input = Some(InputChannel::Ordered(session.cmd_tx.clone())));
+            attempt.recovery.connected();
             attempt.event(json!({"type":"ready", "codec":"VNC", "audio":false, "clipboard":false}));
             while let Some(frame) = session.decoded_bgra_rx.recv().await {
                 attempt.frame(frame);
@@ -65,6 +66,7 @@ pub(super) async fn run(
             )
             .await?;
             attempt.update(|s| s.input = Some(InputChannel::Rdp(session.cmd_tx.clone())));
+            attempt.recovery.connected();
             attempt.event(json!({"type":"ready", "codec":"RDP", "audio":false, "clipboard":false}));
             while let Some(frame) = session.decoded_bgra_rx.recv().await {
                 attempt.frame(frame);

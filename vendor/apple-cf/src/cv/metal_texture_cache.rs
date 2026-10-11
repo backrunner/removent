@@ -27,12 +27,18 @@ impl CVMetalTextureCache {
     #[must_use]
     pub fn system_default() -> Option<Self> {
         let ptr = unsafe { ffi::cv_metal_texture_cache_create_system_default() };
-        Self::from_raw(ptr)
+        unsafe { Self::from_raw(ptr) }
     }
 
-    /// Wraps a +1 retained `CVMetalTextureCacheRef` and returns `None` for null.
+    /// Adopts a +1 retained `CVMetalTextureCacheRef` and returns `None` for null.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CVMetalTextureCacheRef` of the exact
+    /// type carrying one retain transferred to this wrapper. The caller must
+    /// not release or separately adopt that transferred retain.
     #[must_use]
-    pub fn from_raw(ptr: *mut c_void) -> Option<Self> {
+    pub unsafe fn from_raw(ptr: *mut c_void) -> Option<Self> {
         if ptr.is_null() {
             None
         } else {
@@ -40,7 +46,23 @@ impl CVMetalTextureCache {
         }
     }
 
-    /// Borrow the raw cache pointer.
+    /// Retains a +0 borrowed cache pointer and returns an owned wrapper.
+    ///
+    /// # Safety
+    ///
+    /// A non-null `ptr` must be a live `CVMetalTextureCacheRef` of the exact
+    /// type for the duration of the retain call.
+    #[must_use]
+    pub unsafe fn from_raw_borrowed(ptr: *mut c_void) -> Option<Self> {
+        if ptr.is_null() {
+            None
+        } else {
+            let retained = unsafe { ffi::cf_type_retain(ptr) };
+            unsafe { Self::from_raw(retained) }
+        }
+    }
+
+    /// Borrow the raw +0 cache pointer while `self` remains alive.
     #[must_use]
     pub const fn as_ptr(&self) -> *mut c_void {
         self.0
@@ -58,20 +80,11 @@ impl CVMetalTextureCache {
     }
 }
 
-impl Clone for CVMetalTextureCache {
-    fn clone(&self) -> Self {
-        let retained = unsafe { ffi::cf_type_retain(self.0) };
-        Self(retained)
-    }
-}
-
-impl Drop for CVMetalTextureCache {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { ffi::cf_type_release(self.0) };
-        }
-    }
-}
+crate::utils::retained::cf_retained!(
+    CVMetalTextureCache,
+    retain = ffi::cf_type_retain,
+    release = ffi::cf_type_release,
+);
 
 impl PartialEq for CVMetalTextureCache {
     fn eq(&self, other: &Self) -> bool {

@@ -32,11 +32,11 @@ impl HomeView {
                         this.cancel_connection(cx);
                         this.connection_dialog = None;
                         this.connection_subscription = None;
-                        window.focus(&this.focus);
+                        window.focus(&this.focus, cx);
                     }
                     ConnectionDialogEvent::Cancel => {
                         this.cancel_connection(cx);
-                        window.focus(&dialog.focus_handle(cx));
+                        window.focus(&dialog.focus_handle(cx), cx);
                     }
                     ConnectionDialogEvent::Submit | ConnectionDialogEvent::Save => {
                         if this.connecting.is_some() || this.connection_save_task.is_some() {
@@ -126,7 +126,7 @@ impl HomeView {
                                         if this.save_warning.is_none() {
                                             this.connection_dialog = None;
                                             this.connection_subscription = None;
-                                            window.focus(&this.focus);
+                                            window.focus(&this.focus, cx);
                                         }
                                         cx.notify();
                                         window.refresh();
@@ -152,7 +152,7 @@ impl HomeView {
                                             dialog.update(cx, |form, cx| {
                                                 form.set_connecting(true, None, cx)
                                             });
-                                            window.focus(&dialog.focus_handle(cx));
+                                            window.focus(&dialog.focus_handle(cx), cx);
                                         }
                                         Err(error) => dialog.update(cx, |form, cx| {
                                             form.set_connecting(

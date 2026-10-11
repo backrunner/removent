@@ -9,9 +9,9 @@ use core::ptr;
 use std::sync::{Arc, Mutex};
 
 use apple_cf::cf::{AsCFType, CFDictionary, CFType};
+use apple_cf::cm::CMTime;
 #[cfg(feature = "async")]
-use doom_fish_utils::completion::{AsyncCompletion, SyncCompletionPtr};
-#[cfg(feature = "async")]
+use doom_fish_utils::completion::AsyncCompletion;
 use doom_fish_utils::panic_safe::catch_user_panic;
 
 use crate::error::VTError;
@@ -25,9 +25,9 @@ pub struct DecodedFrame {
     /// when the decoder dropped or skipped a frame.
     pub image_buffer: Option<apple_cf::cv::CVPixelBuffer>,
     /// Presentation timestamp of the source sample buffer.
-    pub presentation_time: (i64, i32),
+    pub presentation_time: CMTime,
     /// Presentation duration of the decoded frame.
-    pub duration: (i64, i32),
+    pub duration: CMTime,
     /// Decoder hint flags (asynchronous / image-buffer-modifiable / etc.).
     pub info_flags: ffi::VTDecodeInfoFlags,
     /// Apple's decoder status code. 0 indicates success.
@@ -39,9 +39,9 @@ pub struct DecodedMultiImageFrame {
     /// Multi-image output (for example left/right eye pixel buffers).
     pub tagged_buffer_group: Option<TaggedBufferGroup>,
     /// Presentation timestamp of the source sample buffer.
-    pub presentation_time: (i64, i32),
+    pub presentation_time: CMTime,
     /// Presentation duration of the decoded frame.
-    pub duration: (i64, i32),
+    pub duration: CMTime,
     /// Decoder hint flags (asynchronous / image-buffer-modifiable / etc.).
     pub info_flags: ffi::VTDecodeInfoFlags,
     /// Apple's decoder status code. 0 indicates success.
@@ -55,9 +55,6 @@ struct CallbackState {
     callback: Mutex<DecodeCallback>,
     multi_image_callback: Mutex<Option<MultiImageDecodeCallback>>,
 }
-
-#[cfg(feature = "async")]
-struct AsyncDecodeContext(SyncCompletionPtr);
 
 /// Hardware video decompression session.
 ///
@@ -73,17 +70,10 @@ struct AsyncDecodeContext(SyncCompletionPtr);
 pub struct DecompressionSession {
     session: ffi::VTDecompressionSessionRef,
     state: Arc<CallbackState>,
+    callback_ref_con: *const CallbackState,
 }
 
 unsafe impl Send for DecompressionSession {}
-unsafe impl Sync for DecompressionSession {}
-
-crate::utils::retained::vt_retained!(
-    DecompressionSession,
-    field = session,
-    invalidate = ffi::VTDecompressionSessionInvalidate,
-    release = ffi::CFRelease,
-);
 
 impl DecompressionSession {
     /// CoreFoundation type identifier for `VTDecompressionSession`.
@@ -107,9 +97,8 @@ impl DecompressionSession {
     /// decode support.
     #[must_use]
     pub fn is_stereo_mvhevc_decode_supported() -> bool {
-        // SAFETY: `VTIsStereoMVHEVCDecodeSupported` is a standard query function
-        // that performs no I/O and has no side effects.
-        unsafe { ffi::VTIsStereoMVHEVCDecodeSupported() != 0 }
+        ffi::dynamic::VTIsStereoMVHEVCDecodeSupported()
+            .is_ok_and(|is_supported| unsafe { is_supported() } != 0)
     }
 
     /// Open a decompression session for the given format description.
@@ -137,7 +126,7 @@ impl DecompressionSession {
     ///
     /// Use this to force the output pixel format (for example a `420f`
     /// full-range NV12 buffer required by some renderers) or to require
-    /// IOSurface backing for zero-copy GPU interop, by passing a dictionary
+    /// `IOSurface` backing for zero-copy GPU interop, by passing a dictionary
     /// keyed on `kCVPixelBufferPixelFormatTypeKey` /
     /// `kCVPixelBufferIOSurfacePropertiesKey`.
     ///
@@ -157,10 +146,8 @@ impl DecompressionSession {
             callback: Mutex::new(Box::new(callback)),
             multi_image_callback: Mutex::new(None),
         });
-        let state_for_callback = state.clone();
-        let ref_con = Arc::into_raw(state_for_callback)
-            .cast::<c_void>()
-            .cast_mut();
+        let callback_ref_con = Arc::into_raw(Arc::clone(&state));
+        let ref_con = callback_ref_con.cast::<c_void>().cast_mut();
 
         let record = ffi::VTDecompressionOutputCallbackRecord {
             decompression_output_callback: decode_trampoline,
@@ -174,16 +161,23 @@ impl DecompressionSession {
                 format_description.as_ptr().cast(),
                 ptr::null(),
                 image_buffer_attributes.map_or(ptr::null(), |d| AsCFType::as_ptr(d).cast()),
-                &record,
-                &mut session,
+                &raw const record,
+                &raw mut session,
             )
         };
-        if status != 0 {
-            // Recover the Arc so it doesn't leak.
-            unsafe { Arc::from_raw(ref_con.cast::<CallbackState>()) };
-            return Err(VTError::EncoderCallback(status));
+        if status != 0 || session.is_null() {
+            unsafe { drop(Arc::from_raw(callback_ref_con)) };
+            return Err(VTError::EncoderCallback(if status == 0 {
+                -1
+            } else {
+                status
+            }));
         }
-        Ok(Self { session, state })
+        Ok(Self {
+            session,
+            state,
+            callback_ref_con,
+        })
     }
 
     /// Decode `sample_buffer`. The callback you registered at construction
@@ -206,8 +200,10 @@ impl DecompressionSession {
     ///
     /// # Errors
     ///
-    /// Returns [`VTError::EncoderCallback`] wrapping the raw `OSStatus`
-    /// if `VTDecompressionSessionDecodeFrameWithOptions` rejects the sample buffer.
+    /// Returns [`VTError::Unsupported`] if `frame_options` is set before
+    /// macOS 15.0 (`VTDecompressionSessionDecodeFrameWithOptions`), or
+    /// [`VTError::EncoderCallback`] wrapping the raw `OSStatus` if the decoder
+    /// rejects the sample buffer.
     pub fn decode_with_options(
         &self,
         sample_buffer: &apple_cf::cm::CMSampleBuffer,
@@ -215,15 +211,29 @@ impl DecompressionSession {
         frame_options: Option<&CFDictionary>,
     ) -> Result<ffi::VTDecodeInfoFlags, VTError> {
         let mut info_flags: ffi::VTDecodeInfoFlags = 0;
-        let status = unsafe {
-            ffi::VTDecompressionSessionDecodeFrameWithOptions(
-                self.session,
-                sample_buffer.as_ptr().cast(),
-                decode_flags,
-                frame_options.map_or(ptr::null(), |dict| dict.as_ptr().cast_const().cast()),
-                ptr::null_mut(),
-                &mut info_flags,
-            )
+        let status = match frame_options {
+            None => unsafe {
+                ffi::VTDecompressionSessionDecodeFrame(
+                    self.session,
+                    sample_buffer.as_ptr().cast(),
+                    decode_flags,
+                    ptr::null_mut(),
+                    &raw mut info_flags,
+                )
+            },
+            Some(frame_options) => {
+                let decode = ffi::dynamic::VTDecompressionSessionDecodeFrameWithOptions()?;
+                unsafe {
+                    decode(
+                        self.session,
+                        sample_buffer.as_ptr().cast(),
+                        decode_flags,
+                        frame_options.as_ptr().cast_const().cast(),
+                        ptr::null_mut(),
+                        &raw mut info_flags,
+                    )
+                }
+            }
         };
         if status == 0 {
             Ok(info_flags)
@@ -238,8 +248,10 @@ impl DecompressionSession {
     ///
     /// # Errors
     ///
-    /// Returns [`VTError::EncoderCallback`] if the decoder rejects the frame,
-    /// reports an asynchronous failure, or completes without an image buffer.
+    /// Returns [`VTError::UnexpectedSampleCount`] if `sample_buffer` does not
+    /// contain exactly one sample. Returns [`VTError::EncoderCallback`] if the
+    /// decoder rejects the frame, reports an asynchronous failure, or completes
+    /// without an image buffer.
     #[cfg(feature = "async")]
     #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
     #[allow(clippy::future_not_send)]
@@ -248,22 +260,22 @@ impl DecompressionSession {
         sample_buffer: apple_cf::cm::CMSampleBuffer,
         frame_flags: u32,
     ) -> Result<apple_cf::cv::CVImageBuffer, VTError> {
+        validate_async_sample_count(&sample_buffer)?;
+
         let (future, completion) = AsyncCompletion::<apple_cf::cv::CVImageBuffer>::create();
-        let context = Box::into_raw(Box::new(AsyncDecodeContext(completion)));
         let status = unsafe {
             ffi::VTDecompressionSessionDecodeFrame(
                 self.session,
                 sample_buffer.as_ptr().cast(),
                 frame_flags,
-                context.cast::<c_void>(),
+                completion,
                 ptr::null_mut(),
             )
         };
         if status != 0 {
-            let context = unsafe { Box::from_raw(context) };
             unsafe {
                 AsyncCompletion::<apple_cf::cv::CVImageBuffer>::complete_err(
-                    context.0,
+                    completion,
                     status.to_string(),
                 );
             };
@@ -280,26 +292,24 @@ impl DecompressionSession {
     ///
     /// # Errors
     ///
-    /// Returns [`VTError::ApiFailed`] if the decoder rejects the callback.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the callback mutex is poisoned.
+    /// Returns [`VTError::Unsupported`] before macOS 14.0, or
+    /// [`VTError::ApiFailed`] if the decoder rejects the callback.
     pub fn set_multi_image_callback<F>(&self, callback: F) -> Result<(), VTError>
     where
         F: FnMut(DecodedMultiImageFrame) + Send + 'static,
     {
+        let set_callback = ffi::dynamic::VTDecompressionSessionSetMultiImageCallback()?;
         {
             let mut slot = self
                 .state
                 .multi_image_callback
                 .lock()
-                .expect("decoder multi-image callback mutex poisoned");
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             *slot = Some(Box::new(callback));
         }
 
         let status = unsafe {
-            ffi::VTDecompressionSessionSetMultiImageCallback(
+            set_callback(
                 self.session,
                 decode_multi_image_trampoline,
                 Arc::as_ptr(&self.state).cast::<c_void>().cast_mut(),
@@ -310,7 +320,7 @@ impl DecompressionSession {
                 .state
                 .multi_image_callback
                 .lock()
-                .expect("decoder multi-image callback mutex poisoned");
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             *slot = None;
             drop(slot);
             return Err(VTError::ApiFailed {
@@ -338,6 +348,20 @@ impl DecompressionSession {
         }
     }
 
+    /// Drain pending callbacks, invalidate the decoder, and release its native resources.
+    ///
+    /// Unlike `Drop`, this surfaces a failure to prove that callbacks are
+    /// quiescent. On that exceptional path the native callback context is kept
+    /// alive to prevent an in-flight callback from observing freed Rust state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VTError::ApiFailed`] if
+    /// `VTDecompressionSessionWaitForAsynchronousFrames` fails.
+    pub fn invalidate(mut self) -> Result<(), VTError> {
+        self.teardown()
+    }
+
     /// Copy a black pixel buffer matching the session's current output format.
     ///
     /// # Errors
@@ -346,14 +370,14 @@ impl DecompressionSession {
     pub fn copy_black_pixel_buffer(&self) -> Result<apple_cf::cv::CVPixelBuffer, VTError> {
         let mut out = ptr::null_mut();
         let status =
-            unsafe { ffi::VTDecompressionSessionCopyBlackPixelBuffer(self.session, &mut out) };
+            unsafe { ffi::VTDecompressionSessionCopyBlackPixelBuffer(self.session, &raw mut out) };
         if status != 0 || out.is_null() {
             return Err(VTError::ApiFailed {
                 api: "VTDecompressionSessionCopyBlackPixelBuffer",
                 status,
             });
         }
-        apple_cf::cv::CVPixelBuffer::from_raw(out.cast()).ok_or(VTError::ApiFailed {
+        unsafe { apple_cf::cv::CVPixelBuffer::from_raw(out.cast()) }.ok_or(VTError::ApiFailed {
             api: "VTDecompressionSessionCopyBlackPixelBuffer",
             status,
         })
@@ -447,32 +471,6 @@ impl DecompressionSession {
         unsafe { self.set_property(ffi::kVTDecompressionPropertyKey_RealTime, v.cast()) }
     }
 
-    /// Suggest a maximum number of frames the decoder may keep
-    /// internally awaiting reordering (B-frame reorder depth).
-    /// Wraps `kVTDecompressionPropertyKey_MaximumOutputBufferDepth`.
-    ///
-    /// # Errors
-    ///
-    /// See [`Self::set_property`].
-    #[cfg(target_os = "macos")]
-pub fn set_max_output_buffer_depth(&self, depth: i32) -> Result<(), VTError> {
-        let v = unsafe {
-            ffi::CFNumberCreate(
-                ffi::kCFAllocatorDefault,
-                ffi::kCFNumberSInt32Type,
-                core::ptr::from_ref(&depth).cast(),
-            )
-        };
-        let r = unsafe {
-            self.set_property(
-                ffi::kVTDecompressionPropertyKey_MaximumOutputBufferDepth,
-                v.cast(),
-            )
-        };
-        unsafe { ffi::CFRelease(v.cast()) };
-        r
-    }
-
     /// Finish any decoded frames the decoder has been holding back
     /// for B-frame reordering. Wraps
     /// `VTDecompressionSessionFinishDelayedFrames`.
@@ -501,11 +499,66 @@ pub fn set_max_output_buffer_depth(&self, depth: i32) -> Result<(), VTError> {
     pub unsafe fn can_accept_format(&self, format: ffi::CMFormatDescriptionRef) -> bool {
         ffi::VTDecompressionSessionCanAcceptFormatDescription(self.session, format)
     }
+
+    fn teardown(&mut self) -> Result<(), VTError> {
+        if self.session.is_null() {
+            return Ok(());
+        }
+
+        let wait_status =
+            unsafe { ffi::VTDecompressionSessionWaitForAsynchronousFrames(self.session) };
+        unsafe {
+            ffi::VTDecompressionSessionInvalidate(self.session);
+            ffi::CFRelease(self.session.cast());
+        }
+        self.session = ptr::null_mut();
+
+        if wait_status == 0 {
+            self.release_callback_ref_con();
+            Ok(())
+        } else {
+            // A failed drain cannot prove that native code is done with the ref-con.
+            self.callback_ref_con = ptr::null();
+            Err(VTError::ApiFailed {
+                api: "VTDecompressionSessionWaitForAsynchronousFrames",
+                status: wait_status,
+            })
+        }
+    }
+
+    fn release_callback_ref_con(&mut self) {
+        let callback_ref_con = core::mem::replace(&mut self.callback_ref_con, ptr::null());
+        if !callback_ref_con.is_null() {
+            unsafe { drop(Arc::from_raw(callback_ref_con)) };
+        }
+    }
+}
+
+impl Drop for DecompressionSession {
+    fn drop(&mut self) {
+        let _ = self.teardown();
+    }
 }
 
 #[cfg(feature = "async")]
 fn parse_async_status(error: &str) -> ffi::OSStatus {
     error.parse().unwrap_or(-1)
+}
+
+#[cfg(feature = "async")]
+fn validate_async_sample_count(
+    sample_buffer: &apple_cf::cm::CMSampleBuffer,
+) -> Result<(), VTError> {
+    let actual = sample_buffer.num_samples();
+    if actual == 1 {
+        Ok(())
+    } else {
+        Err(VTError::UnexpectedSampleCount {
+            operation: "DecompressionSession::decode_frame_async",
+            expected: 1,
+            actual,
+        })
+    }
 }
 
 #[cfg(feature = "async")]
@@ -515,11 +568,10 @@ fn complete_async_decode(
     image_buffer: *mut c_void,
 ) {
     catch_user_panic("videotoolbox::decompression::decode_frame_async", || {
-        let context = unsafe { Box::from_raw(source_frame_ref_con.cast::<AsyncDecodeContext>()) };
         if status != 0 {
             unsafe {
                 AsyncCompletion::<apple_cf::cv::CVImageBuffer>::complete_err(
-                    context.0,
+                    source_frame_ref_con,
                     status.to_string(),
                 );
             };
@@ -529,18 +581,19 @@ fn complete_async_decode(
         if image_buffer.is_null() {
             unsafe {
                 AsyncCompletion::<apple_cf::cv::CVImageBuffer>::complete_err(
-                    context.0,
+                    source_frame_ref_con,
                     "-1".into(),
                 );
             };
             return;
         }
 
-        unsafe { ffi::CFRetain(image_buffer.cast_const()) };
-        let Some(image_buffer) = apple_cf::cv::CVImageBuffer::from_raw(image_buffer) else {
+        let Some(image_buffer) =
+            (unsafe { apple_cf::cv::CVImageBuffer::from_raw_borrowed(image_buffer) })
+        else {
             unsafe {
                 AsyncCompletion::<apple_cf::cv::CVImageBuffer>::complete_err(
-                    context.0,
+                    source_frame_ref_con,
                     "-1".into(),
                 );
             };
@@ -548,7 +601,10 @@ fn complete_async_decode(
         };
 
         unsafe {
-            AsyncCompletion::<apple_cf::cv::CVImageBuffer>::complete_ok(context.0, image_buffer);
+            AsyncCompletion::<apple_cf::cv::CVImageBuffer>::complete_ok(
+                source_frame_ref_con,
+                image_buffer,
+            );
         };
     });
 }
@@ -581,16 +637,13 @@ unsafe extern "C" fn decode_trampoline(
     let image = if image_buffer.is_null() {
         None
     } else {
-        // The decoder owns the pixel buffer; retain so the Rust wrapper
-        // can extend its lifetime past the callback's stack frame.
-        unsafe { ffi::CFRetain(image_buffer.cast_const()) };
-        apple_cf::cv::CVPixelBuffer::from_raw(image_buffer)
+        unsafe { apple_cf::cv::CVPixelBuffer::from_raw_borrowed(image_buffer) }
     };
 
     let frame = DecodedFrame {
         image_buffer: image,
-        presentation_time: (pts.value, pts.timescale),
-        duration: (duration.value, duration.timescale),
+        presentation_time: pts,
+        duration,
         info_flags,
         status,
     };
@@ -600,20 +653,28 @@ unsafe extern "C" fn decode_trampoline(
     };
     // The user closure may panic. Unwinding across this `extern "C"` boundary
     // back into VideoToolbox is undefined behaviour, so guard the invocation.
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    catch_user_panic("videotoolbox::decompression::decode_callback", || {
         guard(frame);
-    }));
+    });
 }
 
 unsafe extern "C" fn decode_multi_image_trampoline(
     output_ref_con: *mut c_void,
-    _source_frame_ref_con: *mut c_void,
+    source_frame_ref_con: *mut c_void,
     status: ffi::OSStatus,
     info_flags: ffi::VTDecodeInfoFlags,
     tagged_buffer_group: ffi::CMTaggedBufferGroupRef,
     pts: ffi::CMTime,
     duration: ffi::CMTime,
 ) {
+    #[cfg(not(feature = "async"))]
+    let _ = source_frame_ref_con;
+    #[cfg(feature = "async")]
+    if !source_frame_ref_con.is_null() {
+        complete_async_decode(source_frame_ref_con, status, ptr::null_mut());
+        return;
+    }
+
     if output_ref_con.is_null() {
         return;
     }
@@ -623,8 +684,8 @@ unsafe extern "C" fn decode_multi_image_trampoline(
 
     let frame = DecodedMultiImageFrame {
         tagged_buffer_group: unsafe { TaggedBufferGroup::from_raw_retained(tagged_buffer_group) },
-        presentation_time: (pts.value, pts.timescale),
-        duration: (duration.value, duration.timescale),
+        presentation_time: pts,
+        duration,
         info_flags,
         status,
     };
@@ -637,7 +698,110 @@ unsafe extern "C" fn decode_multi_image_trampoline(
     };
     // The user closure may panic; unwinding across this `extern "C"` boundary
     // back into VideoToolbox is undefined behaviour, so guard the invocation.
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    catch_user_panic("videotoolbox::decompression::multi_image_callback", || {
         callback(frame);
-    }));
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use core::ptr;
+    use std::sync::{Arc, Mutex};
+
+    use apple_cf::cm::CMTime;
+
+    use super::{decode_multi_image_trampoline, CallbackState};
+
+    fn state() -> Arc<CallbackState> {
+        Arc::new(CallbackState {
+            callback: Mutex::new(Box::new(|_| {})),
+            multi_image_callback: Mutex::new(None),
+        })
+    }
+
+    #[cfg(feature = "async")]
+    fn deliver_to_pending_decode(status: i32) -> Result<apple_cf::cv::CVImageBuffer, String> {
+        use doom_fish_utils::completion::AsyncCompletion;
+
+        let state = state();
+        let (future, context) = AsyncCompletion::<apple_cf::cv::CVImageBuffer>::create();
+        unsafe {
+            decode_multi_image_trampoline(
+                Arc::as_ptr(&state).cast_mut().cast(),
+                context,
+                status,
+                0,
+                ptr::null_mut(),
+                CMTime::new(1, 30),
+                CMTime::new(1, 30),
+            );
+        }
+        pollster::block_on(future)
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn multi_image_failure_resolves_the_pending_async_decode() {
+        assert_eq!(
+            deliver_to_pending_decode(-12909).err().as_deref(),
+            Some("-12909")
+        );
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn multi_image_output_without_an_image_buffer_resolves_the_async_decode() {
+        assert_eq!(deliver_to_pending_decode(0).err().as_deref(), Some("-1"));
+    }
+
+    #[test]
+    fn multi_image_output_without_a_frame_context_reaches_the_callback() {
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&received);
+        let state = state();
+        *state.multi_image_callback.lock().expect("unpoisoned") =
+            Some(Box::new(move |frame: super::DecodedMultiImageFrame| {
+                sink.lock().expect("unpoisoned").push((
+                    frame.status,
+                    frame.presentation_time,
+                    frame.duration,
+                ));
+            }));
+
+        unsafe {
+            decode_multi_image_trampoline(
+                Arc::as_ptr(&state).cast_mut().cast(),
+                ptr::null_mut(),
+                -12909,
+                0,
+                ptr::null_mut(),
+                CMTime::new(3, 30),
+                CMTime::new(1, 30),
+            );
+        }
+
+        assert_eq!(
+            *received.lock().expect("unpoisoned"),
+            [(-12909, CMTime::new(3, 30), CMTime::new(1, 30))]
+        );
+    }
+
+    #[test]
+    fn panicking_multi_image_callback_is_contained() {
+        let state = state();
+        *state.multi_image_callback.lock().expect("unpoisoned") =
+            Some(Box::new(|_| panic!("callback panic")));
+
+        unsafe {
+            decode_multi_image_trampoline(
+                Arc::as_ptr(&state).cast_mut().cast(),
+                ptr::null_mut(),
+                0,
+                0,
+                ptr::null_mut(),
+                CMTime::new(0, 30),
+                CMTime::new(1, 30),
+            );
+        }
+    }
 }

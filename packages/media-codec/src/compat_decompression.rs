@@ -42,7 +42,7 @@ impl CompatibleDecompressionSession {
         // Let VideoToolbox perform its optimized YUV conversion. Without an
         // output format it returns NV12, requiring a scalar per-pixel CPU pass.
         let format_key = unsafe {
-            apple_cf::cf::CFType::from_raw_retained(
+            apple_cf::cf::CFType::from_raw_borrowed(
                 apple_cf::raw::kCVPixelBufferPixelFormatTypeKey
                     .cast_mut()
                     .cast(),
@@ -127,12 +127,12 @@ unsafe extern "C" fn decode_trampoline(
         // SAFETY: VideoToolbox supplies a valid image buffer for the duration
         // of this callback. Retaining lets the Rust wrapper outlive the call.
         unsafe { ffi::CFRetain(image_buffer.cast_const()) };
-        apple_cf::cv::CVPixelBuffer::from_raw(image_buffer)
+        unsafe { apple_cf::cv::CVPixelBuffer::from_raw(image_buffer) }
     };
     let frame = DecodedFrame {
         image_buffer: image,
-        presentation_time: (pts.value, pts.timescale),
-        duration: (duration.value, duration.timescale),
+        presentation_time: pts,
+        duration,
         info_flags,
         status,
     };

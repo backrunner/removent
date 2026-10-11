@@ -3,6 +3,29 @@ import XCTest
 
 @MainActor
 final class ControllerTests: XCTestCase {
+    func testNetworkRecoveryPreservesCanvasAndOnlyShowsOverlayForSystemOutage() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let model = ControllerModel(storageDirectory: directory, startServices: false)
+        defer { model.disconnect(); try? FileManager.default.removeItem(at: directory) }
+        model.accept(["type":"ready", "generation":0, "codec":"VNC"])
+        model.frameSize = CGSize(width: 2560, height: 1440)
+        model.accept(["type":"recovery", "generation":0, "offline":false, "visible":false])
+        XCTAssertTrue(model.ready); XCTAssertTrue(model.recovering)
+        XCTAssertFalse(model.networkOverlay); XCTAssertNil(model.error)
+        model.accept(["type":"recovery", "generation":0, "offline":true, "visible":true])
+        XCTAssertTrue(model.ready); XCTAssertTrue(model.networkOverlay); XCTAssertTrue(model.networkOffline)
+        XCTAssertEqual(model.frameSize, CGSize(width: 2560, height: 1440))
+        model.accept(["type":"recovery", "generation":0, "offline":false, "visible":true])
+        XCTAssertTrue(model.networkOverlay); XCTAssertFalse(model.networkOffline)
+        model.accept(["type":"ready", "generation":0, "codec":"VNC"])
+        XCTAssertFalse(model.recovering); XCTAssertFalse(model.networkOverlay)
+        model.accept(["type":"closed", "generation":0, "error":"retry limit"])
+        XCTAssertFalse(model.ready); XCTAssertEqual(model.error, "retry limit")
+        model.disconnect(dismiss: false)
+        model.accept(["type":"recovery", "generation":0, "offline":true, "visible":true])
+        XCTAssertFalse(model.networkOverlay)
+    }
+
     func testCloudImportKeepsCredentialsLocalAndSeparatesAccounts() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let model = ControllerModel(storageDirectory: directory, startServices: false)

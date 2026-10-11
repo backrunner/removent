@@ -27,10 +27,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const CF_ABSOLUTE_TIME_INTERVAL_SINCE_1970: f64 = 978_307_200.0;
 
-fn to_cstring(value: &str) -> CString {
-    CString::new(value).expect("Core Foundation strings may not contain interior NUL bytes")
-}
-
 impl_cf_type_wrapper!(CFString, cf_string_get_type_id);
 impl_cf_type_wrapper!(CFNumber, cf_number_get_type_id);
 impl_cf_type_wrapper!(CFData, cf_data_get_type_id);
@@ -42,12 +38,11 @@ impl CFString {
     /// Create a UTF-8 `CFString`.
     #[must_use]
     pub fn new(value: &str) -> Self {
-        let value = to_cstring(value);
-        let ptr = unsafe { ffi::cf_string_create_with_cstring(value.as_ptr()) };
-        Self::from_raw(ptr).expect("CFStringCreateWithCString returned NULL")
+        let ptr = unsafe { ffi::acf_cf_string_create_with_bytes(value.as_ptr(), value.len()) };
+        unsafe { Self::from_raw(ptr) }.expect("CFStringCreateWithBytes returned NULL")
     }
 
-    /// Number of Unicode scalar values in the string.
+    /// Number of UTF-16 code units in the string.
     #[must_use]
     pub fn len(&self) -> usize {
         unsafe { ffi::cf_string_get_length(self.as_ptr()) }
@@ -62,15 +57,21 @@ impl CFString {
     /// Copy the string into a Rust `String`.
     #[must_use]
     pub fn to_string_lossy(&self) -> String {
-        let ptr = unsafe { ffi::cf_string_copy_cstring(self.as_ptr()) };
-        if ptr.is_null() {
-            return String::new();
+        let mut units: Vec<u16> = Vec::new();
+        loop {
+            let capacity = units.len();
+            let buffer = if capacity == 0 {
+                std::ptr::null_mut()
+            } else {
+                units.as_mut_ptr()
+            };
+            let len = unsafe { ffi::acf_cf_string_copy_utf16(self.as_ptr(), buffer, capacity) };
+            if len <= capacity {
+                units.truncate(len);
+                return String::from_utf16_lossy(&units);
+            }
+            units.resize(len, 0);
         }
-        let string = unsafe { std::ffi::CStr::from_ptr(ptr) }
-            .to_string_lossy()
-            .into_owned();
-        unsafe { ffi::acf_free_string(ptr) };
-        string
     }
 }
 
@@ -91,28 +92,28 @@ impl CFNumber {
     #[must_use]
     pub fn from_i64(value: i64) -> Self {
         let ptr = unsafe { ffi::cf_number_create_i64(value) };
-        Self::from_raw(ptr).expect("CFNumberCreate returned NULL")
+        unsafe { Self::from_raw(ptr) }.expect("CFNumberCreate returned NULL")
     }
 
     /// Create an unsigned integer number.
     #[must_use]
     pub fn from_u64(value: u64) -> Self {
         let ptr = unsafe { ffi::cf_number_create_u64(value) };
-        Self::from_raw(ptr).expect("CFNumberCreate returned NULL")
+        unsafe { Self::from_raw(ptr) }.expect("CFNumberCreate returned NULL")
     }
 
     /// Create a floating-point number.
     #[must_use]
     pub fn from_f64(value: f64) -> Self {
         let ptr = unsafe { ffi::cf_number_create_f64(value) };
-        Self::from_raw(ptr).expect("CFNumberCreate returned NULL")
+        unsafe { Self::from_raw(ptr) }.expect("CFNumberCreate returned NULL")
     }
 
     /// Convert to `i64` if representable.
     #[must_use]
     pub fn to_i64(&self) -> Option<i64> {
         let mut out = 0_i64;
-        let ok = unsafe { ffi::cf_number_get_i64(self.as_ptr(), &mut out) };
+        let ok = unsafe { ffi::cf_number_get_i64(self.as_ptr(), &raw mut out) };
         ok.then_some(out)
     }
 
@@ -120,7 +121,7 @@ impl CFNumber {
     #[must_use]
     pub fn to_u64(&self) -> Option<u64> {
         let mut out = 0_u64;
-        let ok = unsafe { ffi::cf_number_get_u64(self.as_ptr(), &mut out) };
+        let ok = unsafe { ffi::cf_number_get_u64(self.as_ptr(), &raw mut out) };
         ok.then_some(out)
     }
 
@@ -128,7 +129,7 @@ impl CFNumber {
     #[must_use]
     pub fn to_f64(&self) -> Option<f64> {
         let mut out = 0.0_f64;
-        let ok = unsafe { ffi::cf_number_get_f64(self.as_ptr(), &mut out) };
+        let ok = unsafe { ffi::cf_number_get_f64(self.as_ptr(), &raw mut out) };
         ok.then_some(out)
     }
 
@@ -163,7 +164,7 @@ impl CFData {
     pub fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Self {
         let bytes = bytes.as_ref();
         let ptr = unsafe { ffi::cf_data_create(bytes.as_ptr(), bytes.len()) };
-        Self::from_raw(ptr).expect("CFDataCreate returned NULL")
+        unsafe { Self::from_raw(ptr) }.expect("CFDataCreate returned NULL")
     }
 
     /// Number of bytes stored in the data blob.
@@ -182,10 +183,20 @@ impl CFData {
     #[must_use]
     pub fn to_vec(&self) -> Vec<u8> {
         let mut bytes = vec![0_u8; self.len()];
-        if !bytes.is_empty() {
-            unsafe { ffi::cf_data_copy_bytes(self.as_ptr(), bytes.as_mut_ptr()) };
+        loop {
+            let capacity = bytes.len();
+            let buffer = if capacity == 0 {
+                std::ptr::null_mut()
+            } else {
+                bytes.as_mut_ptr()
+            };
+            let len = unsafe { ffi::acf_cf_data_copy_bytes(self.as_ptr(), buffer, capacity) };
+            if len <= capacity {
+                bytes.truncate(len);
+                return bytes;
+            }
+            bytes.resize(len, 0);
         }
-        bytes
     }
 }
 
@@ -194,7 +205,7 @@ impl CFDate {
     #[must_use]
     pub fn from_absolute_time(absolute_time: f64) -> Self {
         let ptr = unsafe { ffi::cf_date_create(absolute_time) };
-        Self::from_raw(ptr).expect("CFDateCreate returned NULL")
+        unsafe { Self::from_raw(ptr) }.expect("CFDateCreate returned NULL")
     }
 
     /// Current wall-clock time.
@@ -224,13 +235,10 @@ impl CFDate {
     #[must_use]
     pub fn to_system_time(&self) -> Option<SystemTime> {
         let unix_seconds = self.absolute_time() + CF_ABSOLUTE_TIME_INTERVAL_SINCE_1970;
-        if unix_seconds.is_nan() || !unix_seconds.is_finite() {
-            return None;
-        }
         if unix_seconds >= 0.0 {
-            Some(UNIX_EPOCH + Duration::from_secs_f64(unix_seconds))
+            UNIX_EPOCH.checked_add(Duration::try_from_secs_f64(unix_seconds).ok()?)
         } else {
-            Some(UNIX_EPOCH - Duration::from_secs_f64(-unix_seconds))
+            UNIX_EPOCH.checked_sub(Duration::try_from_secs_f64(-unix_seconds).ok()?)
         }
     }
 }
@@ -240,22 +248,37 @@ impl CFUUID {
     #[must_use]
     pub fn new() -> Self {
         let ptr = unsafe { ffi::cf_uuid_create() };
-        Self::from_raw(ptr).expect("CFUUIDCreate returned NULL")
+        unsafe { Self::from_raw(ptr) }.expect("CFUUIDCreate returned NULL")
     }
 
     /// Parse a UUID string.
     #[must_use]
     pub fn parse_str(value: &str) -> Option<Self> {
-        let value = to_cstring(value);
+        let canonical = value
+            .strip_prefix('{')
+            .and_then(|inner| inner.strip_suffix('}'))
+            .unwrap_or(value);
+        let well_formed = canonical.len() == 36
+            && canonical.bytes().enumerate().all(|(index, byte)| {
+                if matches!(index, 8 | 13 | 18 | 23) {
+                    byte == b'-'
+                } else {
+                    byte.is_ascii_hexdigit()
+                }
+            });
+        if !well_formed {
+            return None;
+        }
+        let value = CString::new(canonical).ok()?;
         let ptr = unsafe { ffi::cf_uuid_create_from_string(value.as_ptr()) };
-        Self::from_raw(ptr)
+        unsafe { Self::from_raw(ptr) }
     }
 
     /// Canonical textual representation.
     #[must_use]
     pub fn string(&self) -> CFString {
         let ptr = unsafe { ffi::cf_uuid_copy_string(self.as_ptr()) };
-        CFString::from_raw(ptr).expect("CFUUIDCreateString returned NULL")
+        unsafe { CFString::from_raw(ptr) }.expect("CFUUIDCreateString returned NULL")
     }
 
     /// UUID bytes in RFC-4122 order.
@@ -283,19 +306,24 @@ impl CFError {
     /// Create a Core Foundation error object.
     #[must_use]
     pub fn new(domain: &CFString, code: i64, description: Option<&str>) -> Self {
-        let description = description.map(to_cstring);
-        let description_ptr = description
-            .as_ref()
-            .map_or(std::ptr::null(), |s| s.as_ptr());
-        let ptr = unsafe { ffi::cf_error_create(domain.as_ptr(), code, description_ptr) };
-        Self::from_raw(ptr).expect("CFErrorCreate returned NULL")
+        let description = description.map(CFString::new);
+        let ptr = unsafe {
+            ffi::acf_cf_error_create(
+                domain.as_ptr(),
+                code,
+                description
+                    .as_ref()
+                    .map_or(std::ptr::null_mut(), CFString::as_ptr),
+            )
+        };
+        unsafe { Self::from_raw(ptr) }.expect("CFErrorCreate returned NULL")
     }
 
     /// Error domain.
     #[must_use]
     pub fn domain(&self) -> CFString {
         let ptr = unsafe { ffi::cf_error_get_domain(self.as_ptr()) };
-        CFString::from_raw(ptr).expect("CFErrorGetDomain returned NULL")
+        unsafe { CFString::from_raw(ptr) }.expect("CFErrorGetDomain returned NULL")
     }
 
     /// Numeric error code.
@@ -308,14 +336,14 @@ impl CFError {
     #[must_use]
     pub fn description_string(&self) -> Option<CFString> {
         let ptr = unsafe { ffi::cf_error_copy_description(self.as_ptr()) };
-        CFString::from_raw(ptr)
+        unsafe { CFString::from_raw(ptr) }
     }
 
     /// Failure reason if present.
     #[must_use]
     pub fn failure_reason(&self) -> Option<CFString> {
         let ptr = unsafe { ffi::cf_error_copy_failure_reason(self.as_ptr()) };
-        CFString::from_raw(ptr)
+        unsafe { CFString::from_raw(ptr) }
     }
 }
 

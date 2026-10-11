@@ -1,7 +1,7 @@
 use super::*;
 use aes::Aes128;
-use aes::cipher::generic_array::GenericArray;
-use aes::cipher::{BlockDecrypt, KeyInit};
+
+use aes::cipher::{BlockCipherDecrypt, KeyInit};
 use md5::{Digest, Md5};
 use num_bigint::BigUint;
 use removent_proto::{ControlMsg, KeyModifiers, MouseKind, ScrollPhase};
@@ -393,7 +393,7 @@ async fn apple_ard_type30_handshake_pointer_and_raw_frame_roundtrip() {
         let cipher = Aes128::new_from_slice(&key).unwrap();
         let mut decrypted = encrypted_credentials;
         for block in decrypted.as_chunks_mut::<16>().0 {
-            cipher.decrypt_block(GenericArray::from_mut_slice(block));
+            cipher.decrypt_block(block.into());
         }
         assert_eq!(&decrypted[..6], b"alice\0");
         assert_eq!(&decrypted[64..71], b"secret\0");

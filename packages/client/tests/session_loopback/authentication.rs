@@ -231,10 +231,10 @@ async fn otp_authenticates_and_rejects_reuse_wrong_and_expired_codes() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let token = totp.generate(now);
+    let token = totp.generate(now).to_string();
     let candidates: Vec<_> = [now.saturating_sub(30), now, now + 30]
         .into_iter()
-        .map(|time| totp.generate(time))
+        .map(|time| totp.generate(time).to_string())
         .collect();
     let wrong = (0..1_000_000)
         .map(|n| format!("{n:06}"))
@@ -282,7 +282,7 @@ async fn otp_authenticates_and_rejects_reuse_wrong_and_expired_codes() {
     assert_eq!(
         attempt(
             auth.clone(),
-            Some(totp.generate(now.saturating_sub(120))),
+            Some(totp.generate(now.saturating_sub(120)).to_string()),
             false,
             AdmissionMode::AlwaysAsk,
             DataPaths {

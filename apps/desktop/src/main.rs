@@ -55,7 +55,7 @@ fn run(paths: DataPaths) -> Result<()> {
 
     let engine_for_window = engine.clone();
     let theme_pref = engine.settings().theme;
-    gpui::Application::new()
+    gpui_platform::application()
         .with_assets(assets::Assets)
         .run(move |cx: &mut gpui::App| {
             gpui_component::init(cx);
@@ -138,7 +138,7 @@ fn run(paths: DataPaths) -> Result<()> {
             // The menu bar app and hosting daemon are independent processes.
             // Leaving this process alive without its home window makes Dock/tray
             // activation a no-op, because the event receiver belongs to that view.
-            cx.on_window_closed(move |cx| {
+            cx.on_window_closed(move |cx, _| {
                 if !cx
                     .windows()
                     .iter()

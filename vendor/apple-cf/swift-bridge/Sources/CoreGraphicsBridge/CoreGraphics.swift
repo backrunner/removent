@@ -110,8 +110,11 @@ public func renderCGImageRGBAInto(
     let width = cgImage.width
     let height = cgImage.height
     let bytesPerPixel = 4 // RGBA
-    let bytesPerRow = width * bytesPerPixel
-    let totalBytes = height * bytesPerRow
+    let (bytesPerRow, rowOverflow) = width.multipliedReportingOverflow(by: bytesPerPixel)
+    let (totalBytes, totalOverflow) = height.multipliedReportingOverflow(by: bytesPerRow)
+    guard !rowOverflow, !totalOverflow else {
+        return 0
+    }
 
     // Refuse to render into a buffer the caller didn't size correctly. The
     // Rust side allocates exactly width*height*4 bytes; if the image's
@@ -163,10 +166,10 @@ public func renderCGImageBGRAInto(
     let width = cgImage.width
     let height = cgImage.height
     let bytesPerPixel = 4 // BGRA
-    let bytesPerRow = width * bytesPerPixel
-    let totalBytes = height * bytesPerRow
+    let (bytesPerRow, rowOverflow) = width.multipliedReportingOverflow(by: bytesPerPixel)
+    let (totalBytes, totalOverflow) = height.multipliedReportingOverflow(by: bytesPerRow)
 
-    guard totalBytes <= destCapacity else {
+    guard !rowOverflow, !totalOverflow, totalBytes <= destCapacity else {
         return 0
     }
 
@@ -209,8 +212,11 @@ public func getCGImageData(_ image: OpaquePointer, _ outPtr: UnsafeMutablePointe
     let width = cgImage.width
     let height = cgImage.height
     let bytesPerPixel = 4 // RGBA
-    let bytesPerRow = width * bytesPerPixel
-    let totalBytes = height * bytesPerRow
+    let (bytesPerRow, rowOverflow) = width.multipliedReportingOverflow(by: bytesPerPixel)
+    let (totalBytes, totalOverflow) = height.multipliedReportingOverflow(by: bytesPerRow)
+    guard !rowOverflow, !totalOverflow else {
+        return false
+    }
 
     let buffer = UnsafeMutableRawPointer.allocate(byteCount: totalBytes, alignment: 1)
 

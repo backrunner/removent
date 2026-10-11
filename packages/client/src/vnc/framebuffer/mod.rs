@@ -86,10 +86,10 @@ pub(super) async fn read_frames(
         if let Err(error) = stream.read_exact(&mut kind).await {
             if error.kind() == io::ErrorKind::UnexpectedEof {
                 tracing::info!("VNC server closed the stream");
-            } else {
-                return Err(error);
             }
-            break;
+            // RFB has no graceful peer-end message. A FIN is an interrupted
+            // session too, so both desktop and mobile supervisors can recover.
+            return Err(error);
         }
         let previous_size = *dimensions.read().await;
         let update_started = Instant::now();

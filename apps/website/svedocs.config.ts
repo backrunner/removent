@@ -17,14 +17,15 @@ export default defineConfig({
     nav: [
       { label: 'Overview', labelKey: 'site.overview', href: '/' },
       { label: 'Documentation', labelKey: 'nav.documentation', href: '/docs' },
-      { label: 'Download', labelKey: 'site.download', href: '/download' }
+      { label: 'Download', labelKey: 'site.download', href: '/download' },
+      { label: 'Support', labelKey: 'site.support', href: '/support' }
     ],
     footer: { text: 'Removent', links: [] },
     code: { copyButton: true, wrap: false }
   },
   search: { provider: 'local', scope: 'current' }, ai: false,
   agent: { enabled: true, markdown: true, llms: true, negotiation: false },
-  source: { editBaseUrl: 'https://github.com/backrunner/removent/edit/main/website' },
+  source: { editBaseUrl: 'https://github.com/backrunner/removent/edit/main/apps/website' },
   checks: { assets: true, translations: true },
   i18n: {
     defaultLocale: 'en', prefixDefaultLocale: false,

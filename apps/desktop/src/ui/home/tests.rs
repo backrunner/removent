@@ -1,6 +1,8 @@
 use super::*;
 use gpui::{AnyView, TestAppContext};
 
+mod authentication;
+
 #[gpui::test]
 fn permissions_clear_during_restart_and_reappear_from_the_new_snapshot(cx: &mut TestAppContext) {
     cx.update(gpui_component::init);
@@ -154,6 +156,7 @@ fn settings_sidebar_switches_sections_and_preserves_device_selection(cx: &mut Te
                 "office".into(),
                 DeviceRow {
                     name: "Office Mac".into(),
+                    hosts: vec![],
                     addr: "192.0.2.1:48688".parse().unwrap(),
                     protocol: ConnectionProtocol::Removent,
                 },
@@ -427,6 +430,7 @@ fn discovery_switches_persist_independently_and_remove_disabled_rows(cx: &mut Te
                 UiEvent::DeviceFound {
                     fp: "VNC:192.168.1.2:5900".into(),
                     name: "Office".into(),
+                    hosts: vec![],
                     addr: "192.168.1.2:5900".parse().unwrap(),
                     protocol: ConnectionProtocol::Vnc,
                 },
@@ -456,77 +460,82 @@ fn discovery_switches_persist_independently_and_remove_disabled_rows(cx: &mut Te
 }
 
 #[gpui::test]
-fn authentication_settings_persist_each_mode_and_require_password(cx: &mut TestAppContext) {
+fn no_update_result_only_renders_for_manual_checks_while_history_remains_visible(
+    cx: &mut TestAppContext,
+) {
     cx.update(gpui_component::init);
     let directory = tempfile::tempdir().unwrap();
     let paths = removent_core::DataPaths {
         root: directory.path().into(),
     };
-    let read_paths = paths.clone();
+    std::fs::write(
+        paths.root.join("update-check.json"),
+        r#"{"last_checked_at":1791829440}"#,
+    )
+    .unwrap();
     let (commands, _rx) = tokio::sync::mpsc::channel(1);
     let engine = Engine::for_ui_test(paths, commands);
+    assert_eq!(engine.last_update_check(), Some(1791829440));
     let slot = Rc::new(std::cell::RefCell::new(None));
     let out = slot.clone();
     let (_, cx) = cx.add_window_view(move |window, cx| {
         let view = cx.new(|cx| HomeView::new(engine, window, cx));
         view.update(cx, |view, _| {
             view.settings_open = true;
-            view.settings_section = 2;
+            view.settings_section = 4;
         });
         *out.borrow_mut() = Some(view.clone());
         gpui_component::Root::new(AnyView::from(view), window, cx)
     });
     let view = slot.borrow_mut().take().unwrap();
     cx.simulate_resize(gpui::size(px(860.), px(700.)));
-    cx.run_until_parked();
-    let password = cx.debug_bounds("authentication-1").unwrap();
-    cx.simulate_mouse_move(password.center(), None, Default::default());
-    cx.simulate_click(password.center(), Default::default());
-    cx.run_until_parked();
-    assert_eq!(
-        removent_core::Settings::load(&read_paths)
-            .unwrap()
-            .authentication
-            .mode,
-        removent_core::AuthenticationMode::PairingCode
-    );
-    view.update_in(cx, |view, window, cx| {
-        view.auth_password_input.update(cx, |input, cx| {
-            input.set_value("synthetic-host-password", window, cx)
+    for dark in [false, true] {
+        cx.update(|window, cx| {
+            gpui_component::Theme::change(
+                if dark {
+                    gpui_component::ThemeMode::Dark
+                } else {
+                    gpui_component::ThemeMode::Light
+                },
+                Some(window),
+                cx,
+            );
+            crate::theme::apply(dark, cx);
         });
-        view.save_authentication(removent_core::AuthenticationMode::Password, cx);
-    });
-    assert_eq!(
-        removent_core::Settings::load(&read_paths)
-            .unwrap()
-            .authentication
-            .mode,
-        removent_core::AuthenticationMode::Password
-    );
-    for (selector, mode) in [
-        ("authentication-2", removent_core::AuthenticationMode::Otp),
-        ("authentication-3", removent_core::AuthenticationMode::None),
-        (
-            "authentication-0",
-            removent_core::AuthenticationMode::PairingCode,
-        ),
-    ] {
-        cx.run_until_parked();
-        let bounds = cx.debug_bounds(selector).unwrap();
-        assert!(bounds.right() <= px(860.));
-        cx.simulate_mouse_move(bounds.center(), None, Default::default());
-        cx.simulate_click(bounds.center(), Default::default());
-        cx.run_until_parked();
-        let settings = removent_core::Settings::load(&read_paths).unwrap();
-        assert_eq!(settings.authentication.mode, mode);
-        if mode == removent_core::AuthenticationMode::Otp {
-            assert!(settings.authentication.totp().is_ok());
+        for (status, result, available) in [
+            (UpdateStatus::Idle, false, false),
+            (UpdateStatus::UpToDate { manual: false }, false, false),
+            (UpdateStatus::UpToDate { manual: true }, true, false),
+            (
+                UpdateStatus::Available {
+                    version: "9.0.0".into(),
+                    notes: String::new(),
+                },
+                false,
+                true,
+            ),
+        ] {
+            cx.update(|_, cx| {
+                view.update(cx, |view, cx| {
+                    view.update_status = status;
+                    cx.notify();
+                })
+            });
+            cx.run_until_parked();
+            assert_eq!(cx.debug_bounds("update-up-to-date").is_some(), result);
+            assert_eq!(cx.debug_bounds("update-download").is_some(), available);
+            let time = cx
+                .debug_bounds("update-last-check")
+                .expect("historical check time remains visible");
+            assert!(time.right() <= px(860.) && time.bottom() <= px(700.));
         }
     }
 }
 
 #[gpui::test]
-fn certificate_confirmation_requires_a_click_and_rejects_stale_events(cx: &mut TestAppContext) {
+fn saved_connections_hide_nearby_duplicates_and_reappear_after_bookmark_removal(
+    cx: &mut TestAppContext,
+) {
     cx.update(gpui_component::init);
     let directory = tempfile::tempdir().unwrap();
     let paths = removent_core::DataPaths {
@@ -534,77 +543,105 @@ fn certificate_confirmation_requires_a_click_and_rejects_stale_events(cx: &mut T
     };
     let (commands, _rx) = tokio::sync::mpsc::channel(1);
     let engine = Engine::for_ui_test(paths, commands);
+    engine.update_settings(|s| s.discovery.vnc = true).unwrap();
     let slot = Rc::new(std::cell::RefCell::new(None));
     let out = slot.clone();
     let (_, cx) = cx.add_window_view(move |window, cx| {
         let view = cx.new(|cx| HomeView::new(engine, window, cx));
+        view.update(cx, |view, cx| {
+            view.handle_event(
+                UiEvent::DeviceFound {
+                    fp: "office".into(),
+                    name: "Mac mini".into(),
+                    addr: "192.168.1.11:5900".parse().unwrap(),
+                    hosts: vec!["mac-mini.local.".into(), "2001:db8::1".into()],
+                    protocol: ConnectionProtocol::Vnc,
+                },
+                window,
+                cx,
+            );
+            view.selected = Some(Selection::Device("office".into()));
+        });
         *out.borrow_mut() = Some(view.clone());
         gpui_component::Root::new(AnyView::from(view), window, cx)
     });
     let view = slot.borrow_mut().take().unwrap();
-    cx.simulate_resize(gpui::size(px(860.), px(650.)));
-    let (tx, mut stale) = oneshot::channel();
-    cx.update(|window, cx| {
-        view.update(cx, |view, cx| {
-            view.handle_event(
-                UiEvent::ConfirmCertificate {
-                    generation: view.engine.client_generation() + 1,
-                    destination: "stale".into(),
-                    relay: false,
-                    tx,
-                },
-                window,
-                cx,
-            );
-            assert!(view.pin_dialog.is_none());
-        })
-    });
-    assert!(matches!(
-        stale.try_recv(),
-        Err(oneshot::error::TryRecvError::Closed)
-    ));
-    let (tx, mut answer) = oneshot::channel();
-    cx.update(|window, cx| {
-        view.update(cx, |view, cx| {
-            view.handle_event(
-                UiEvent::ConfirmCertificate {
-                    generation: view.engine.client_generation(),
-                    destination: "Office Mac".into(),
-                    relay: false,
-                    tx,
-                },
-                window,
-                cx,
-            );
-        })
-    });
-    cx.run_until_parked();
-    assert!(matches!(
-        answer.try_recv(),
-        Err(oneshot::error::TryRecvError::Empty)
-    ));
-    let button = cx.debug_bounds("trust-certificate").unwrap();
-    cx.simulate_click(button.center(), Default::default());
-    cx.run_until_parked();
-    assert!(answer.try_recv().unwrap());
-    let (tx, mut cancel) = oneshot::channel();
-    cx.update(|window, cx| {
-        view.update(cx, |view, cx| {
-            view.handle_event(
-                UiEvent::ConfirmCertificate {
-                    generation: view.engine.client_generation(),
-                    destination: "relay.example".into(),
-                    relay: true,
-                    tx,
-                },
-                window,
-                cx,
-            );
-        })
-    });
-    cx.run_until_parked();
-    let button = cx.debug_bounds("cancel-certificate").unwrap();
-    cx.simulate_click(button.center(), Default::default());
-    cx.run_until_parked();
-    assert!(!cancel.try_recv().unwrap());
+    cx.simulate_resize(gpui::size(px(1040.), px(700.)));
+    let saved = SavedConnection {
+        id: "saved-office".into(),
+        name: "br-gateway".into(),
+        host: "192.168.1.11".into(),
+        port: 5900,
+        protocol: ConnectionProtocol::Vnc,
+        ..Default::default()
+    };
+    for (entries, discovered) in [
+        (vec![saved.clone()], false),
+        (vec![], true),
+        (
+            vec![SavedConnection {
+                port: 5901,
+                ..saved.clone()
+            }],
+            true,
+        ),
+        (
+            vec![SavedConnection {
+                protocol: ConnectionProtocol::Rdp,
+                ..saved.clone()
+            }],
+            true,
+        ),
+        (
+            vec![SavedConnection {
+                host: "MAC-MINI.LOCAL.".into(),
+                ..saved.clone()
+            }],
+            false,
+        ),
+        (
+            vec![SavedConnection {
+                host: "[2001:0db8::1]".into(),
+                ..saved.clone()
+            }],
+            false,
+        ),
+        (vec![], true),
+    ] {
+        let saved_visible = !entries.is_empty();
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle_event(
+                    UiEvent::CloudSync {
+                        status: serde_json::json!({"code":"off"}),
+                        entries,
+                    },
+                    window,
+                    cx,
+                );
+                assert!(
+                    view.devices.contains_key("office"),
+                    "deduplication retains the live discovery source"
+                );
+                if !discovered {
+                    assert!(
+                        matches!(&view.selected, Some(Selection::Saved(id)) if id == "saved-office")
+                    );
+                }
+            })
+        });
+        cx.run_until_parked();
+        assert_eq!(cx.debug_bounds("discovered-office").is_some(), discovered);
+        assert_eq!(
+            cx.debug_bounds("bookmark-saved-office").is_some(),
+            saved_visible
+        );
+        if discovered {
+            cx.update(|_, cx| {
+                view.update(cx, |view, _| {
+                    view.selected = Some(Selection::Device("office".into()))
+                })
+            });
+        }
+    }
 }

@@ -59,6 +59,22 @@ impl Default for SavedConnection {
 }
 
 impl SavedConnection {
+    /// List deduplication does not merge credentials or transfer pairing trust.
+    pub fn matches_discovered(
+        &self,
+        protocol: ConnectionProtocol,
+        address: &ConnectionAddress,
+        advertised_hosts: &[String],
+    ) -> bool {
+        self.relay.is_none()
+            && self.protocol == protocol
+            && self.port == address.port
+            && (address.same_host(&self.host)
+                || advertised_hosts
+                    .iter()
+                    .any(|host| self.address().same_host(host)))
+    }
+
     /// Identity/timestamps are placeholders: `SavedConnections::upsert` assigns them.
     pub fn from_request(request: &ConnectionRequest, name: impl Into<String>) -> Self {
         Self {

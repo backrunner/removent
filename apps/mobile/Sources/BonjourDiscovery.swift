@@ -39,7 +39,7 @@ final class BonjourDiscovery: NSObject, ObservableObject, @preconcurrency NetSer
         guard services[key(service)] === service, service.port > 0 else { return }
         // Prefer a numeric address so saved discovery also works when multicast
         // DNS is later unavailable. getnameinfo retains IPv6 interface scope.
-        let host = service.addresses?.compactMap { data -> String? in
+        let addresses = service.addresses?.compactMap { data -> String? in
             data.withUnsafeBytes { bytes in
                 guard let base = bytes.baseAddress, data.count >= MemoryLayout<sockaddr>.size else { return nil }
                 let address = base.assumingMemoryBound(to:sockaddr.self)
@@ -48,7 +48,8 @@ final class BonjourDiscovery: NSObject, ObservableObject, @preconcurrency NetSer
                     nil, 0, NI_NUMERICHOST) == 0 else { return nil }
                 return String(cString:result)
             }
-        }.sorted { !$0.contains(":") && $1.contains(":") }.first ?? service.hostName
+        }.sorted { !$0.contains(":") && $1.contains(":") } ?? []
+        let host = addresses.first ?? service.hostName
         guard let host else { return }
         let proto: ConnectionProtocol = service.type == "_removent._udp." ? .removent : service.type == "_rfb._tcp." ? .vnc : .rdp
         let id = key(service)
@@ -56,7 +57,7 @@ final class BonjourDiscovery: NSObject, ObservableObject, @preconcurrency NetSer
         let txt = service.txtRecordData().map(NetService.dictionary(fromTXTRecord:)) ?? [:]
         let locator = txt["pair"].flatMap { String(data:$0, encoding:.utf8) }
         let expires = txt["pair-exp"].flatMap { String(data:$0, encoding:.utf8) }.flatMap(TimeInterval.init)
-        devices.append(NearbyDevice(id:id, name:service.name, host:host, port:service.port, protocol:proto, pairingLocator:locator, pairingExpiresAt:expires, pairingIdentity:txt["fp"].flatMap { String(data:$0, encoding:.utf8) }))
+        devices.append(NearbyDevice(id:id, name:service.name, host:host, port:service.port, protocol:proto, advertisedHosts:addresses + [service.hostName].compactMap { $0 }, pairingLocator:locator, pairingExpiresAt:expires, pairingIdentity:txt["fp"].flatMap { String(data:$0, encoding:.utf8) }))
         devices.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 

@@ -49,6 +49,7 @@ const SIDEBAR_ROW_INSET: f32 = 8.;
 struct DeviceRow {
     name: String,
     addr: SocketAddr,
+    hosts: Vec<String>,
     protocol: ConnectionProtocol,
 }
 
@@ -85,6 +86,11 @@ enum PinDialog {
     },
 }
 
+enum AuthenticationFormError {
+    InvalidPassword,
+    Save(String),
+}
+
 pub struct HomeView {
     engine: Engine,
     _subscriptions: Vec<gpui::Subscription>,
@@ -115,6 +121,11 @@ pub struct HomeView {
     pin_input: Entity<InputState>,
     auth_mode: removent_core::AuthenticationMode,
     auth_password_input: Entity<InputState>,
+    otp_qr: Option<qrcode::QrCode>,
+    otp_secret_visible: bool,
+    otp_setup_error: bool,
+    auth_password_pending: bool,
+    auth_password_error: Option<AuthenticationFormError>,
     search_input: Entity<InputState>,
     connection_dialog: Option<Entity<ConnectionDialog>>,
     connection_subscription: Option<gpui::Subscription>,
@@ -362,4 +373,5 @@ mod settings;
 mod sidebar;
 #[cfg(test)]
 mod tests;
+mod timestamps;
 mod updates;

@@ -42,10 +42,10 @@ pub fn palette(dark: bool) -> Palette {
         }
     } else {
         Palette {
-            background: c(0xFFFFFF),
+            background: c(0xF5F6F8),
             surface: c(0xF6F8FC),
             overlay: ca(0xFFFFFFF5),
-            border: ca(0x0000000F),
+            border: ca(0x17203314),
             text_primary: c(0x1A1D28),
             text_secondary: c(0x5E6A88),
             accent: c(0x3D61CF),
@@ -53,7 +53,7 @@ pub fn palette(dark: bool) -> Palette {
             // system colors lack contrast (2.2:1), so use darkened shades to reach ≥4.5:1 (WCAG AA).
             success: c(0x286FB0),
             warning: c(0xA85B00),
-            danger: c(0xD92D24),
+            danger: c(0xCF2922),
         }
     }
 }
@@ -129,7 +129,7 @@ pub fn apply(dark: bool, cx: &mut App) {
     t.list_active_border = p.border;
     t.list_even = p.background;
     t.list_head = p.surface;
-    t.sidebar = if dark { c(0x0F1117) } else { c(0xF6F8FC) };
+    t.sidebar = if dark { c(0x0F1117) } else { c(0xEEF0F4) };
     t.sidebar_foreground = p.text_primary;
     t.sidebar_border = p.border;
     t.sidebar_accent = if dark { ca(0x5B7FED15) } else { ca(0x476EED12) };

@@ -8,6 +8,7 @@
   <nav aria-label={context.t('nav.footer')}>
     <a href={resolveLocalizedHref('/docs', context)}>{context.t('nav.documentation')}</a>
     <a href="https://github.com/backrunner/removent/releases">{context.t('site.releases')}</a>
+    <a href={resolveLocalizedHref('/support', context)}>{context.t('site.support')}</a>
     <a href={resolveLocalizedHref('/privacy', context)}>{context.t('site.privacy')}</a>
     <a href="https://github.com/backrunner/removent/blob/main/LICENSE">{context.t('site.license')}</a>
   </nav>

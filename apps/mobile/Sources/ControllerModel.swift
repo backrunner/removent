@@ -32,7 +32,6 @@ final class ControllerModel: ObservableObject {
     @Published var frameSize = CGSize.zero
     @Published var fps = 0
     @Published var receivedFrames = 0
-    @Published var scanDevices: [NearbyDevice] = []
     @Published var fingerprint = ""
     @Published var muted = false { didSet { audio.muted = muted } }
     @Published var audioEnabled = UserDefaults.standard.object(forKey: "audioEnabled") as? Bool ?? true {
@@ -249,14 +248,10 @@ final class ControllerModel: ObservableObject {
     }
     func startDiscovery() {
         discovery.start(removent:discoverRemovent, vnc:discoverVNC, rdp:discoverRDP)
-        scanDevices = []
-        do { try call(["op":"scan", "vnc":discoverVNC, "rdp":discoverRDP]) }
-        catch { self.error = error.localizedDescription }
     }
     func background() {
         servicesStarted = false
-        discovery.stop(); scanDevices = []
-        _ = try? call(["op":"scan", "vnc":false, "rdp":false])
+        discovery.stop()
         if presentingSession {
             disconnect(dismiss:false)
             status = L("Session paused while in the background.", "进入后台后会话已暂停。")
@@ -310,17 +305,6 @@ final class ControllerModel: ObservableObject {
         }
     }
     func accept(_ event: [String:Any]) {
-        if event["type"] as? String == "scan", let protocolName = event["protocol"] as? String,
-            let proto = ConnectionProtocol(rawValue:protocolName), let devices = event["devices"] as? [[String:Any]] {
-            guard (proto == .vnc && discoverVNC) || (proto == .rdp && discoverRDP) else { return }
-            scanDevices.removeAll { $0.protocol == proto }
-            scanDevices += devices.compactMap {
-                guard let id = $0["id"] as? String, let name = $0["name"] as? String,
-                    let host = $0["host"] as? String, let port = $0["port"] as? Int else { return nil }
-                return NearbyDevice(id:id, name:name, host:host, port:port, protocol:proto)
-            }
-            return
-        }
         guard (event["generation"] as? NSNumber)?.uint64Value == generation else { return }
         switch event["type"] as? String {
         case "resolve_pairing":

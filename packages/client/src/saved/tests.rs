@@ -294,3 +294,51 @@ fn failed_save_does_not_change_in_memory_list() {
     assert!(store.remove(&id).is_err());
     assert_eq!(store.all().len(), 1);
 }
+
+#[test]
+fn discovery_matches_only_direct_protocol_and_port_using_broadcast_aliases() {
+    let mut saved = SavedConnection::from_request(
+        &request(ConnectionProtocol::Vnc, "192.168.1.11", 5900),
+        "br-gateway",
+    );
+    let address = ConnectionAddress::parse("192.168.1.11", "5900").unwrap();
+    let before = saved.clone();
+    assert!(saved.matches_discovered(ConnectionProtocol::Vnc, &address, &[]));
+    assert_eq!(
+        saved, before,
+        "deduplication must not mutate credentials or bookmarks"
+    );
+    assert!(!saved.matches_discovered(ConnectionProtocol::Rdp, &address, &[]));
+    assert!(!saved.matches_discovered(
+        ConnectionProtocol::Vnc,
+        &ConnectionAddress::parse("192.168.1.11", "5901").unwrap(),
+        &[]
+    ));
+    saved.host = "MAC-MINI.local.".into();
+    assert!(!saved.matches_discovered(ConnectionProtocol::Vnc, &address, &[]));
+    assert!(saved.matches_discovered(
+        ConnectionProtocol::Vnc,
+        &address,
+        &["mac-mini.local.".into()]
+    ));
+    saved.host = "[2001:0db8::1]".into();
+    assert!(saved.matches_discovered(ConnectionProtocol::Vnc, &address, &["2001:db8::1".into()]));
+    saved.host = "fe80::1%8".into();
+    assert!(!saved.matches_discovered(ConnectionProtocol::Vnc, &address, &["fe80::1%9".into()]));
+    assert!(saved.matches_discovered(
+        ConnectionProtocol::Vnc,
+        &address,
+        &["fe80:0:0:0:0:0:0:1%8".into()]
+    ));
+    saved.host = address.host.clone();
+    saved.relay = Some(
+        RelayRoute::parse(
+            "removent://relay.example:443",
+            crate::connection::RelayTransport::WebSocket,
+            "",
+            &"aa".repeat(32),
+        )
+        .unwrap(),
+    );
+    assert!(!saved.matches_discovered(ConnectionProtocol::Vnc, &address, &[]));
+}

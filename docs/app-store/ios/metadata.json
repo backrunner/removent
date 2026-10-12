@@ -1,0 +1,38 @@
+{
+  "bundle_id": "com.alkinum.removent.mobile",
+  "version": "0.1.3",
+  "build": "4",
+  "operator": "Alkinum",
+  "copyright": "2026 Alkinum",
+  "primary_category": "Utilities",
+  "secondary_category": "Productivity",
+  "price": "Free",
+  "in_app_purchases": false,
+  "minimum_os": "26.0",
+  "supported_devices": [
+    "iPhone",
+    "iPad"
+  ],
+  "marketing_url": "https://removent.pwp.sh/",
+  "private_contact_source": "userdata/release/ios-review.private.json",
+  "release_mode": "manual",
+  "availability": "Owner decision required before submission",
+  "localizations": {
+    "en-US": {
+      "name": "Removent",
+      "subtitle": "Remote desktop, VNC & RDP",
+      "keywords": "remote,desktop,vnc,rdp,mac,computer,keyboard,clipboard,screen,relay,ipad",
+      "promotional_text": "Connect to your own computer with native Removent, VNC, or RDP. Save connections and control the screen from iPhone or iPad.",
+      "support_url": "https://removent.pwp.sh/support/",
+      "privacy_url": "https://removent.pwp.sh/privacy/"
+    },
+    "zh-Hans": {
+      "name": "Removent",
+      "subtitle": "iPhone 与 iPad 远程桌面",
+      "keywords": "远程桌面,远程控制,电脑,Mac,VNC,RDP,局域网,键盘,剪贴板,屏幕,中继,iPad",
+      "promotional_text": "通过原生 Removent、VNC 或 RDP 连接你获准访问的电脑，在 iPhone 与 iPad 上查看画面、发送输入并保存常用连接。",
+      "support_url": "https://removent.pwp.sh/zh/support/",
+      "privacy_url": "https://removent.pwp.sh/zh/privacy/"
+    }
+  }
+}

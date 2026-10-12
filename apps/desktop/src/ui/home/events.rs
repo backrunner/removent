@@ -32,6 +32,7 @@ impl HomeView {
                 fp,
                 name,
                 addr,
+                hosts,
                 protocol,
             } => {
                 // A queued resolve must not reinsert a row after its toggle was turned off.
@@ -41,6 +42,7 @@ impl HomeView {
                         DeviceRow {
                             name,
                             addr,
+                            hosts,
                             protocol,
                         },
                     );
@@ -358,6 +360,7 @@ impl HomeView {
                 }
             }
         }
+        self.reconcile_discovery_selection();
         cx.notify();
     }
 

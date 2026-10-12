@@ -34,6 +34,7 @@ pub enum UiEvent {
         fp: String,
         name: String,
         addr: SocketAddr,
+        hosts: Vec<String>,
         protocol: ConnectionProtocol,
     },
     DeviceLost(String),
@@ -415,7 +416,7 @@ impl Engine {
     fn with_state(rt: tokio::runtime::Runtime, paths: DataPaths, settings: Settings) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         let (discovery_settings, _) = tokio::sync::watch::channel(settings.discovery);
-        let update = UpdateShared::new(&settings);
+        let update = UpdateShared::with_history(&settings, &paths);
         Self {
             rt: Arc::new(rt),
             paths,

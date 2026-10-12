@@ -358,3 +358,48 @@ async fn advertise_and_browse_loopback() {
 fn resolved_test_entry(protocol: DiscoveryProtocol, info: &ServiceInfo) -> Option<DeviceEntry> {
     super::resolved_entry(protocol, &info.clone().as_resolved_service())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn service_broadcasts_resolve_without_a_listening_tcp_service() {
+    for protocol in [
+        DiscoveryProtocol::Removent,
+        DiscoveryProtocol::Vnc,
+        DiscoveryProtocol::Rdp,
+    ] {
+        // Reserve the TCP port without listening. Discovery must resolve the
+        // announcement even when the advertised service is unreachable. A
+        // listening fixture would also observe unrelated local health probes.
+        let reserved = tokio::net::TcpSocket::new_v4().unwrap();
+        reserved.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let port = reserved.local_addr().unwrap().port();
+        let browser = DiscoveryBrowser::with_daemon(loopback_daemon(), protocol).unwrap();
+        let mut rx = browser.subscribe_table();
+        let advertiser = loopback_daemon();
+        let name = format!("NoProbes-{:016x}", rand::random::<u64>());
+        let hostname = format!("{}.local.", name.to_ascii_lowercase());
+        let info = ServiceInfo::new(
+            protocol.service_types()[0],
+            &name,
+            &hostname,
+            "127.0.0.1",
+            port,
+            &[("fp", "1234567890abcdef")][..],
+        )
+        .unwrap();
+        let fullname = info.get_fullname().to_string();
+        advertiser.register(info).unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Some(entry) = rx.borrow_and_update().get(&fullname) {
+                    assert_eq!(entry.addr.unwrap().port(), port);
+                    assert!(entry.hosts.contains(&hostname));
+                    assert!(entry.hosts.contains(&"127.0.0.1".into()));
+                    break;
+                }
+                rx.changed().await.unwrap();
+            }
+        })
+        .await
+        .expect("real multicast announcement should resolve");
+    }
+}

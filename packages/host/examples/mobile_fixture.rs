@@ -17,6 +17,28 @@ async fn main() -> anyhow::Result<()> {
     };
     let identity = removent_core::identity::load_or_create(&paths, "Mobile Test Computer")?;
     let proactive = std::env::var("REMOVENT_FIXTURE_INVITATION").as_deref() == Ok("1");
+    // Optional isolated review content goes through the normal encoder/transport.
+    let width: usize = std::env::var("REMOVENT_FIXTURE_WIDTH")
+        .unwrap_or_else(|_| "640".into())
+        .parse()?;
+    let height: usize = std::env::var("REMOVENT_FIXTURE_HEIGHT")
+        .unwrap_or_else(|_| "360".into())
+        .parse()?;
+    anyhow::ensure!(
+        (64..=3840).contains(&width) && (64..=2160).contains(&height),
+        "invalid fixture dimensions"
+    );
+    let review_frame = std::env::var("REMOVENT_FIXTURE_BGRA")
+        .ok()
+        .map(std::fs::read)
+        .transpose()?;
+    if let Some(frame) = &review_frame {
+        anyhow::ensure!(
+            frame.len() == width * height * 4,
+            "invalid fixture BGRA size"
+        );
+    }
+
     let invitation = if proactive {
         Some(removent_core::pairing_invitation::Invitation::generate(
             &paths,
@@ -103,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
         });
     }
     let pin = Arc::new(Mutex::new(String::new()));
+    let pin_generation = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let recorder = Arc::new(RecorderInputSink::default());
     let clipboard = MemoryClipboard::new();
     clipboard
@@ -110,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
         .map_err(anyhow::Error::msg)?;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:48690").await?;
     let status_pin = pin.clone();
+    let status_generation = pin_generation.clone();
     let status_input = recorder.clone();
     let status_clip = clipboard.clone();
     let status_paths = paths.clone();
@@ -151,6 +175,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }).collect();
             let body = serde_json::json!({"relay":std::env::var("REMOVENT_FIXTURE_RELAY").as_deref() == Ok("1"), "auth_mode":auth_mode, "otp":auth.totp().unwrap().generate(now).to_string(), "pin":*status_pin.lock().unwrap(),
+                "pin_generation":status_generation.load(std::sync::atomic::Ordering::SeqCst),
                 "inputs":status_input.events.lock().unwrap().len(),
                 "typed_text":typed_text,
                 "keys":keys,
@@ -175,6 +200,7 @@ async fn main() -> anyhow::Result<()> {
             }
         };
         let pin = pin.clone();
+        let pin_generation = pin_generation.clone();
         let cfg = HostConfig {
             authentication: match std::env::var("REMOVENT_FIXTURE_AUTH").as_deref() {
                 Ok("password") => removent_core::AuthenticationSettings {
@@ -195,7 +221,7 @@ async fn main() -> anyhow::Result<()> {
             },
             auth_paths: Some(paths.clone()),
             device_name: "Mobile Test Computer".into(),
-            audio_available: true,
+            audio_available: std::env::var("REMOVENT_FIXTURE_NO_AUDIO").as_deref() != Ok("1"),
             preapproved_only: false,
             admission: removent_core::AdmissionMode::AlwaysAsk,
             video_bitrate_kbps: 3000,
@@ -211,13 +237,14 @@ async fn main() -> anyhow::Result<()> {
             HostInteractions {
                 show_pairing_pin: Box::new(move |value| {
                     *pin.lock().unwrap() = value;
+                    pin_generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 }),
                 admission_prompt: Box::new(|_, _| Box::pin(async { true })),
             },
             removent_proto::DisplayInfo {
                 id: 1,
-                w_px: 640,
-                h_px: 360,
+                w_px: width as u32,
+                h_px: height as u32,
                 scale: 1.,
                 dpi: 96,
                 is_main: true,
@@ -253,8 +280,8 @@ async fn main() -> anyhow::Result<()> {
             kf,
             quality,
             session.ack.video.codec,
-            640,
-            360,
+            width,
+            height,
             3000,
             30,
             session.cancel.clone(),
@@ -279,21 +306,25 @@ async fn main() -> anyhow::Result<()> {
         loop {
             tokio::select! { _ = conn.inner().closed() => break, _ = tick.tick() => {} }
             if index.is_multiple_of(3) {
-                let mut frame = vec![0u8; 640 * 360 * 4];
-                for y in 0..360 {
-                    for x in 0..640 {
-                        let offset = (y * 640 + x) * 4;
-                        frame[offset] = (x * 255 / 640) as u8;
-                        frame[offset + 1] = (y * 255 / 360) as u8;
-                        frame[offset + 2] = if x / 40 % 2 == y / 40 % 2 { 220 } else { 40 };
-                        frame[offset + 3] = 255;
+                let mut frame = review_frame
+                    .clone()
+                    .unwrap_or_else(|| vec![0u8; width * height * 4]);
+                if review_frame.is_none() {
+                    for y in 0..height {
+                        for x in 0..width {
+                            let offset = (y * width + x) * 4;
+                            frame[offset] = (x * 255 / width) as u8;
+                            frame[offset + 1] = (y * 255 / height) as u8;
+                            frame[offset + 2] = if x / 40 % 2 == y / 40 % 2 { 220 } else { 40 };
+                            frame[offset + 3] = 255;
+                        }
                     }
-                }
-                let x = (index as usize * 3) % 620;
-                for y in 160..180 {
-                    for xx in x..x + 20 {
-                        frame[(y * 640 + xx) * 4..(y * 640 + xx) * 4 + 4]
-                            .copy_from_slice(&[255, 255, 255, 255]);
+                    let x = (index as usize * 3) % (width - 20);
+                    for y in (height / 2)..(height / 2 + 20) {
+                        for xx in x..x + 20 {
+                            frame[(y * width + xx) * 4..(y * width + xx) * 4 + 4]
+                                .copy_from_slice(&[255, 255, 255, 255]);
+                        }
                     }
                 }
                 if tx.send((frame, (index * 10000) as i64)).is_err() {

@@ -24,8 +24,7 @@ struct HomeView: View {
     @State private var settings = false
     @State private var pendingConnection: ConnectionDraft?
     var nearby: [NearbyDevice] {
-        var seen = Set<String>()
-        return (discovery.devices + model.scanDevices).filter { seen.insert($0.endpointKey).inserted }
+        NearbyDevice.visible(discovery.devices, excluding: model.bookmarks)
     }
     var body: some View {
         NavigationStack {
@@ -82,8 +81,8 @@ struct HomeView: View {
                     Text(L("Nearby computers", "附近的电脑"))
                 } footer: {
                     if nearby.isEmpty {
-                        Text(L("Keep your computer on the same network with screen sharing enabled.",
-                               "让电脑连接同一网络，并开启屏幕共享。"))
+                        Text(L("Keep your computer on the same network with service broadcasting enabled, or add its address manually.",
+                               "让电脑连接同一网络并开启服务广播，或手动添加地址。"))
                     }
                 }
             }
@@ -151,9 +150,10 @@ struct ComputerRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(name).foregroundStyle(.primary).font(.body.weight(.medium))
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
-                Text("\(protocolName) · \(detail)")
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    .lineLimit(typeSize.isAccessibilitySize ? nil : 1).truncationMode(.middle)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) { protocolTag; address }
+                    VStack(alignment: .leading, spacing: 6) { protocolTag; address }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -162,6 +162,16 @@ struct ComputerRow: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityHint(L("Connect to this computer", "连接到此电脑"))
+    }
+    private var protocolTag: some View {
+        Text(protocolName).font(.caption.weight(.medium))
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .foregroundStyle(.secondary).background(.quaternary, in: Capsule())
+            .fixedSize()
+    }
+    private var address: some View {
+        Text(detail).font(.subheadline).foregroundStyle(.secondary)
+            .lineLimit(typeSize.isAccessibilitySize ? nil : 1).truncationMode(.middle)
     }
 }
 
@@ -363,6 +373,7 @@ struct ConnectionForm: View {
 struct SettingsView: View {
     @ObservedObject var model: ControllerModel
     @Environment(\.dismiss) private var dismiss
+    @State private var licenses = false
     var body: some View {
         NavigationStack {
             Form {
@@ -389,6 +400,15 @@ struct SettingsView: View {
                 }
                 Section {
                     LabeledContent(L("Version", "版本"), value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
+                    Link(destination: URL(string: L("https://removent.pwp.sh/privacy/", "https://removent.pwp.sh/zh/privacy/"))!) {
+                        Label(L("Privacy policy", "隐私政策"), systemImage: "hand.raised")
+                    }.accessibilityIdentifier("privacyPolicyLink")
+                    Link(destination: URL(string: L("https://removent.pwp.sh/support/", "https://removent.pwp.sh/zh/support/"))!) {
+                        Label(L("Support", "支持与反馈"), systemImage: "questionmark.circle")
+                    }.accessibilityIdentifier("supportLink")
+                    Button { licenses = true } label: {
+                        Label(L("Open-source licenses", "开源许可"), systemImage: "doc.text")
+                    }.accessibilityIdentifier("licenseNoticesButton")
                 } footer: {
                     Text(L("Removent for iPhone and iPad", "适用于 iPhone 与 iPad 的 Removent"))
                 }
@@ -396,11 +416,41 @@ struct SettingsView: View {
             .modifier(MobileContentWidth())
             .navigationTitle(L("Settings", "设置"))
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $licenses) {
+                NavigationStack {
+                    LicenseNoticesView()
+                        .navigationTitle(L("Open-source licenses", "开源许可"))
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar { ToolbarItem(placement: .confirmationAction) {
+                            Button(L("Done", "完成")) { licenses = false }
+                        } }
+                }
+            }
             .toolbar { ToolbarItem(placement: .confirmationAction) {
                 Button(L("Done", "完成"), systemImage: "checkmark") { dismiss() }.labelStyle(.iconOnly)
             } }
         }
     }
+}
+
+/// TextKit keeps the bundled acknowledgements scrollable without building one
+/// enormous SwiftUI text layout. No network request is needed to read licenses.
+struct LicenseNoticesView: UIViewRepresentable {
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.isEditable = false
+        view.adjustsFontForContentSizeCategory = true
+        view.font = .preferredFont(forTextStyle: .body)
+        view.textColor = .label
+        view.backgroundColor = .systemBackground
+        view.textContainerInset = UIEdgeInsets(top: 16, left: 12, bottom: 16, right: 12)
+        view.accessibilityIdentifier = "licenseNotices"
+        if let url = Bundle.main.url(forResource: "ThirdPartyNotices", withExtension: "txt") {
+            view.text = try? String(contentsOf: url, encoding: .utf8)
+        }
+        return view
+    }
+    func updateUIView(_ view: UITextView, context: Context) {}
 }
 
 /// System styles inherit Liquid Glass and the user's accessibility preferences.

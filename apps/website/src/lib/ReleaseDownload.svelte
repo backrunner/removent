@@ -57,7 +57,7 @@
       <Icon name="down" size={18} />{t('download.ctaVersion', { version })}
     </a>
     <p class="rv-release-meta">
-      <code>{dmg.name}</code><span aria-hidden="true"> · </span>{formatSize(dmg.size)}<span aria-hidden="true"> · </span><a href={notesUrl}>{t('download.notes')}</a><span aria-hidden="true"> · </span><a href={RELEASES_URL}>{t('download.all')}</a>
+      <code>{dmg.name}</code><span>{formatSize(dmg.size)}</span><a href={notesUrl}>{t('download.notes')}</a><a href={RELEASES_URL}>{t('download.all')}</a>
     </p>
   {:else}
     <a class="rv-button rv-primary" href={state === 'missing' ? notesUrl : RELEASES_URL}>

@@ -16,13 +16,13 @@ test('connection preview supports keyboard navigation and localized destinations
   await expect(page.getByRole('tabpanel')).toContainText('office.local:5900');
   await page.keyboard.press('End');
   await expect(page.getByRole('tabpanel')).toContainText('RDP · Client only');
-  await expect(page.getByRole('link', { name: 'Explore this connection' })).toHaveAttribute('href', '/docs/rdp');
+  await expect(page.getByRole('link', { name: 'Explore this connection' })).toHaveAttribute('href', '/docs/rdp/');
   await page.locator('.sd-scope-trigger').click();
   await page.getByRole('menuitemradio', { name: '简体中文' }).click();
   await expect(page).toHaveURL('/zh');
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
   await page.getByRole('tab', { name: /RDP/ }).click();
-  await expect(page.getByRole('link', { name: '了解这种连接方式' })).toHaveAttribute('href', '/docs/zh/rdp');
+  await expect(page.getByRole('link', { name: '了解这种连接方式' })).toHaveAttribute('href', '/docs/zh/rdp/');
   expect(errors).toEqual([]);
 });
 
@@ -62,7 +62,7 @@ test('system theme, explicit theme preference, and real product images stay alig
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   const duration = await page.locator('.rv-button').first().evaluate(el => getComputedStyle(el).transitionDuration);
-  expect(duration).toBe('0s');
+  expect(Math.max(...duration.split(',').map(value => parseFloat(value)))).toBeLessThanOrEqual(0.001);
 });
 
 test('mobile navigation, reading, and localized pages fit narrow screens', async ({ page }, testInfo) => {
@@ -105,6 +105,7 @@ test('docs anchors remain visible and code copy uses the displayed command', asy
   if (browserName === 'chromium') await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await ready(page, '/docs/hosting');
+  await expect(page.getByRole('link', { name: 'Edit this page', exact: true })).toHaveAttribute('href', 'https://github.com/backrunner/removent/edit/main/apps/website/content/docs/en/hosting.md');
   await page.locator('.rv-docs-toc .sd-toc').getByRole('link', { name: 'Manage from the CLI', exact: true }).click();
   await expect(page).toHaveURL(/#manage-from-the-cli$/);
   await expect.poll(async () => page.locator('#manage-from-the-cli').evaluate(el => Math.round(el.getBoundingClientRect().top))).toBeGreaterThanOrEqual(76);
@@ -124,7 +125,7 @@ test('grouped documentation and mobile contents keep bilingual guides reachable'
   await ready(page, '/docs');
   await expect(page.locator('.rv-docs-sidebar .rv-nav-group')).toHaveCount(4);
   await expect(page.locator('.rv-doc-shortcuts a')).toHaveCount(3);
-  await page.locator('.rv-doc-shortcuts a[href="/docs/relay"]').click();
+  await page.locator('.rv-doc-shortcuts a[href="/docs/relay/"]').click();
   await expect(page.locator('.rv-docs-sidebar a[aria-current="page"]')).toHaveText('Private relay');
   await expect(page.locator('.rv-prose, .sd-prose').first()).toContainText('check_interval_secs = 86400');
   await expect(page.locator('.rv-sidebar-release')).toHaveAttribute('href', /v0\.1\.3$/);
@@ -138,7 +139,7 @@ test('grouped documentation and mobile contents keep bilingual guides reachable'
   await expect.poll(async () => page.getByRole('heading', { name: '日志位置与保留', exact: false }).evaluate(el => Math.round(el.getBoundingClientRect().top))).toBeGreaterThanOrEqual(76);
   await expect(page.locator('.rv-mobile-toc')).not.toHaveAttribute('open');
   await ready(page, '/docs/zh');
-  await expect(page.locator('.rv-doc-shortcuts a[href="/docs/zh/relay"]')).toBeVisible();
+  await expect(page.locator('.rv-doc-shortcuts a[href="/docs/zh/relay/"]')).toBeVisible();
 });
 
 test('download stays usable when the release lookup fails', async ({ page }, testInfo) => {
@@ -169,7 +170,7 @@ test('static metadata, markdown, sitemap, assets, and download destinations are 
   await expect(release.locator('.rv-primary')).toHaveAttribute('href', /^https:\/\/github\.com\/backrunner\/removent\/releases/);
   await ready(page, '/zh/download');
   await expect(page.locator('.rv-release')).toBeVisible();
-  expect(await page.locator('a[href*="support"]').count()).toBe(0);
+  await expect(page.locator('.rv-footer a[href="/zh/support/"]')).toBeVisible();
 });
 
 test('unknown routes show the themed error and a working way home', async ({ page }) => {
@@ -179,4 +180,27 @@ test('unknown routes show the themed error and a working way home', async ({ pag
   await page.locator('.rv-header .rv-brand').click();
   await expect(page).toHaveURL('/');
   await expect(page.locator('h1')).toContainText('Your other Mac.');
+});
+
+
+test('bilingual document next, previous and browser history retain the active route', async ({ page }) => {
+  for (const prefix of ['/docs', '/docs/zh']) {
+    await ready(page, prefix + '/connecting');
+    const next = page.locator('.sd-prev-next[data-direction="next"]').first();
+    const previous = page.locator('.sd-prev-next[data-direction="prev"]').first();
+    const previousHref = await previous.getAttribute('href');
+    const nextHref = await next.getAttribute('href');
+    expect(nextHref).toContain(prefix + '/');
+    await next.click();
+    await expect(page).toHaveURL(nextHref!);
+    await page.goBack();
+    await expect(page).toHaveURL(prefix + '/connecting/');
+    await expect(page.locator('h1')).toBeVisible();
+    await previous.click();
+    await expect(page).toHaveURL(previousHref!);
+    await page.goBack();
+    await expect(page).toHaveURL(prefix + '/connecting/');
+    await page.goForward();
+    await expect(page).toHaveURL(previousHref!);
+  }
 });

@@ -8,9 +8,32 @@
   "assets": {
     "directory": "./build",
     "html_handling": "force-trailing-slash",
-    "not_found_handling": "404-page"
+    "not_found_handling": "404-page",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/api/support",
+      "/api/support/"
+    ]
   },
   "routes": [
-    { "pattern": "removent.pwp.sh", "custom_domain": true }
-  ]
+    {
+      "pattern": "removent.pwp.sh",
+      "custom_domain": true
+    }
+  ],
+  "main": "worker.ts",
+  "ratelimits": [
+    {
+      "name": "SUPPORT_RATE_LIMIT",
+      "namespace_id": "1048",
+      "simple": {
+        "limit": 5,
+        "period": 60
+      }
+    }
+  ],
+  "vars": {
+    "ONFIRE_PRODUCT_ID": "b241c205-53b1-4559-a556-3266424db0d2",
+    "ONFIRE_TICKET_TYPES": "{\"problem\":\"6af825d3-5689-4876-9ed9-e2570d3dd92a\",\"feature\":\"a3a163ab-87d3-4879-b542-97b634753b7b\",\"question\":\"f0ffaad9-65fb-4857-8d6a-aebc676621ad\",\"privacy\":\"3727a008-1ea1-4bf3-8703-c5bdef2b823b\"}"
+  }
 }

@@ -413,10 +413,12 @@ final class ConnectionTests: XCTestCase {
             self.capture(app, "Password authentication prompt")
             app.buttons["Connect"].tap()
         } else if mode == "otp" {
-            let field = app.textFields["pairingPIN"]
+            let field = app.textFields["authenticationOTP"]
             XCTAssertTrue(field.waitForExistence(timeout: 10))
             let (data, _) = try await URLSession.shared.data(from: url)
             let status = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            XCTAssertTrue(app.staticTexts["otpAutofillHint"].exists)
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "OTP must focus automatically so AutoFill can offer codes")
             field.tap(); field.typeText(try XCTUnwrap(status["otp"] as? String))
             self.capture(app, "OTP authentication prompt")
             app.buttons["Connect"].tap()

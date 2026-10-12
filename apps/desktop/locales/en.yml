@@ -53,7 +53,7 @@ session.manually_disconnected: Disconnected manually
 notice.daemon_spawn_failed: "Failed to start removentd: %{err}"
 notice.daemon_start_timeout: removentd start timed out; host service not enabled
 notice.daemon_binary_missing: removentd executable not found
-notice.discovery_unavailable: "Service broadcast discovery unavailable: %{err} (enabled port scans and manual connections remain available)"
+notice.discovery_unavailable: "Service broadcast discovery unavailable: %{err}. Check the local network or add a connection manually."
 
 manual.invalid_addr: Invalid address format, e.g. 192.168.1.10 or 192.168.1.10:7890
 
@@ -102,6 +102,7 @@ settings.admission.trusted: "Trusted devices"
 settings.admission.deny: "Block all"
 settings.vnc: Apple Remote Desktop / VNC
 settings.vnc_enabled: Enable VNC compatibility service
+settings.tcp_port: "TCP port"
 settings.vnc_password: VNC Password
 settings.vnc_password_placeholder: "Optional"
 settings.vnc_hint: This password is for sharing this Mac over VNC (port 5900). Enter remote credentials in Add connection.
@@ -118,6 +119,8 @@ update.channel_beta: Beta
 update.channel_hint: Stable receives final releases; Beta also receives beta builds. Switching channels never downgrades your app.
 update.checking: Checking for updates…
 update.up_to_date: No newer version in this channel
+update.last_checked: Last checked at %{time}
+update.never_checked: Updates have not been checked yet
 update.available: "New version available: %{version}"
 update.download_install: Download and Install
 update.downloading: "Downloading %{version}…"
@@ -301,7 +304,7 @@ connection.relay_quic: "VPS / QUIC"
 
 settings.discovery: LAN discovery
 settings.discovery_description: Choose which protocols appear in Nearby. Changes apply immediately.
-settings.discovery_hint: Uses Bonjour/mDNS and scans the local IPv4 network for VNC (5900) and RDP (3389). Unadvertised custom ports can be added manually. Sharing this Mac is controlled separately.
+settings.discovery_hint: Uses Bonjour/mDNS service broadcasts without scanning ports. Unadvertised devices can be added manually. Sharing this Mac is controlled separately.
 device.protocol: Protocol
 
 device.discovery_off: LAN discovery is off
@@ -324,9 +327,9 @@ sync.account: "Sign in to iCloud in System Settings"
 sync.configuration: "iCloud is unavailable in this build"
 sync.conflict: "Choose which changes to keep"
 sync.error: "Could not sync. Your local changes are saved."
-sync.pending: "Pending changes: %{count}"
+sync.pending: "%{count} pending changes"
 sync.retry: "Sync now"
-sync.last: "Last synced %{minutes} minutes ago"
+sync.last: "Last synced at %{time}"
 sync.deleted: "Deleted"
 sync.local_version: "This device: %{value}"
 sync.cloud_version: "iCloud: %{value}"
@@ -346,12 +349,17 @@ auth.otp: "OTP"
 auth.none: "No authentication"
 auth.password_desc: "Enter the access password configured on the remote computer."
 auth.otp_desc: "Enter the current six-digit code from your authenticator."
-auth.password_hint: "Set a password before selecting password authentication."
+auth.password_hint: "Enter a non-empty password, up to 1024 bytes. Changes take effect after saving."
+auth.password_placeholder: "Enter a remote access password"
+auth.password_pending: "Password authentication is not enabled yet. %{mode} remains active."
+auth.password_unsaved: "Password changes are not saved. The current password remains active."
+auth.password_too_long: "The password exceeds 1024 bytes. Shorten it before saving."
 auth.password_required: "Set a non-empty access password first (at most 1024 bytes)."
-auth.use_password: "Use password"
+auth.use_password: "Save and enable"
+auth.save_password: "Save password"
 auth.connect: "Connect"
 auth.otp_setup: "Authenticator setup"
-auth.otp_setup_hint: "Add this secret manually: TOTP, SHA-1, 6 digits, 30 seconds. Each code can be used once."
+auth.otp_setup_hint: "Six-digit codes refresh every 30 seconds and can be used only once."
 auth.copy_secret: "Copy setup secret"
 auth.none_hint: "Anyone who can reach this computer can connect and control it without credentials."
 auth.allow: "Allow connections"
@@ -394,3 +402,19 @@ viewer.network_reconnecting: "Reconnecting…"
 viewer.network_retry_hint: "The session will reconnect automatically when the network is available."
 
 connection.relay_credential_destination_changed: "The destination changed. Enter the access password again."
+
+auth.otp_show_qr: "Show setup QR code"
+auth.otp_hide_qr: "Hide QR code"
+auth.otp_show_secret: "Show secret"
+auth.otp_hide_secret: "Hide secret"
+auth.otp_secret_hidden: "Setup secret is hidden"
+auth.otp_scan_hint: "Scan the code below with 1Password, Passwords, or another authenticator to add this computer."
+auth.otp_setup_failed: "Could not create the QR code. Copy the secret to set up your authenticator manually."
+
+sync.attention: "Needs attention"
+
+auth.otp_qr_label: "Scan a QR code"
+auth.otp_expand: "Show"
+auth.otp_collapse: "Hide"
+auth.otp_manual_label: "Enter a setup key"
+auth.otp_manual_hint: "If you cannot scan, copy the key into your authenticator."

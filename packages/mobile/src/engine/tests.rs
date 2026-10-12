@@ -171,3 +171,10 @@ fn certificate_confirmation_cannot_be_consumed_by_a_stale_attempt_or_survive_can
     ));
     assert!(engine.shared.state.lock().unwrap().events.is_empty());
 }
+
+#[test]
+fn client_contract_cannot_start_a_port_scan() {
+    assert!(
+        serde_json::from_value::<Command>(json!({"op":"scan", "vnc":true, "rdp":true})).is_err()
+    );
+}

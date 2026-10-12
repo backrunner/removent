@@ -3,6 +3,28 @@ import XCTest
 
 @MainActor
 final class ControllerTests: XCTestCase {
+    func testNearbyDeduplicationUsesProtocolPortAndBroadcastAliases() throws {
+        var bookmark = try JSONDecoder().decode(Bookmark.self, from: Data(#"{"id":"office","name":"br-gateway","protocol":"vnc","host":"192.168.1.11","port":5900,"username":"","domain":"","accept_invalid_certificate":false,"relay":null,"credentials_review_required":false,"password_hint":false}"#.utf8))
+        let device = NearbyDevice(id:"discovered", name:"Mac mini", host:"192.168.1.11", port:5900, protocol:.vnc,
+            advertisedHosts:["mac-mini.local.", "2001:db8::1", "fe80::1%8"])
+        XCTAssertTrue(NearbyDevice.visible([device], excluding:[bookmark]).isEmpty)
+        XCTAssertEqual(NearbyDevice.visible([device, device], excluding:[]).count, 1)
+        bookmark.port = 5901
+        XCTAssertEqual(NearbyDevice.visible([device], excluding:[bookmark]).count, 1)
+        bookmark.port = 5900; bookmark.protocol = .rdp
+        XCTAssertEqual(NearbyDevice.visible([device], excluding:[bookmark]).count, 1)
+        bookmark.protocol = .vnc; bookmark.host = "MAC-MINI.LOCAL."
+        XCTAssertTrue(bookmark.matches(device))
+        bookmark.host = "[2001:0db8::1]"
+        XCTAssertTrue(bookmark.matches(device))
+        bookmark.host = "fe80::1%9"
+        XCTAssertFalse(bookmark.matches(device))
+        bookmark.host = "fe80:0:0:0:0:0:0:1%8"
+        XCTAssertTrue(bookmark.matches(device))
+        bookmark.relay = RelayRoute(endpoint:"removent://relay.example:443", transport:"websocket", server_fingerprint:"", host_fingerprint:"")
+        XCTAssertFalse(bookmark.matches(device))
+    }
+
     func testNetworkRecoveryPreservesCanvasAndOnlyShowsOverlayForSystemOutage() {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let model = ControllerModel(storageDirectory: directory, startServices: false)

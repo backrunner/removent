@@ -67,7 +67,9 @@ pub enum UpdateStatus {
     Idle,
     Checking,
     /// Check finished, no newer version.
-    UpToDate,
+    UpToDate {
+        manual: bool,
+    },
     /// A newer, signature-valid version exists (prompt only, never forced).
     Available {
         version: String,
@@ -108,6 +110,8 @@ impl UpdateStatus {
 /// Shared updater state (engine ↔ worker threads).
 pub struct UpdateShared {
     pub status: UpdateStatus,
+    pub last_checked_at: Option<u64>,
+    history_path: Option<PathBuf>,
     policy: UpdatePolicy,
     generation: u64,
     /// Manifest of the available update (Some while Available or later).
@@ -120,11 +124,24 @@ impl UpdateShared {
     pub fn new(settings: &Settings) -> Arc<Mutex<Self>> {
         Arc::new(Mutex::new(Self {
             status: UpdateStatus::Idle,
+            last_checked_at: None,
+            history_path: None,
             policy: UpdatePolicy::from_settings(settings),
             generation: 0,
             manifest: None,
             staged_app: None,
         }))
+    }
+
+    pub fn with_history(settings: &Settings, paths: &DataPaths) -> Arc<Mutex<Self>> {
+        let shared = Self::new(settings);
+        let path = paths.root.join("update-check.json");
+        {
+            let mut state = shared.lock().unwrap();
+            state.last_checked_at = history::load(&path);
+            state.history_path = Some(path);
+        }
+        shared
     }
 
     /// Called under the same lock as worker state transitions. Switching a
@@ -170,6 +187,7 @@ mod background_tests;
 mod check;
 mod download;
 mod fetch;
+mod history;
 mod install;
 /// Strict SemVer, including prerelease precedence and ignoring build metadata.
 mod manifest;

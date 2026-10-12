@@ -32,7 +32,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm check:docs
+      - run: pnpm test:support
       - run: pnpm build
+      - name: Validate support Worker bundle
+        env:
+          WRANGLER_SEND_METRICS: 'false'
+        run: pnpm exec wrangler deploy --dry-run
       - run: pnpm exec playwright install --with-deps chromium webkit
       - run: pnpm test
       - uses: actions/upload-artifact@v4

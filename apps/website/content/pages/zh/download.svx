@@ -5,7 +5,7 @@ description: "为 Apple 芯片 Mac 获取 Removent，免费开源，采用 Apach
 
 ## Mac 版 Removent
 
-**macOS 26 Tahoe 或更新版本 · Apple 芯片（arm64）**
+**适用于 Apple 芯片（arm64）Mac，需要 macOS 26 Tahoe 或更新版本**
 
 <ReleaseDownload />
 

@@ -1,0 +1,1 @@
+Test LAN discovery, native pairing and trust, saved connections, touch and English keyboard input, landscape panning, foreground/background reconnect, optional native audio/clipboard, compatible VNC/RDP, and opt-in iCloud sync. Please do not submit credentials or private screen contents.

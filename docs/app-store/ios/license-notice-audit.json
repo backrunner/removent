@@ -1,0 +1,167 @@
+{
+  "inventory_kind": "conservative resolved closure including build dependencies",
+  "notice_groups": 300,
+  "license_text_not_in_package_root": [
+    {
+      "name": "asn1-rs-impl",
+      "version": "0.2.0",
+      "license": "MIT/Apache-2.0"
+    },
+    {
+      "name": "atomig-macro",
+      "version": "0.4.0",
+      "license": "MIT/Apache-2.0"
+    },
+    {
+      "name": "block",
+      "version": "0.1.6",
+      "license": "MIT"
+    },
+    {
+      "name": "block2",
+      "version": "0.6.2",
+      "license": "MIT"
+    },
+    {
+      "name": "core-audio-types-rs",
+      "version": "0.3.5",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "core-media-rs",
+      "version": "0.3.5",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "core-utils-rs",
+      "version": "0.3.5",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "core-video-rs",
+      "version": "0.3.5",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "dispatch2",
+      "version": "0.3.1",
+      "license": "Zlib OR Apache-2.0 OR MIT"
+    },
+    {
+      "name": "ironrdp-bulk",
+      "version": "0.1.1",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "ironrdp-echo",
+      "version": "0.4.0",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "leak",
+      "version": "0.1.2",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "name": "leaky-cow",
+      "version": "0.1.1",
+      "license": "MIT / Apache-2.0"
+    },
+    {
+      "name": "objc2",
+      "version": "0.6.5",
+      "license": "MIT"
+    },
+    {
+      "name": "objc2-app-kit",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT"
+    },
+    {
+      "name": "objc2-cloud-kit",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT"
+    },
+    {
+      "name": "objc2-core-data",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT"
+    },
+    {
+      "name": "objc2-core-foundation",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT"
+    },
+    {
+      "name": "objc2-core-graphics",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT"
+    },
+    {
+      "name": "objc2-core-image",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT"
+    },
+    {
+      "name": "objc2-core-text",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT"
+    },
+    {
+      "name": "objc2-core-video",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT"
+    },
+    {
+      "name": "objc2-encode",
+      "version": "4.1.0",
+      "license": "MIT"
+    },
+    {
+      "name": "objc2-foundation",
+      "version": "0.3.2",
+      "license": "MIT"
+    },
+    {
+      "name": "objc2-io-surface",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT"
+    },
+    {
+      "name": "objc2-metal",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT"
+    },
+    {
+      "name": "objc2-quartz-core",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT"
+    },
+    {
+      "name": "profiling",
+      "version": "1.0.18",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "profiling-procmacros",
+      "version": "1.0.18",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "rustcrypto-ff_derive",
+      "version": "0.14.0-rc.0",
+      "license": "MIT/Apache-2.0"
+    },
+    {
+      "name": "simd_helpers",
+      "version": "0.1.0",
+      "license": "MIT"
+    },
+    {
+      "name": "winscard",
+      "version": "0.3.3",
+      "license": "MIT/Apache-2.0"
+    }
+  ],
+  "legal_clearance": false
+}

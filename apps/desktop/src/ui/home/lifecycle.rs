@@ -18,7 +18,11 @@ impl HomeView {
         vnc_password_input.update(cx, |s, cx| {
             s.set_value(settings.vnc_password.clone(), window, cx);
         });
-        let auth_password_input = cx.new(|cx| InputState::new(window, cx).masked(true));
+        let auth_password_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .masked(true)
+                .placeholder(t!("auth.password_placeholder").to_string())
+        });
         auth_password_input.update(cx, |s, cx| {
             s.set_value(settings.authentication.password.clone(), window, cx)
         });
@@ -135,8 +139,36 @@ impl HomeView {
             );
         }
 
-        subscriptions
-            .push(cx.subscribe(&auth_password_input, |_, _, _: &InputEvent, cx| cx.notify()));
+        subscriptions.push(cx.subscribe_in(
+            &auth_password_input,
+            window,
+            |this, _, event: &InputEvent, _, cx| match event {
+                InputEvent::PressEnter { .. }
+                    if this.settings_open
+                        && this.settings_section == 2
+                        && (this.auth_password_pending
+                            || this.engine.settings().authentication.mode
+                                == removent_core::AuthenticationMode::Password)
+                        && this.connection_dialog.is_none()
+                        && this.pin_dialog.is_none()
+                        && this.admission.is_none() =>
+                {
+                    this.save_authentication(removent_core::AuthenticationMode::Password, cx);
+                }
+                InputEvent::Change => {
+                    if matches!(
+                        this.auth_password_error,
+                        Some(AuthenticationFormError::InvalidPassword)
+                    ) && removent_core::AuthenticationMode::Password
+                        .valid_input(&this.auth_password_input.read(cx).value())
+                    {
+                        this.auth_password_error = None;
+                    }
+                    cx.notify();
+                }
+                _ => {}
+            },
+        ));
 
         Self {
             my_fp_short: engine.fingerprint_short(),
@@ -164,6 +196,11 @@ impl HomeView {
             pin_input,
             auth_mode: Default::default(),
             auth_password_input,
+            otp_qr: None,
+            otp_secret_visible: false,
+            otp_setup_error: false,
+            auth_password_pending: false,
+            auth_password_error: None,
             search_input,
             connection_dialog: None,
             connection_subscription: None,

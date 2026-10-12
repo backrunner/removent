@@ -10,14 +10,15 @@
     "preview": "svedocs preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:docs": "svedocs check --translations --strict",
-    "test": "playwright test"
+    "test": "playwright test",
+    "test:support": "node --experimental-strip-types --test tests/support-intake.test.ts"
   },
   "dependencies": {
     "@sveltejs/adapter-static": "^3.0.10",
     "@sveltejs/kit": "^2.60.1",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tailwindcss/vite": "^4.3.0",
-    "svedocs": "0.2.2",
+    "svedocs": "0.2.4",
     "svelte": "^5.55.7",
     "tailwindcss": "^4.3.0",
     "vite": "^8.0.13"
@@ -25,7 +26,7 @@
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "@types/node": "^25.8.0",
-    "svedocs-cli": "0.2.2",
+    "svedocs-cli": "0.2.4",
     "svelte-check": "^4.7.6",
     "typescript": "^6.0.3",
     "wrangler": "4.135.0"

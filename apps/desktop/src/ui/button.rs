@@ -1,8 +1,8 @@
 //! Application button styles. Keep GPUI's keyboard/focus/tooltip behavior while
 //! supplying complete normal, hover, pressed, selected, and disabled palettes.
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, Interactivity, IntoElement, RenderOnce, SharedString,
-    StyleRefinement, Window, div, prelude::*, relative,
+    AnyElement, App, ClickEvent, ElementId, Interactivity, IntoElement, JustifyContent, RenderOnce,
+    SharedString, StyleRefinement, Window, div, prelude::*, relative,
 };
 use gpui_component::{
     ActiveTheme, Disableable, Icon, Selectable, Sizable, Size,
@@ -136,7 +136,8 @@ impl ParentElement for Button {
     }
 }
 impl RenderOnce for Button {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(mut self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let align_start = self.inner.style().justify_content == Some(JustifyContent::Start);
         let t = cx.theme();
         let clear = t.transparent;
         let _dark = t.is_dark();
@@ -222,6 +223,37 @@ impl RenderOnce for Button {
             .active(pressed)
             .foreground(foreground)
             .shadow(raised);
+        let mut content = Vec::new();
+        if let Some(icon) = self.icon {
+            content.push(
+                div()
+                    .flex_none()
+                    .child(icon.text_color(foreground))
+                    .when(!self.disabled, |d| d.hover(|s| s.text_color(hover_fg)))
+                    .into_any_element(),
+            );
+        }
+        if let Some(label) = self.label {
+            content.push(
+                div()
+                    .flex_none()
+                    .line_height(relative(1.))
+                    .text_color(foreground)
+                    .when(!self.disabled, |d| d.hover(|s| s.text_color(hover_fg)))
+                    .child(label)
+                    .into_any_element(),
+            );
+        }
+        if !self.children.is_empty() {
+            content.push(
+                div()
+                    .min_w_0()
+                    .text_color(foreground)
+                    .when(!self.disabled, |d| d.hover(|s| s.text_color(hover_fg)))
+                    .children(self.children)
+                    .into_any_element(),
+            );
+        }
         self.inner
             .custom(style)
             // The new component defaults custom normal backgrounds to 20%
@@ -235,34 +267,24 @@ impl RenderOnce for Button {
             .border_color(border)
             .when(!self.disabled, |b| b.cursor_pointer())
             .when(self.disabled, |b| b.cursor_default())
-            .when_some(self.icon.clone(), |b, icon| {
-                b.child(
-                    div()
-                        .flex_none()
-                        .child(icon.text_color(foreground))
-                        .when(!self.disabled, |d| d.hover(|s| s.text_color(hover_fg))),
-                )
-            })
             // Explicit child colors also avoid gpui-component's hard-coded
             // red hover label. Only the interaction surface changes color.
-            .when_some(self.label, |b, label| {
-                b.child(
-                    div()
-                        .flex_none()
-                        .line_height(relative(1.))
-                        .text_color(foreground)
-                        .when(!self.disabled, |d| d.hover(|s| s.text_color(hover_fg)))
-                        .child(label),
-                )
-            })
-            .when(!self.children.is_empty(), |b| {
-                b.child(
-                    div()
-                        .min_w_0()
-                        .text_color(foreground)
-                        .when(!self.disabled, |d| d.hover(|s| s.text_color(hover_fg)))
-                        .children(self.children),
-                )
+            .map(|b| {
+                if align_start {
+                    // NativeButton centers its full-width inner content row.
+                    // Fill that row so the caller's left alignment reaches the
+                    // icon and label, not just the outer interaction surface.
+                    b.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .w_full()
+                            .gap_2()
+                            .children(content),
+                    )
+                } else {
+                    b.children(content)
+                }
             })
     }
 }

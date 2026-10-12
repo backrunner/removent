@@ -259,3 +259,6 @@ a { text-decoration: none; }
   .rv-connection-detail { padding: 25px 23px; }.rv-connection-detail h2 { font-size: 21px; }.rv-connection-detail dl > div { font-size: 10px; }
   .rv-preview figcaption { text-align: right; margin-top: 15px; font: 10px var(--font-mono); }
 }
+
+.rv-protocol-tags > span { padding: 2px 5px; border: 1px solid var(--rv-line); border-radius: 999px; line-height: 1; }
+.rv-release-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }

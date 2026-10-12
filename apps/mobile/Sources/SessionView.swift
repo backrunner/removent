@@ -51,8 +51,15 @@ struct SessionView: View {
                         if model.ready && (stats || model.error != nil) {
                             VStack(alignment: .leading, spacing: 8) {
                                 if stats {
-                                    Text("\(Int(model.frameSize.width)) × \(Int(model.frameSize.height)) · \(model.fps) fps · \(model.codec)\n\(model.receivedFrames) \(L("frames", "帧"))")
-                                        .font(.caption.monospacedDigit())
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("\(Int(model.frameSize.width)) × \(Int(model.frameSize.height))")
+                                        HStack(spacing: 8) {
+                                            Text("\(model.fps) fps")
+                                            Text(model.codec).padding(.horizontal, 6).padding(.vertical, 2)
+                                                .background(.thinMaterial, in: Capsule())
+                                        }
+                                        Text("\(model.receivedFrames) \(L("frames", "帧"))")
+                                    }.font(.caption.monospacedDigit())
                                 }
                                 if let error = model.error {
                                     HStack(alignment: .top) {
@@ -157,7 +164,11 @@ struct SessionView: View {
             guard !Task.isCancelled, model.ready, !keyboard, !actions, !actionsPresented, !clipboard, !gestures, !UIAccessibility.isVoiceOverRunning else { return }
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) { controlsVisible = false }
         }
-        .onChange(of: model.needsPIN) { _, _ in pin = ""; pinFocused = false }
+        // Focus the rendered native field so system OTP providers can offer a code.
+        .task(id: "\(model.needsPIN)-\(model.authenticationMode)") {
+            pin = ""
+            pinFocused = model.needsPIN
+        }
         .task(id: model.certificatePrompt?.id) {
             certificateAlertPresented = false
             guard let prompt = model.certificatePrompt else { return }
@@ -255,17 +266,26 @@ struct SessionView: View {
                         } else {
                         TextField(model.authenticationMode == "otp" ? L("Six-digit OTP", "六位动态验证码") : L("Six-digit PIN", "六位配对码"), text: $pin)
                             .font(.title2.monospacedDigit()).multilineTextAlignment(.center)
-                            .keyboardType(.numberPad).textContentType(.oneTimeCode).focused($pinFocused)
+                            .keyboardType(.numberPad)
+                            .textContentType(model.authenticationMode == "otp" ? .oneTimeCode : nil)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .focused($pinFocused)
                             .padding(12).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
-                            .accessibilityIdentifier("pairingPIN")
+                            .accessibilityIdentifier(model.authenticationMode == "otp" ? "authenticationOTP" : "pairingPIN")
                             .onChange(of: pin) { _, value in
                                 pin = String(value.filter { $0.isASCII && $0.isNumber }.prefix(6))
                             }
+                        }
+                        if model.authenticationMode == "otp" {
+                            Text(L("Use a code suggested above the keyboard, or choose AutoFill in the text field menu to fill from 1Password or another authenticator.", "可使用键盘上方建议的验证码，或在输入框的“自动填充”菜单中选择 1Password 等验证器。"))
+                                .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                                .accessibilityIdentifier("otpAutofillHint")
                         }
                         Button { pinFocused = false; model.submitPIN(pin) } label: {
                             Text(L("Connect", "连接")).frame(maxWidth: .infinity)
                         }
                         .buttonStyle(PrimaryActionStyle()).controlSize(.large).disabled(model.authenticationMode == "password" ? pin.isEmpty || pin.utf8.count > 1024 : pin.count != 6)
+                        .accessibilityIdentifier("pairingConnect")
                     } else if model.certificateDestination != nil {
                         Image(systemName: "checkmark.shield").font(.system(size: 32)).foregroundStyle(.tint)
                         Text(model.status).font(.headline).multilineTextAlignment(.center)
@@ -417,7 +437,9 @@ struct SessionView: View {
 
 private struct SessionGlass: ViewModifier {
     func body(content: Content) -> some View {
-        content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24))
+        content.foregroundStyle(.white)
+            .background(Color.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 24))
+            .glassEffect(.regular.tint(.black.opacity(0.3)), in: RoundedRectangle(cornerRadius: 24))
     }
 }
 

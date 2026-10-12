@@ -74,6 +74,10 @@ impl Engine {
         self.update.lock().unwrap().status.clone()
     }
 
+    pub fn last_update_check(&self) -> Option<u64> {
+        self.update.lock().unwrap().last_checked_at
+    }
+
     /// Persist before changing the active policy. Holding the worker lock
     /// prevents a queued download/install from claiming the old candidate.
     pub fn set_update_channel(&self, channel: removent_core::UpdateChannel) -> Result<(), String> {
@@ -83,10 +87,19 @@ impl Engine {
     /// Kick a manifest check (the settings-page button; always runs unless a
     /// download/install is already in flight).
     pub fn check_for_updates(&self) {
+        self.start_update_check(true);
+    }
+
+    /// A channel change refreshes the candidate without a manual-check result.
+    pub fn check_for_updates_silently(&self) {
+        self.start_update_check(false);
+    }
+
+    fn start_update_check(&self, manual: bool) {
         let shared = self.update.clone();
         let events = self.events_tx.clone();
         self.rt
-            .spawn_blocking(move || updater::run_check(true, shared, events));
+            .spawn_blocking(move || updater::run_check(manual, shared, events));
     }
 
     /// Download and triple-verify the available update (lands in ReadyToInstall).

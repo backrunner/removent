@@ -1,9 +1,11 @@
 use super::*;
 
+mod appearance;
+mod otp;
 mod security;
 
 impl HomeView {
-    pub(super) fn render_settings_sidebar(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_settings_sidebar(&self, _window: &Window, cx: &mut Context<Self>) -> Div {
         let colors = cx.theme().colors;
         let mut navigation = div()
             .id("settings-navigation")
@@ -29,10 +31,14 @@ impl HomeView {
                 .label(t!(key).to_string())
                 .w_full()
                 .justify_start()
+                .px(px(7.))
                 .h(px(36.))
                 .rounded(px(8.))
                 .sidebar(self.settings_section == index)
-                .on_click(cx.listener(move |this, _, _, cx| {
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    if this.settings_section != index {
+                        this.reset_authentication_form(window, cx);
+                    }
                     this.settings_section = index;
                     cx.notify();
                 }));
@@ -48,19 +54,17 @@ impl HomeView {
             .ghost()
             .w_full()
             .justify_start()
+            .px(px(7.))
             .h(px(32.))
-            .on_click(cx.listener(|this, _, _, cx| {
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.reset_authentication_form(window, cx);
                 this.settings_open = false;
                 cx.notify();
             }));
         #[cfg(test)]
         let back = div().debug_selector(|| "settings-back".into()).child(back);
         div()
-            .w(px(if window.viewport_size().width < px(1000.) {
-                228.
-            } else {
-                256.
-            }))
+            .w(px(200.))
             .flex_shrink_0()
             .flex()
             .flex_col()
@@ -198,86 +202,58 @@ impl HomeView {
                     ))
                     .child(
                         form_group(cx).child(
-                            row()
-                                .child(setting_label(
-                                    t!("settings.color_mode").to_string(),
-                                    t!("settings.theme_hint").to_string(),
-                                    cx,
-                                ))
-                                .child({
-                                    let view = cx.entity();
-                                    segmented(
-                                        "theme",
-                                        &[
-                                            t!("settings.theme.system").to_string(),
-                                            t!("settings.theme.dark").to_string(),
-                                            t!("settings.theme.light").to_string(),
-                                        ],
-                                        match settings.theme {
-                                            ThemePref::System => 0,
-                                            ThemePref::Dark => 1,
-                                            ThemePref::Light => 2,
-                                        },
-                                        Rc::new(move |i, _, window, app| {
-                                            view.update(app, |this, cx| {
-                                                this.set_theme(
-                                                    match i {
-                                                        1 => ThemePref::Dark,
-                                                        2 => ThemePref::Light,
-                                                        _ => ThemePref::System,
-                                                    },
-                                                    window,
-                                                    cx,
-                                                )
-                                            });
-                                        }),
-                                        cx,
-                                    )
-                                })
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .items_start()
+                                .gap_5()
+                                .p_5()
+                                .w_full()
+                                .min_w_0()
                                 .child(
                                     div()
-                                        .mt_2()
-                                        .p_4()
-                                        .rounded(px(12.))
-                                        .bg(colors.background)
-                                        .border_1()
-                                        .border_color(colors.border)
-                                        .child(section_header(
-                                            "monitor",
-                                            "Removent".into(),
-                                            t!("settings.preview_hint").to_string(),
+                                        .flex()
+                                        .flex_col()
+                                        .gap_3()
+                                        .w(px(260.))
+                                        .max_w_full()
+                                        .child(setting_label(
+                                            t!("settings.color_mode").to_string(),
+                                            t!("settings.theme_hint").to_string(),
                                             cx,
                                         ))
-                                        .child(
-                                            div()
-                                                .mt_4()
-                                                .flex()
-                                                .gap_2()
-                                                .child(
-                                                    div()
-                                                        .w(px(72.))
-                                                        .h(px(54.))
-                                                        .rounded(px(8.))
-                                                        .bg(colors.sidebar),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .flex_1()
-                                                        .h(px(54.))
-                                                        .rounded(px(8.))
-                                                        .bg(colors.group_box)
-                                                        .shadow_sm()
-                                                        .child(
-                                                            div()
-                                                                .m_3()
-                                                                .w(px(48.))
-                                                                .h(px(6.))
-                                                                .rounded_full()
-                                                                .bg(colors.accent),
-                                                        ),
-                                                ),
-                                        ),
-                                ),
+                                        .child({
+                                            let view = cx.entity();
+                                            segmented(
+                                                "theme",
+                                                &[
+                                                    t!("settings.theme.system").to_string(),
+                                                    t!("settings.theme.dark").to_string(),
+                                                    t!("settings.theme.light").to_string(),
+                                                ],
+                                                match settings.theme {
+                                                    ThemePref::System => 0,
+                                                    ThemePref::Dark => 1,
+                                                    ThemePref::Light => 2,
+                                                },
+                                                Rc::new(move |i, _, window, app| {
+                                                    view.update(app, |this, cx| {
+                                                        this.set_theme(
+                                                            match i {
+                                                                1 => ThemePref::Dark,
+                                                                2 => ThemePref::Light,
+                                                                _ => ThemePref::System,
+                                                            },
+                                                            window,
+                                                            cx,
+                                                        )
+                                                    });
+                                                }),
+                                                cx,
+                                            )
+                                        }),
+                                )
+                                .child(appearance::theme_preview(cx)),
                         ),
                     );
             }
@@ -300,15 +276,66 @@ impl HomeView {
                                     .gap_4()
                                     .p_5()
                                     .child(
-                                        setting_label(
-                                            t!("settings.vnc_enabled").to_string(),
-                                            format!(
-                                                "Apple Remote Desktop · VNC · TCP {}",
-                                                settings.vnc_port
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_2()
+                                            .child(
+                                                div()
+                                                    .text_size(px(13.))
+                                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                                    .child(t!("settings.vnc_enabled").to_string()),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_wrap()
+                                                    .items_center()
+                                                    .gap_2()
+                                                    .child(
+                                                        sidebar_tag("VNC".into(), false, cx)
+                                                            .h(px(22.))
+                                                            .px_2()
+                                                            .text_size(px(11.)),
+                                                    )
+                                                    .child(
+                                                        sidebar_tag(
+                                                            "Apple Remote Desktop".into(),
+                                                            false,
+                                                            cx,
+                                                        )
+                                                        .h(px(22.))
+                                                        .px_2()
+                                                        .text_size(px(11.)),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .flex()
+                                                            .items_center()
+                                                            .gap_1()
+                                                            .ml_1()
+                                                            .text_size(px(11.))
+                                                            .text_color(colors.muted_foreground)
+                                                            .child(
+                                                                t!("settings.tcp_port").to_string(),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .font_family(
+                                                                        cx.theme()
+                                                                            .mono_font_family
+                                                                            .clone(),
+                                                                    )
+                                                                    .child(
+                                                                        settings
+                                                                            .vnc_port
+                                                                            .to_string(),
+                                                                    ),
+                                                            ),
+                                                    ),
                                             ),
-                                            cx,
-                                        )
-                                        .flex_1(),
                                     )
                                     .child(
                                         Switch::new("vnc-enabled")

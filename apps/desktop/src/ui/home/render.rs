@@ -45,6 +45,7 @@ impl Render for HomeView {
                     && this.admission.is_none()
                     && this.connection_dialog.is_none()
                 {
+                    this.reset_authentication_form(window, cx);
                     this.settings_open = !this.settings_open;
                     window.focus(&this.focus, cx);
                     cx.notify();
@@ -87,6 +88,7 @@ impl Render for HomeView {
                 } else if let Some(dialog) = &this.connection_dialog {
                     dialog.update(cx, |form, cx| form.back(window, cx));
                 } else if this.settings_open {
+                    this.reset_authentication_form(window, cx);
                     this.settings_open = false;
                     window.focus(&this.focus, cx);
                     cx.notify();

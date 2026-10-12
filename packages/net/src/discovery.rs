@@ -17,6 +17,8 @@ pub struct DeviceEntry {
     pub name: String,
     pub short_fp: String,
     pub addr: Option<std::net::SocketAddr>,
+    /// Hostname and all IPs supplied by this service's mDNS records.
+    pub hosts: Vec<String>,
     pub caps: Caps,
     pub busy: bool,
     /// When this entry was last resolved, used for TTL graying-out.
@@ -359,6 +361,7 @@ fn resolved_entry(protocol: DiscoveryProtocol, info: &ResolvedService) -> Option
         name: name.to_string(),
         short_fp: short_fp.to_ascii_lowercase(),
         addr: pick_scoped_addr(info.get_addresses(), info.get_port()),
+        hosts: advertised_hosts(info),
         caps: if native {
             parse_cap_string(props.get_property_val_str("cap").unwrap_or(""))
         } else {
@@ -367,6 +370,21 @@ fn resolved_entry(protocol: DiscoveryProtocol, info: &ResolvedService) -> Option
         busy: native && props.get_property_val_str("busy") == Some("1"),
         seen_at: Instant::now(),
     })
+}
+
+fn advertised_hosts(info: &ResolvedService) -> Vec<String> {
+    let mut hosts = vec![info.get_hostname().to_string()];
+    hosts.extend(info.get_addresses().iter().filter_map(|ip| match ip {
+        ScopedIp::V4(ip) => Some(ip.addr().to_string()),
+        ScopedIp::V6(ip) if ip.scope_id().index != 0 => {
+            Some(format!("{}%{}", ip.addr(), ip.scope_id().index))
+        }
+        ScopedIp::V6(ip) => Some(ip.addr().to_string()),
+        _ => None,
+    }));
+    hosts.sort();
+    hosts.dedup();
+    hosts
 }
 
 fn pick_scoped_addr(

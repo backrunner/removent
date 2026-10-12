@@ -1,6 +1,22 @@
 use super::*;
 
 impl HomeView {
+    pub(super) fn saved_discovery_match(&self, row: &DeviceRow) -> Option<&SavedConnection> {
+        let address = removent_client::connection::ConnectionAddress::from_socket(row.addr);
+        self.saved
+            .iter()
+            .find(|entry| entry.matches_discovered(row.protocol, &address, &row.hosts))
+    }
+
+    pub(super) fn reconcile_discovery_selection(&mut self) {
+        if let Some(Selection::Device(id)) = &self.selected
+            && let Some(row) = self.devices.get(id)
+            && let Some(saved) = self.saved_discovery_match(row)
+        {
+            self.selected = Some(Selection::Saved(saved.id.clone()));
+        }
+    }
+
     pub(super) fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         TitleBar::new()
             .child(
@@ -34,7 +50,8 @@ impl HomeView {
                             .small()
                             .tooltip(t!("settings.title").to_string())
                             .tab(self.settings_open)
-                            .on_click(cx.listener(|this, _, _w, cx| {
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.reset_authentication_form(window, cx);
                                 this.settings_open = !this.settings_open;
                                 cx.notify();
                             })),
@@ -57,6 +74,10 @@ impl HomeView {
         let fp_dbl = fp.to_string();
         let mut el = div()
             .id(gpui::ElementId::Name(format!("dev-{fp}").into()))
+            .debug_selector({
+                let id = fp.to_string();
+                move || format!("discovered-{id}")
+            })
             .tab_index(0)
             .border_1()
             .border_color(colors.border.opacity(0.))
@@ -135,6 +156,10 @@ impl HomeView {
         let id_dbl = entry.id.clone();
         let mut el = div()
             .id(gpui::ElementId::Name(format!("saved-{}", entry.id).into()))
+            .debug_selector({
+                let id = entry.id.clone();
+                move || format!("bookmark-{id}")
+            })
             .tab_index(0)
             .border_1()
             .border_color(colors.border.opacity(0.))
@@ -215,6 +240,7 @@ impl HomeView {
         let rows: Vec<_> = self
             .devices
             .iter()
+            .filter(|(_, row)| self.saved_discovery_match(row).is_none())
             .filter(|(_, row)| {
                 query.is_empty()
                     || row.name.to_lowercase().contains(&query)
@@ -278,86 +304,88 @@ impl HomeView {
                 cx,
             ));
         if rows.is_empty() {
-            nearby_section =
-                nearby_section.child(
-                    div()
-                        .mx(px(SIDEBAR_ROW_INSET))
-                        .p_3()
-                        .mt_1()
-                        .rounded(px(10.))
-                        .border_1()
-                        .border_color(colors.border)
-                        .bg(colors.group_box)
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .text_color(colors.muted_foreground)
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .child(
-                                    div()
-                                        .size(px(32.))
-                                        .flex_shrink_0()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .rounded(px(8.))
-                                        .bg(colors.secondary_hover)
-                                        .child(
-                                            icon_16(if !query.is_empty() {
-                                                "search"
-                                            } else if discovering {
-                                                "wifi"
-                                            } else {
-                                                "wifi-off"
-                                            })
-                                            .size(px(20.))
-                                            .text_color(if discovering && query.is_empty() {
+            nearby_section = nearby_section.child(
+                div()
+                    .mx(px(SIDEBAR_ROW_INSET))
+                    .p_3()
+                    .mt_1()
+                    .rounded(px(10.))
+                    .border_1()
+                    .border_color(colors.border)
+                    .bg(colors.group_box)
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .text_color(colors.muted_foreground)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .size(px(32.))
+                                    .flex_shrink_0()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(px(8.))
+                                    .bg(colors.secondary_hover)
+                                    .child(
+                                        icon_16(if !query.is_empty() {
+                                            "search"
+                                        } else if discovering {
+                                            "wifi"
+                                        } else {
+                                            "wifi-off"
+                                        })
+                                        .size(px(20.))
+                                        .text_color(
+                                            if discovering && query.is_empty() {
                                                 colors.accent
                                             } else {
                                                 colors.muted_foreground
-                                            }),
+                                            },
                                         ),
-                                )
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .text_size(px(12.))
-                                        .line_height(px(18.))
-                                        .child(
-                                            t!(if query.is_empty() {
-                                                if discovering {
-                                                    "device.searching"
-                                                } else {
-                                                    "device.discovery_off"
-                                                }
-                                            } else {
-                                                "device.no_match"
-                                            })
-                                            .to_string(),
-                                        ),
-                                ),
-                        )
-                        .when(query.is_empty(), |el| {
-                            el.child(
-                                div().text_size(px(11.)).line_height(px(17.)).child(
-                                    t!(if discovering {
-                                        "device.searching_hint"
-                                    } else {
-                                        "device.discovery_off_hint"
-                                    })
-                                    .to_string(),
-                                ),
+                                    ),
                             )
-                        })
-                        .when(query.is_empty() && !discovering, |el| {
-                            el.child(
+                            .child(
                                 div()
-                                    .flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_size(px(12.))
+                                    .line_height(px(18.))
+                                    .child(
+                                        t!(if query.is_empty() {
+                                            if discovering {
+                                                "device.searching"
+                                            } else {
+                                                "device.discovery_off"
+                                            }
+                                        } else {
+                                            "device.no_match"
+                                        })
+                                        .to_string(),
+                                    ),
+                            ),
+                    )
+                    .when(query.is_empty(), |el| {
+                        el.child(
+                            div().text_size(px(11.)).line_height(px(17.)).child(
+                                t!(if discovering {
+                                    "device.searching_hint"
+                                } else {
+                                    "device.discovery_off_hint"
+                                })
+                                .to_string(),
+                            ),
+                        )
+                    })
+                    .when(query.is_empty() && !discovering, |el| {
+                        el.child(
+                            div().flex().justify_end().pt_1().child(
+                                div()
+                                    .flex_shrink_0()
                                     .debug_selector(|| "enable-discovery".into())
                                     .child(
                                         Button::new("enable-discovery")
@@ -365,6 +393,8 @@ impl HomeView {
                                             .label(t!("device.enable_discovery").to_string())
                                             .primary()
                                             .small()
+                                            .h(px(28.))
+                                            .px_3()
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 if this.persist_settings(|s| {
                                                     s.discovery.removent = true;
@@ -379,9 +409,10 @@ impl HomeView {
                                                 cx.notify();
                                             })),
                                     ),
-                            )
-                        }),
-                );
+                            ),
+                        )
+                    }),
+            );
         }
         for (fp, row) in rows {
             let trusted = self.trusted.contains(fp.as_str());

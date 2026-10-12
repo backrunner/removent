@@ -1,4 +1,27 @@
 import Foundation
+import Darwin
+
+// Normalize only local strings supplied by bookmarks or Bonjour, never resolve
+// arbitrary hosts or open discovery connections.
+private func endpointHostKey(_ value: String) -> String {
+    var host = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    if host.hasPrefix("[") && host.hasSuffix("]") { host = String(host.dropFirst().dropLast()) }
+    let parts = host.split(separator: "%", maxSplits: 1, omittingEmptySubsequences: false)
+    let address = String(parts[0])
+    var ipv6 = in6_addr()
+    if inet_pton(AF_INET6, address, &ipv6) == 1 {
+        var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+        _ = inet_ntop(AF_INET6, &ipv6, &buffer, socklen_t(buffer.count))
+        host = String(cString: buffer)
+        if parts.count == 2 {
+            let scope = String(parts[1])
+            let index = UInt32(scope) ?? if_nametoindex(scope)
+            host += "%" + (index == 0 ? scope : String(index))
+        }
+        return host
+    }
+    return host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+}
 
 enum ConnectionProtocol: String, CaseIterable, Codable, Identifiable {
     case removent, vnc, rdp
@@ -29,6 +52,11 @@ struct Bookmark: Codable, Identifiable {
     var credentials_review_required: Bool
     var password_hint: Bool
     var title: String { name.isEmpty ? host : name }
+
+    func matches(_ device: NearbyDevice) -> Bool {
+        relay == nil && `protocol` == device.protocol && port == device.port
+            && ([device.host] + device.advertisedHosts).contains { endpointHostKey(host) == endpointHostKey($0) }
+    }
 }
 
 struct NearbyDevice: Identifiable {
@@ -37,10 +65,18 @@ struct NearbyDevice: Identifiable {
     var host: String
     var port: Int
     var `protocol`: ConnectionProtocol
+    var advertisedHosts: [String] = []
     var pairingLocator: String? = nil
     var pairingExpiresAt: TimeInterval? = nil
     var pairingIdentity: String? = nil
-    var endpointKey: String { "\(`protocol`.rawValue):\(host.lowercased()):\(port)" }
+    var endpointKey: String { "\(`protocol`.rawValue):\(endpointHostKey(host)):\(port)" }
+
+    static func visible(_ devices: [NearbyDevice], excluding bookmarks: [Bookmark]) -> [NearbyDevice] {
+        var seen = Set<String>()
+        return devices.filter { device in
+            !bookmarks.contains { $0.matches(device) } && seen.insert(device.endpointKey).inserted
+        }
+    }
 }
 
 struct ConnectionDraft: Identifiable {

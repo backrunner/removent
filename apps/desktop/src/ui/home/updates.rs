@@ -8,6 +8,10 @@ impl HomeView {
         let settings = self.engine.settings();
         let auto_check = settings.update_check_enabled;
         let busy = self.update_status.is_busy();
+        let last_check = self
+            .engine
+            .last_update_check()
+            .and_then(|last| super::timestamps::local_clock_time(last, &chrono::Local));
 
         // One status line per state, colored by severity; spinners while working.
         let status_line = |text: String, color: gpui::Hsla| {
@@ -33,15 +37,15 @@ impl HomeView {
 
         let mut state_block = div().flex().flex_col().gap_2().px_4().pb_3();
         match &self.update_status {
-            UpdateStatus::Idle => {}
+            UpdateStatus::Idle | UpdateStatus::UpToDate { manual: false } => {}
             UpdateStatus::Checking => {
                 state_block = state_block.child(spinner_line(t!("update.checking").to_string()));
             }
-            UpdateStatus::UpToDate => {
-                state_block = state_block.child(status_line(
-                    t!("update.up_to_date").to_string(),
-                    colors.success,
-                ));
+            UpdateStatus::UpToDate { manual: true } => {
+                state_block = state_block.child(
+                    status_line(t!("update.up_to_date").to_string(), colors.success)
+                        .debug_selector(|| "update-up-to-date".into()),
+                );
             }
             UpdateStatus::Available { version, notes } => {
                 state_block = state_block
@@ -127,6 +131,17 @@ impl HomeView {
             }
         }
 
+        state_block = state_block.child(
+            div()
+                .debug_selector(|| "update-last-check".into())
+                .text_size(px(11.))
+                .text_color(colors.muted_foreground)
+                .child(match last_check {
+                    Some(time) => t!("update.last_checked", time = time).to_string(),
+                    None => t!("update.never_checked").to_string(),
+                }),
+        );
+
         div()
             .flex()
             .flex_col()
@@ -200,7 +215,7 @@ impl HomeView {
                                                 Ok(()) => {
                                                     this.update_status =
                                                         this.engine.update_status();
-                                                    this.engine.check_for_updates();
+                                                    this.engine.check_for_updates_silently();
                                                 }
                                                 Err(reason) => {
                                                     this.set_status(reason, StatusTone::Err)

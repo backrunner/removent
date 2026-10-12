@@ -42,6 +42,21 @@ impl AuthenticationSettings {
         Secret::generate().to_base32()
     }
     pub fn totp(&self) -> std::result::Result<Totp, String> {
+        self.totp_for_account("Remote access")
+    }
+    /// Standard local authenticator provisioning URI. Never log or transmit it.
+    pub fn otp_provisioning_uri(&self, account_name: &str) -> std::result::Result<String, String> {
+        // A colon separates issuer and account in the Key URI format.
+        let account = account_name.trim().replace(':', "-");
+        self.totp_for_account(if account.is_empty() {
+            "Remote access"
+        } else {
+            &account
+        })?
+        .to_url()
+        .map_err(|_| "Cannot create OTP setup URI".into())
+    }
+    fn totp_for_account(&self, account_name: &str) -> std::result::Result<Totp, String> {
         let secret = Secret::try_from_base32(&self.otp_secret).map_err(|_| "Invalid OTP secret")?;
         Builder::new()
             .with_algorithm(Algorithm::SHA1)
@@ -50,7 +65,7 @@ impl AuthenticationSettings {
             .with_step_duration(30)
             .with_secret(secret)
             .with_issuer(Some("Removent"))
-            .with_account_name("Remote access")
+            .with_account_name(account_name)
             .build()
             .map_err(|_| "Invalid OTP secret".into())
     }
@@ -106,6 +121,29 @@ mod tests {
         assert!(auth.clone().consume_otp(&paths, 1).is_err());
         assert!(auth.consume_otp(&paths, 0).is_err());
         auth.consume_otp(&paths, 2).unwrap();
+    }
+    #[test]
+    fn provisioning_uri_round_trips_with_the_host_policy_and_encoded_device_label() {
+        let auth = AuthenticationSettings {
+            mode: AuthenticationMode::Otp,
+            otp_secret: Secret::new(b"12345678901234567890".to_vec().into_boxed_slice())
+                .to_base32(),
+            ..Default::default()
+        };
+        let uri = auth.otp_provisioning_uri("办公室 Mac: 50% / 工作").unwrap();
+        let imported = Totp::from_url(&uri).unwrap();
+        assert_eq!(imported.account_name(), "办公室 Mac- 50% / 工作");
+        assert_eq!(imported.issuer(), Some("Removent"));
+        for time in [59, 1_111_111_109, 2_000_000_000] {
+            assert_eq!(imported.generate(time), auth.totp().unwrap().generate(time));
+        }
+        assert_eq!(imported.generate(59).to_string(), "287082");
+        assert!(auth.otp_provisioning_uri("  ").is_ok());
+        assert!(
+            AuthenticationSettings::default()
+                .otp_provisioning_uri("Mac")
+                .is_err()
+        );
     }
     #[test]
     fn legacy_settings_default_to_pairing_and_invalid_password_never_commits() {

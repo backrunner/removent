@@ -3,7 +3,7 @@
 use crate::engine::UiEvent;
 use removent_client::connection::ConnectionProtocol;
 use removent_core::DiscoverySettings;
-use removent_net::{DeviceEntry, DiscoveryBrowser, DiscoveryProtocol, lan_scan::LanScanner};
+use removent_net::{DeviceEntry, DiscoveryBrowser, DiscoveryProtocol};
 use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -31,7 +31,6 @@ pub async fn run(
         my_fp,
         events,
         DiscoveryBrowser::start_for,
-        LanScanner::start,
     )
     .await;
 }
@@ -42,7 +41,6 @@ async fn run_with_browser(
     my_fp: String,
     events: Sender<UiEvent>,
     start: impl Fn(DiscoveryProtocol) -> removent_net::Result<DiscoveryBrowser>,
-    start_scan: impl Fn(DiscoveryProtocol) -> Option<LanScanner>,
 ) {
     let browse_protocol = match protocol {
         ConnectionProtocol::Removent => DiscoveryProtocol::Removent,
@@ -56,8 +54,6 @@ async fn run_with_browser(
             }
             continue;
         }
-        let scanner = start_scan(browse_protocol);
-        let mut scanned = scanner.as_ref().map(LanScanner::subscribe_table);
         let mut browser = None;
         let mut advertised = None;
         let mut retry_at = tokio::time::Instant::now();
@@ -83,7 +79,7 @@ async fn run_with_browser(
                 }
             }
             let mut combined = HashMap::new();
-            for source in [&mut scanned, &mut advertised].into_iter().flatten() {
+            if let Some(source) = &mut advertised {
                 combined.extend(
                     source
                         .borrow_and_update()
@@ -108,12 +104,10 @@ async fn run_with_browser(
                     browser = None;
                     retry_at = tokio::time::Instant::now() + Duration::from_secs(5);
                 },
-                result = changed(&mut scanned) => if result.is_err() { scanned = None; },
                 _ = tokio::time::sleep_until(retry_at), if browser.is_none() => {},
             }
         }
-        // Stops multicast queries and all active TCP probes for this protocol.
-        drop(scanner);
+        // Stop multicast queries for this protocol. No TCP probes are made.
         drop(browser);
         publish(protocol, &previous, &BTreeMap::new(), &events);
         if settings.has_changed().is_err() {
@@ -131,7 +125,7 @@ async fn changed(source: &mut Option<DiscoveryTable>) -> Result<(), watch::error
     }
 }
 
-type VisibleDevices = BTreeMap<String, (String, SocketAddr)>;
+type VisibleDevices = BTreeMap<String, (String, SocketAddr, Vec<String>)>;
 
 fn visible_devices(
     protocol: ConnectionProtocol,
@@ -151,17 +145,21 @@ fn visible_devices(
             // on the same host never share an identity or pairing trust.
             format!("{}:{addr}", protocol.short_label())
         };
-        if entries.get(&id).is_none_or(|current| {
-            // Keep the advertised name when a port probe finds the same server.
-            (!entry.instance.starts_with("scan:"), entry.seen_at)
-                > (!current.instance.starts_with("scan:"), current.seen_at)
-        }) {
+        if entries
+            .get(&id)
+            .is_none_or(|current| entry.seen_at > current.seen_at)
+        {
             entries.insert(id, entry);
         }
     }
     entries
         .into_iter()
-        .map(|(id, entry)| (id, (entry.name.clone(), entry.addr.unwrap())))
+        .map(|(id, entry)| {
+            (
+                id,
+                (entry.name.clone(), entry.addr.unwrap(), entry.hosts.clone()),
+            )
+        })
         .collect()
 }
 
@@ -172,12 +170,13 @@ fn publish(
     events: &Sender<UiEvent>,
 ) {
     for (id, target) in next {
-        let (name, addr) = target;
+        let (name, addr, hosts) = target;
         if previous.get(id) != Some(target) {
             let _ = events.send(UiEvent::DeviceFound {
                 fp: id.clone(),
                 name: name.clone(),
                 addr: *addr,
+                hosts: hosts.clone(),
                 protocol,
             });
         }
@@ -198,7 +197,6 @@ mod tests {
         let (settings, rx) = watch::channel(DiscoverySettings::default());
         let (events, _rx) = std::sync::mpsc::channel();
         let observers = std::sync::Mutex::new(Vec::new());
-        let scans = std::sync::atomic::AtomicUsize::new(0);
         let mut worker = Box::pin(run_with_browser(
             ConnectionProtocol::Vnc,
             rx,
@@ -209,13 +207,8 @@ mod tests {
                 observers.lock().unwrap().push(browser.subscribe_table());
                 Ok(browser)
             },
-            |_| {
-                scans.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                None
-            },
         ));
         assert!(futures::poll!(&mut worker).is_pending());
-        assert_eq!(scans.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert!(
             observers.lock().unwrap().is_empty(),
             "disabled discovery must not open a browser"
@@ -223,7 +216,6 @@ mod tests {
         settings.send_modify(|s| s.vnc = true);
         assert!(futures::poll!(&mut worker).is_pending());
         assert_eq!(observers.lock().unwrap().len(), 1);
-        assert_eq!(scans.load(std::sync::atomic::Ordering::SeqCst), 1);
         settings.send_modify(|s| s.rdp = true);
         assert!(futures::poll!(&mut worker).is_pending());
         assert_eq!(
@@ -232,7 +224,6 @@ mod tests {
             "unrelated toggle must not restart VNC"
         );
         settings.send_modify(|s| s.vnc = false);
-        assert_eq!(scans.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert!(futures::poll!(&mut worker).is_pending());
         let mut stopped = observers.lock().unwrap()[0].clone();
         tokio::time::timeout(Duration::from_secs(2), async {
@@ -243,7 +234,6 @@ mod tests {
         settings.send_modify(|s| s.vnc = true);
         assert!(futures::poll!(&mut worker).is_pending());
         assert_eq!(observers.lock().unwrap().len(), 2);
-        assert_eq!(scans.load(std::sync::atomic::Ordering::SeqCst), 2);
         drop(settings);
         tokio::time::timeout(Duration::from_secs(2), worker)
             .await
@@ -257,6 +247,7 @@ mod tests {
             name: instance.into(),
             short_fp: fp.into(),
             addr: addr.map(|s| s.parse().unwrap()),
+            hosts: vec![],
             caps: Caps::all(),
             busy: false,
             seen_at: Instant::now(),
@@ -286,7 +277,7 @@ mod tests {
         assert_eq!(visible.len(), 1);
         assert_eq!(
             visible["peer"],
-            ("new".into(), "192.168.1.3:48688".parse().unwrap())
+            ("new".into(), "192.168.1.3:48688".parse().unwrap(), vec![])
         );
     }
 
@@ -296,7 +287,6 @@ mod tests {
             entry("rdp", "", Some("192.168.1.2:3389")),
             entry("ms-wbt-server", "", Some("192.168.1.2:3389")),
             entry("another desktop", "", Some("192.168.1.2:3390")),
-            entry("scan:192.168.1.2:3389", "", Some("192.168.1.2:3389")),
         ]
         .into_iter()
         .enumerate()
@@ -320,11 +310,11 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let first = BTreeMap::from([(
             "peer".into(),
-            ("Old".into(), "192.168.1.2:48688".parse().unwrap()),
+            ("Old".into(), "192.168.1.2:48688".parse().unwrap(), vec![]),
         )]);
         let next = BTreeMap::from([(
             "peer".into(),
-            ("New".into(), "192.168.1.3:48688".parse().unwrap()),
+            ("New".into(), "192.168.1.3:48688".parse().unwrap(), vec![]),
         )]);
         publish(protocol, &BTreeMap::new(), &first, &tx);
         publish(protocol, &first, &first, &tx);

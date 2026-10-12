@@ -53,7 +53,7 @@
         <a class="rv-preview-link" href={resolveLocalizedHref(active.path, context)}>{t('preview.link')}<Icon name="arrow" size={16} /></a>
       </div>
     </div>
-    <div class="rv-window-status"><span><Icon name="shield" size={13} />{t(selected === 'native' ? 'preview.encrypted' : 'preview.' + selected + '.security')}</span><span>RVP · VNC · RDP</span></div>
+    <div class="rv-window-status"><span><Icon name="shield" size={13} />{t(selected === 'native' ? 'preview.encrypted' : 'preview.' + selected + '.security')}</span><span class="rv-protocol-tags">{#each ['RVP', 'VNC', 'RDP'] as protocol}<span>{protocol}</span>{/each}</span></div>
   </div>
   <figcaption>{t('preview.caption')}</figcaption>
 </figure>

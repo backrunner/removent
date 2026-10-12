@@ -16,7 +16,9 @@ destination and verified fingerprint, never the temporary code.
 Native sessions include mutual certificate
 pinning, relay routing, adaptive video receive, touch/mouse and keyboard input,
 text clipboard, optional Opus playback, saved connections in Keychain, Bonjour
-discovery, one quick resume, and explicit foreground/background session state.
+discovery without subnet or port scans, one quick resume, and explicit foreground/background session state.
+
+Nearby computers already saved with the same protocol and port are hidden using the IP addresses and hostname advertised by Bonjour; removing a bookmark restores any still-advertised computer. Unadvertised servers can be added manually.
 
 Requires iOS/iPadOS 26 or newer and Xcode 26 or newer (validated with Xcode 27).
 Controls use native Liquid Glass directly. The connection forms support Dynamic

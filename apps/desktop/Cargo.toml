@@ -20,6 +20,8 @@ gpui = { package = "gpui-pre", version = "0.3" }
 gpui-platform = { package = "gpui-pre-platform", version = "0.3", features = ["font-kit", "wayland", "x11"] }
 gpui-component = "0.7"
 image = "0.25"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+qrcode = { version = "0.14.1", default-features = false }
 rust-i18n = { workspace = true }
 hex = { workspace = true }
 serde = { workspace = true }

@@ -57,6 +57,38 @@ pub enum AddressError {
 }
 
 impl ConnectionAddress {
+    /// Compare advertised endpoint hosts locally, without DNS queries or probes.
+    pub fn same_host(&self, host: &str) -> bool {
+        fn normalized(host: &str) -> Option<String> {
+            let address = ConnectionAddress::parse(host, "1").ok()?;
+            if let Some((ip, scope)) = address.host.split_once('%') {
+                let scope = scope
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|index| *index != 0)
+                    .or_else(|| {
+                        #[cfg(unix)]
+                        {
+                            let name = std::ffi::CString::new(scope).ok()?;
+                            let index = unsafe { libc::if_nametoindex(name.as_ptr()) };
+                            (index != 0).then_some(index)
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            None
+                        }
+                    });
+                return Some(match scope {
+                    Some(index) => format!("{ip}%{index}"),
+                    None => address.host,
+                });
+            }
+            Some(address.host.trim_end_matches('.').to_ascii_lowercase())
+        }
+        normalized(&self.host)
+            .is_some_and(|left| normalized(host).is_some_and(|right| left == right))
+    }
+
     pub fn parse_native(host: &str, port: &str) -> Result<Self, AddressError> {
         if host.trim().starts_with("removent://") {
             let endpoint = RemoventEndpoint::parse(host).map_err(|_| AddressError::Host)?;

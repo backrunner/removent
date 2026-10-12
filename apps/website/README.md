@@ -1,6 +1,6 @@
 # Removent website
 
-The public Removent site, built with **svedocs 0.2.2**, Svelte 5, and SvelteKit. It includes a custom landing page and documentation theme, English and Simplified Chinese content, local search, and system/light/dark appearance. There is no support page or support backend.
+The public Removent site, built with **svedocs 0.2.4**, Svelte 5, and SvelteKit. It includes a custom landing page and documentation theme, English and Simplified Chinese content, local search, and system/light/dark appearance. It includes localized support forms and a server-only OnFire intake Worker.
 
 ## Develop
 
@@ -16,6 +16,7 @@ pnpm dev
 ```sh
 pnpm check
 pnpm check:docs
+pnpm test:support
 pnpm build
 pnpm exec playwright install chromium webkit
 pnpm test
@@ -26,7 +27,7 @@ The browser tests run against the production build. They cover protocol preview 
 
 ## Deploy to Cloudflare
 
-The production site is **https://removent.pwp.sh**. `pnpm build` writes the complete site to `build/`; Wrangler deploys it as Cloudflare Workers Static Assets using `wrangler.jsonc`. Cloudflare manages the custom domain and HTTPS certificate. Unknown paths serve `404.html` with a 404 status. No runtime Worker code, database, AI provider, or application API credentials are required.
+The production site is **https://removent.pwp.sh**. `pnpm build` writes the complete site to `build/`; Wrangler deploys it as Cloudflare Workers Static Assets using `wrangler.jsonc`. Cloudflare manages the custom domain and HTTPS certificate. Unknown paths serve `404.html` with a 404 status. Pages remain prerendered. Only `POST /api/support` runs Worker code. The product-specific `ONFIRE_API_KEY` is a Cloudflare Secret; product/type IDs and the rate-limit binding are declared in `wrangler.jsonc`. No customer token is returned to the browser.
 
 With Wrangler authenticated to the Alkinum account, deploy from this directory:
 
@@ -45,7 +46,7 @@ The default canonical origin is `https://removent.pwp.sh`. Override it only when
 SITE_URL=https://your-domain.example pnpm build
 ```
 
-Use the same origin when generating and serving the site. Both `/` and `/zh` are prerendered, documentation lives at `/docs` and `/docs/zh`, and standalone pages include `/download`, `/privacy`, and their Chinese equivalents. The build also includes Open Graph images, sitemap, robots.txt, markdown twins, and the `llms.txt` interface. There are no runtime search endpoints: the search index loads in the browser on demand.
+Use the same origin when generating and serving the site. Both `/` and `/zh` are prerendered, documentation lives at `/docs` and `/docs/zh`, and standalone pages include `/download`, `/privacy`, `/support`, and their Chinese equivalents. The build also includes Open Graph images, sitemap, robots.txt, markdown twins, and the `llms.txt` interface. There are no runtime search endpoints: the search index loads in the browser on demand.
 
 The main download button resolves the latest stable DMG through GitHub's release API, with a Releases-page fallback when lookup fails. Release announcements in the homepage, docs sidebar, and download pages use separate, explicit release-notes links. Keep all three surfaces and both languages in sync when publishing a release. Publish the referenced release before deploying its announcement; prereleases must not replace the stable button or automatic-update feed.
 
@@ -65,3 +66,13 @@ The main download button resolves the latest stable DMG through GitHub's release
 Mirror relative Markdown paths between languages. Keep compiled content, page discovery, route resolution, search loading, metadata, and locale mapping owned by svedocs. `pnpm check:docs` validates links, assets, and complete translation coverage.
 
 Brand assets come from `../assets/branding/`. Product screenshots come from `../docs/images/settings-native-{light,dark}.png`. The connection preview contains illustrative hostnames and no fabricated latency or connection measurements. Feature claims distinguish native RVP, VNC, and RDP; update the public guides when those implementations change.
+
+## Support intake operations
+
+The form submits an email, subject, message, category, language and optional app/OS/device details. OnFire validates Turnstile server-side. The Worker enforces the canonical origin, bounded JSON, input limits and five attempts per IP per minute. An uncertain ticket POST is never retried automatically.
+
+The public Turnstile site key belongs to the existing OnFire widget. Its hostname list includes `removent.pwp.sh`; its matching verification secret remains in OnFire. Keep hostname registration aligned when changing deployment domains.
+
+The website product credential expires on 2027-01-10. Rotate it before expiry with the same product scope, replace the Worker Secret, and verify a test ticket. Private credential and contact configuration lives in Git-ignored `../../userdata/release/`, mode 0600. Never put secrets in public environment variables or the static build.
+
+Server tests: `pnpm test:support`. Browser tests use a mocked Turnstile callback and API; they are distinct from live OnFire acceptance and email delivery. Production verification is recorded in `../../dist/app-store-ios/readiness.json`.

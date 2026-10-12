@@ -4,7 +4,6 @@ pub mod clipboard;
 pub mod control_writer;
 pub mod discovery;
 pub mod error;
-pub mod lan_scan;
 pub mod pairing;
 pub mod session;
 pub mod tls;

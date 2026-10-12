@@ -1,0 +1,19 @@
+---
+title: "Support"
+description: "Get help with Removent connections, input, and privacy."
+---
+
+Alkinum maintains Removent. Send a request using the form below. A Removent account is not required.
+
+<SupportForm locale="en" />
+
+## Before sending
+
+- For native connections, enable the host on your Mac and grant its required screen/input permissions. Use the same LAN for your first connection.
+- Check the protocol, address, port, and computer's authentication policy. A relay access password does not replace the computer's authentication.
+- Keep the mobile app in the foreground during a session. After returning from the background, use Reconnect if prompted.
+- See [connecting](/docs/connecting), [permissions](/docs/permissions), [VNC](/docs/vnc), [RDP](/docs/rdp), and [relay setup](/docs/relay).
+
+## Privacy requests
+
+Explain what you want to access, correct, or delete without including passwords or private screen contents. Local connections are managed in the app. See our [privacy policy](/privacy) for optional iCloud and support data.

@@ -1,0 +1,20 @@
+Connect to your computer from iPhone or iPad with Removent, a remote desktop controller from Alkinum.
+
+CONNECT YOUR WAY
+Use native Removent connections to a Mac running the desktop host, connect to compatible VNC / Apple Remote Desktop servers, or use RDP to access a configured Windows Remote Desktop server. Save connections for next time, and discover compatible computers on your local network.
+
+CONTROL THE SCREEN
+View the remote computer, send touch and mouse input, and type with the session's direct English keyboard or a hardware keyboard. Landscape sessions fill the display while preserving the picture's proportions; pan to reach cropped edges. Floating controls fade when idle and return when you need them.
+
+NATIVE CONNECTIONS
+Native Removent sessions support pairing, certificate trust checks, optional text clipboard transfer, and remote audio playback. Configure a private relay when you need native connections outside your LAN. A relay does not replace the computer's authentication.
+
+SAVED CONNECTIONS
+Credentials stay in your device's Keychain. Optionally sync saved connection information with your other Removent devices using the same iCloud account. Passwords, pairing secrets, and certificate-verification exceptions remain local.
+
+BEFORE YOU CONNECT
+This iOS app is a controller, not a host. You need a reachable computer and permission to control it. The native Mac host requires macOS 26 or later and its screen/input permissions. VNC and RDP require compatible, configured servers and have their own authentication and encryption behavior. RDP does not provide audio, clipboard, or file redirection in this release. File transfer is not included.
+
+The app is free, with no in-app purchases. Keep the app in the foreground during sessions. Local Network permission is used to discover and connect to nearby computers; iCloud sync is optional.
+
+Setup and help: https://removent.pwp.sh/support/

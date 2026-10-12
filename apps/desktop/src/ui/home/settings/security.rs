@@ -11,7 +11,22 @@ impl HomeView {
             section_header(name, t!(title).to_string(), t!(description).to_string(), cx)
         };
         let mut content = div().flex().flex_col().gap_5().w_full().min_w_0();
-        let mode = settings.authentication.mode;
+        let committed_mode = settings.authentication.mode;
+        let mode = if self.auth_password_pending {
+            removent_core::AuthenticationMode::Password
+        } else {
+            committed_mode
+        };
+        let password = self.auth_password_input.read(cx).value();
+        let password_changed = password.as_ref() != settings.authentication.password;
+        let password_error = match &self.auth_password_error {
+            Some(AuthenticationFormError::Save(message)) => Some(message.clone()),
+            _ if password.len() > 1024 => Some(t!("auth.password_too_long").to_string()),
+            Some(AuthenticationFormError::InvalidPassword) if password.is_empty() => {
+                Some(t!("auth.password_required").to_string())
+            }
+            _ => None,
+        };
         content = content
             .child(header(
                 "shield-check",
@@ -42,7 +57,7 @@ impl HomeView {
                                     removent_core::AuthenticationMode::Otp => 2,
                                     removent_core::AuthenticationMode::None => 3,
                                 },
-                                Rc::new(move |i, _, _, app| {
+                                Rc::new(move |i, _, window, app| {
                                     view.update(app, |this, cx| {
                                         let mode = match i {
                                             1 => removent_core::AuthenticationMode::Password,
@@ -50,65 +65,98 @@ impl HomeView {
                                             3 => removent_core::AuthenticationMode::None,
                                             _ => removent_core::AuthenticationMode::PairingCode,
                                         };
-                                        this.save_authentication(mode, cx)
+                                        this.select_authentication(mode, window, cx);
                                     })
                                 }),
                                 cx,
                             )
                         })
-                        .child(setting_label(
-                            t!("auth.password").to_string(),
-                            t!("auth.password_hint").to_string(),
-                            cx,
-                        ))
-                        .child(
-                            div()
+                        .when(mode == removent_core::AuthenticationMode::Password, |el| {
+                            let editor = div()
                                 .flex()
+                                .flex_col()
                                 .gap_3()
-                                .items_center()
+                                .child(setting_label(
+                                    t!("auth.password").to_string(),
+                                    t!("auth.password_hint").to_string(),
+                                    cx,
+                                ))
+                                .when(self.auth_password_pending || password_changed, |el| {
+                                    let notice = div()
+                                        .text_size(px(12.))
+                                        .text_color(colors.muted_foreground)
+                                        .child(if self.auth_password_pending {
+                                            let active = t!(match committed_mode {
+                                                removent_core::AuthenticationMode::PairingCode =>
+                                                    "auth.pairing",
+                                                removent_core::AuthenticationMode::Password =>
+                                                    "auth.password",
+                                                removent_core::AuthenticationMode::Otp =>
+                                                    "auth.otp",
+                                                removent_core::AuthenticationMode::None =>
+                                                    "auth.none",
+                                            });
+                                            t!("auth.password_pending", mode = active).to_string()
+                                        } else {
+                                            t!("auth.password_unsaved").to_string()
+                                        });
+                                    #[cfg(test)]
+                                    let notice =
+                                        notice.debug_selector(|| "authentication-pending".into());
+                                    el.child(notice)
+                                })
                                 .child(
                                     div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .child(form_input(&self.auth_password_input).mask_toggle()),
+                                        .flex()
+                                        .gap_3()
+                                        .items_center()
+                                        .child(div().flex_1().min_w_0().child(
+                                            form_input(&self.auth_password_input).mask_toggle(),
+                                        ))
+                                        .child({
+                                            let save = Button::new("save-auth-password")
+                                                .label(
+                                                    t!(if self.auth_password_pending {
+                                                        "auth.use_password"
+                                                    } else {
+                                                        "auth.save_password"
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .primary()
+                                                .disabled(
+                                                    !removent_core::AuthenticationMode::Password
+                                                        .valid_input(&password)
+                                                        || (!self.auth_password_pending
+                                                            && !password_changed),
+                                                )
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.save_authentication(
+                                                        removent_core::AuthenticationMode::Password,
+                                                        cx,
+                                                    );
+                                                }));
+                                            #[cfg(test)]
+                                            let save = div()
+                                                .debug_selector(|| "authentication-save".into())
+                                                .child(save);
+                                            save
+                                        }),
                                 )
-                                .child(
-                                    Button::new("save-auth-password")
-                                        .label(t!("auth.use_password").to_string())
-                                        .primary()
-                                        .disabled(
-                                            self.auth_password_input.read(cx).value().is_empty(),
-                                        )
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.save_authentication(
-                                                removent_core::AuthenticationMode::Password,
-                                                cx,
-                                            )
-                                        })),
-                                ),
-                        )
-                        .when(mode == removent_core::AuthenticationMode::Otp, |el| {
-                            el.child(setting_label(
-                                t!("auth.otp_setup").to_string(),
-                                t!("auth.otp_setup_hint").to_string(),
-                                cx,
-                            ))
-                            .child(
-                                div()
-                                    .text_size(px(13.))
-                                    .font_family(cx.theme().mono_font_family.clone())
-                                    .child(settings.authentication.otp_secret.clone()),
-                            )
-                            .child(
-                                Button::new("copy-otp-secret")
-                                    .label(t!("auth.copy_secret").to_string())
-                                    .outline()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(
-                                            this.engine.settings().authentication.otp_secret,
-                                        ));
-                                    })),
-                            )
+                                .when_some(password_error, |el, error| {
+                                    let error = div()
+                                        .text_size(px(12.))
+                                        .text_color(colors.danger)
+                                        .child(error);
+                                    #[cfg(test)]
+                                    let error =
+                                        error.debug_selector(|| "authentication-error".into());
+                                    el.child(error)
+                                });
+                            #[cfg(test)]
+                            let editor =
+                                editor.debug_selector(|| "authentication-password-editor".into());
+                            el.child(editor)
                         })
                         .when(mode == removent_core::AuthenticationMode::None, |el| {
                             el.child(
@@ -120,7 +168,10 @@ impl HomeView {
                         }),
                 ),
             );
-        if mode == removent_core::AuthenticationMode::PairingCode {
+        if mode == removent_core::AuthenticationMode::Otp {
+            content = content.child(self.render_otp_setup(cx));
+        }
+        if committed_mode == removent_core::AuthenticationMode::PairingCode {
             content = content.child(
                 form_group(cx)
                     .child(row()

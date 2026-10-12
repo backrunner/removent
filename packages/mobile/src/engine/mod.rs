@@ -75,17 +75,12 @@ pub enum Command {
     Delete {
         id: String,
     },
-    Scan {
-        vnc: bool,
-        rdp: bool,
-    },
 }
 
 pub struct Engine {
     runtime: Option<tokio::runtime::Runtime>,
     pub shared: Arc<Shared>,
     task: Option<tokio::task::JoinHandle<()>>,
-    scans: Vec<tokio::task::JoinHandle<()>>,
 }
 
 pub struct Shared {
@@ -259,7 +254,6 @@ impl Engine {
                 state: Mutex::new(State::default()),
             }),
             task: None,
-            scans: vec![],
         })
     }
 
@@ -397,35 +391,6 @@ impl Engine {
                 SavedConnections::load(&self.shared.paths)?.remove_with_password(&id)?;
                 Ok(Value::Null)
             }
-            Command::Scan { vnc, rdp } => {
-                for task in self.scans.drain(..) {
-                    task.abort();
-                }
-                for (enabled, protocol, label) in [
-                    (vnc, removent_net::DiscoveryProtocol::Vnc, "vnc"),
-                    (rdp, removent_net::DiscoveryProtocol::Rdp, "rdp"),
-                ] {
-                    if !enabled {
-                        continue;
-                    }
-                    let shared = self.shared.clone();
-                    self.scans.push(self.runtime.as_ref().unwrap().spawn(async move {
-                        let Some(scanner) = removent_net::lan_scan::LanScanner::start(protocol) else { return };
-                        let mut table = scanner.subscribe_table();
-                        while table.changed().await.is_ok() {
-                            let devices: Vec<_> = table.borrow_and_update().values().filter_map(|entry| {
-                                entry.addr.map(|addr| {
-                                    let address = removent_client::connection::ConnectionAddress::from_socket(addr);
-                                    json!({"id":format!("{label}:{addr}"), "name":entry.name,
-                                        "host":address.host, "port":address.port, "protocol":label})
-                                })
-                            }).collect();
-                            shared.state.lock().unwrap().event(json!({"type":"scan", "protocol":label, "devices":devices}));
-                        }
-                    }));
-                }
-                Ok(Value::Null)
-            }
             Command::PairingAddress {
                 generation,
                 host,
@@ -551,9 +516,6 @@ fn same_credential_scope(entry: &SavedConnection, request: &ConnectionRequest) -
 impl Drop for Engine {
     fn drop(&mut self) {
         self.stop();
-        for task in self.scans.drain(..) {
-            task.abort();
-        }
         if let Some(runtime) = self.runtime.take() {
             runtime.shutdown_background();
         }

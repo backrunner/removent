@@ -53,7 +53,7 @@ session.manually_disconnected: 已手动断开
 notice.daemon_spawn_failed: 无法启动 removentd：%{err}
 notice.daemon_start_timeout: removentd 启动超时，被控服务未能开启
 notice.daemon_binary_missing: 找不到 removentd 可执行文件
-notice.discovery_unavailable: 服务广播发现不可用：%{err}（已开启的端口扫描和手动连接仍可使用）
+notice.discovery_unavailable: 服务广播发现不可用：%{err}，请检查本地网络，或手动添加连接
 
 manual.invalid_addr: 地址格式无效，如 192.168.1.10 或 192.168.1.10:7890
 
@@ -102,6 +102,7 @@ settings.admission.trusted: "信任的设备"
 settings.admission.deny: "拒绝所有"
 settings.vnc: Apple Remote Desktop / VNC
 settings.vnc_enabled: 启用 VNC 兼容服务
+settings.tcp_port: "TCP 端口"
 settings.vnc_password: VNC 密码
 settings.vnc_password_placeholder: "选填"
 settings.vnc_hint: 此密码用于通过 VNC 共享本机（端口 5900）。远程设备的凭据请在「添加连接」中填写。
@@ -118,6 +119,8 @@ update.channel_beta: Beta
 update.channel_hint: Stable 接收正式版，Beta 也接收测试版。切换渠道只会升级，不会降级。
 update.checking: 正在检查更新…
 update.up_to_date: 当前渠道没有更高版本
+update.last_checked: 上次检查于 %{time}
+update.never_checked: 尚未检查更新
 update.available: 发现新版本：%{version}
 update.download_install: 下载并安装
 update.downloading: 正在下载 %{version}…
@@ -301,7 +304,7 @@ connection.relay_quic: "VPS / QUIC"
 
 settings.discovery: 局域网发现
 settings.discovery_description: 选择在附近设备中自动发现的协议，修改立即生效。
-settings.discovery_hint: 通过 Bonjour/mDNS 和本地 IPv4 网络扫描发现设备（VNC 5900、RDP 3389）。未广播的自定义端口可手动添加；本机共享服务由单独的设置控制。
+settings.discovery_hint: 通过 Bonjour/mDNS 广播发现设备，不扫描端口。未广播的设备可手动添加。本机共享单独控制。
 device.protocol: 协议
 
 device.discovery_off: 局域网发现已关闭
@@ -324,9 +327,9 @@ sync.account: "请在系统设置中登录 iCloud"
 sync.configuration: "当前构建尚未配置 iCloud"
 sync.conflict: "请选择要保留的更改"
 sync.error: "暂时无法同步，本机更改已保存。"
-sync.pending: "待同步更改：%{count}"
+sync.pending: "待同步 %{count} 项更改"
 sync.retry: "立即同步"
-sync.last: "上次同步于 %{minutes} 分钟前"
+sync.last: "上次同步于 %{time}"
 sync.deleted: "已删除"
 sync.local_version: "本机：%{value}"
 sync.cloud_version: "iCloud：%{value}"
@@ -346,12 +349,17 @@ auth.otp: "OTP"
 auth.none: "无认证"
 auth.password_desc: "输入远程电脑上设置的访问口令。"
 auth.otp_desc: "输入验证器中当前的六位动态验证码。"
-auth.password_hint: "选择口令认证前，请先设置访问口令。"
+auth.password_hint: "口令不能为空，最长 1024 字节。保存后才会生效。"
+auth.password_placeholder: "输入用于远程连接的访问口令"
+auth.password_pending: "尚未启用访问口令，当前仍使用「%{mode}」。"
+auth.password_unsaved: "口令尚未保存，当前口令仍有效。"
+auth.password_too_long: "访问口令不能超过 1024 字节，请缩短后再保存。"
 auth.password_required: "请先设置非空访问口令（最多 1024 字节）。"
-auth.use_password: "使用口令"
+auth.use_password: "保存并启用"
+auth.save_password: "保存口令"
 auth.connect: "连接"
 auth.otp_setup: "绑定验证器"
-auth.otp_setup_hint: "手动添加此密钥：TOTP、SHA-1、6 位、30 秒。每个验证码仅可使用一次。"
+auth.otp_setup_hint: "验证码为六位，每 30 秒更新，每个验证码仅可使用一次。"
 auth.copy_secret: "复制绑定密钥"
 auth.none_hint: "任何可连接到此电脑的人均可直接访问和控制，无需提供凭据。"
 auth.allow: "允许连接"
@@ -394,3 +402,19 @@ viewer.network_reconnecting: "正在重新连接…"
 viewer.network_retry_hint: "网络恢复后将自动尝试重新连接。"
 
 connection.relay_credential_destination_changed: "连接目标已改变，请重新输入访问密码。"
+
+auth.otp_show_qr: "显示绑定二维码"
+auth.otp_hide_qr: "隐藏二维码"
+auth.otp_show_secret: "显示密钥"
+auth.otp_hide_secret: "隐藏密钥"
+auth.otp_secret_hidden: "绑定密钥已隐藏"
+auth.otp_scan_hint: "使用 1Password、系统密码或其他验证器扫描下方二维码，添加这台电脑。"
+auth.otp_setup_failed: "无法生成绑定二维码，请使用复制密钥进行手动绑定。"
+
+sync.attention: "需要处理"
+
+auth.otp_qr_label: "扫码绑定"
+auth.otp_expand: "展开"
+auth.otp_collapse: "收起"
+auth.otp_manual_label: "手动绑定"
+auth.otp_manual_hint: "无法扫码时，可复制密钥到验证器中手动添加。"

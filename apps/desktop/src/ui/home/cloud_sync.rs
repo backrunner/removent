@@ -1,3 +1,4 @@
+use super::timestamps::local_clock_time;
 use super::*;
 
 impl HomeView {
@@ -10,6 +11,7 @@ impl HomeView {
             Ok(status) => {
                 self.cloud_sync_status = status;
                 self.saved = self.engine.saved_connections();
+                self.reconcile_discovery_selection();
             }
             Err(error) => self.set_status(
                 t!("status.settings_save_failed", err = error).to_string(),
@@ -59,20 +61,94 @@ impl HomeView {
                     ),
                 ),
         );
+        let colors = cx.theme().colors;
+        let healthy = enabled && code == "ready" && pending == 0;
+        let issue = enabled && !matches!(code, "off" | "ready" | "waiting" | "syncing" | "offline");
+        let tone = if healthy {
+            colors.success
+        } else if code == "syncing" {
+            colors.accent
+        } else if enabled {
+            colors.warning
+        } else {
+            colors.muted_foreground
+        };
+        let badge = div()
+            .flex()
+            .items_center()
+            .gap_1()
+            .h(px(24.))
+            .px_2()
+            .rounded_full()
+            .text_size(px(11.))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(tone)
+            .bg(tone.opacity(0.10))
+            .when(healthy, |badge| {
+                badge.child(icon_16("check").size(px(12.)).text_color(tone))
+            })
+            .child(t!(if issue { "sync.attention" } else { label }).to_string());
+        let last = self.cloud_sync_status["last_success"]
+            .as_u64()
+            .and_then(|last| local_clock_time(last, &chrono::Local));
         group = group.child(Divider::horizontal()).child(
             div()
                 .flex()
-                .flex_col()
-                .gap_3()
+                .items_center()
+                .gap_4()
                 .p_5()
-                .child(t!(label).to_string())
-                .when(enabled, |view| {
-                    view.child(t!("sync.pending", count = pending).to_string())
-                })
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .items_center()
+                                .gap_2()
+                                .child(badge)
+                                .when(enabled && pending > 0, |row| {
+                                    row.child(
+                                        sidebar_tag(
+                                            t!("sync.pending", count = pending).to_string(),
+                                            false,
+                                            cx,
+                                        )
+                                        .h(px(24.))
+                                        .px_2()
+                                        .text_size(px(11.)),
+                                    )
+                                }),
+                        )
+                        .when(issue, |view| {
+                            view.child(
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(colors.muted_foreground)
+                                    .child(t!(label).to_string()),
+                            )
+                        })
+                        .when_some(last, |view, time| {
+                            view.child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(colors.muted_foreground)
+                                    .child(t!("sync.last", time = time).to_string()),
+                            )
+                        }),
+                )
                 .when(enabled, |view| {
                     view.child(
                         Button::new("cloud-sync-retry")
                             .label(t!("sync.retry").to_string())
+                            .outline()
+                            .h(px(32.))
+                            .w(px(112.))
+                            .flex_shrink_0()
                             .disabled(code == "syncing")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.update_cloud_sync(Command::Retry, cx)
@@ -80,24 +156,6 @@ impl HomeView {
                     )
                 }),
         );
-        if let Some(last) = self.cloud_sync_status["last_success"]
-            .as_u64()
-            .filter(|t| *t > 0)
-        {
-            let elapsed = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs()
-                .saturating_sub(last);
-            group = group.child(
-                div()
-                    .px_5()
-                    .pb_5()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(t!("sync.last", minutes = elapsed / 60).to_string()),
-            );
-        }
         if enabled && let Some(conflicts) = self.cloud_sync_status["conflicts"].as_array() {
             for (index, conflict) in conflicts.iter().enumerate() {
                 let Some(id) = conflict["id"].as_str() else {

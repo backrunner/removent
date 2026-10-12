@@ -8,6 +8,15 @@ pub fn run_check(
     shared: Arc<Mutex<UpdateShared>>,
     events: std::sync::mpsc::Sender<UiEvent>,
 ) {
+    run_check_with_fetch(manual, shared, events, fetch_and_validate);
+}
+
+fn run_check_with_fetch(
+    manual: bool,
+    shared: Arc<Mutex<UpdateShared>>,
+    events: std::sync::mpsc::Sender<UiEvent>,
+    fetch: impl FnOnce(&UpdatePolicy) -> Result<Option<UpdateManifest>, String>,
+) {
     let policy = {
         let mut state = shared.lock().unwrap();
         let status = &state.status;
@@ -27,18 +36,32 @@ pub fn run_check(
         let _ = events.send(UiEvent::UpdateStatus(UpdateStatus::Checking));
         state.policy.clone()
     };
-    match fetch_and_validate(&policy) {
+    let result = fetch(&policy);
+    let mut state = shared.lock().unwrap();
+    // Record completed attempts, including failures. Skipped/busy checks above
+    // never overwrite the time. Persist before notifying the UI.
+    state.last_checked_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|time| time.as_secs());
+    if let (Some(path), Some(last)) = (&state.history_path, state.last_checked_at)
+        && let Err(error) = history::save(path, last)
+    {
+        tracing::warn!(%error, "could not save update check time");
+    }
+    state.status = match result {
         Ok(Some(m)) => {
             let available = UpdateStatus::Available {
                 version: m.version.clone(),
                 notes: m.notes.clone(),
             };
-            shared.lock().unwrap().manifest = Some(m);
-            set_status(&shared, &events, available);
+            state.manifest = Some(m);
+            available
         }
-        Ok(None) => set_status(&shared, &events, UpdateStatus::UpToDate),
-        Err(reason) => set_status(&shared, &events, UpdateStatus::Failed(reason)),
-    }
+        Ok(None) => UpdateStatus::UpToDate { manual },
+        Err(reason) => UpdateStatus::Failed(reason),
+    };
+    let _ = events.send(UiEvent::UpdateStatus(state.status.clone()));
 }
 
 /// Fetch and validate the manifest; Ok(Some) = a newer compatible version exists.
@@ -172,3 +195,123 @@ pub(super) fn fetch_update(
 }
 
 // ---- download + verify ----
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checks_record_completion_and_preserve_manual_origin_across_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = DataPaths {
+            root: directory.path().into(),
+        };
+        let settings = Settings::default();
+        let shared = UpdateShared::with_history(&settings, &paths);
+        for manual in [false, true, false] {
+            let previous = shared.lock().unwrap().last_checked_at;
+            let (tx, rx) = std::sync::mpsc::channel();
+            run_check_with_fetch(manual, shared.clone(), tx, |_| {
+                assert_eq!(shared.lock().unwrap().last_checked_at, previous);
+                Ok(None)
+            });
+            assert!(matches!(
+                rx.try_recv().unwrap(),
+                UiEvent::UpdateStatus(UpdateStatus::Checking)
+            ));
+            assert!(
+                matches!(rx.try_recv().unwrap(), UiEvent::UpdateStatus(UpdateStatus::UpToDate { manual: origin }) if origin == manual)
+            );
+            let last = shared.lock().unwrap().last_checked_at.unwrap();
+            let restored = UpdateShared::with_history(&settings, &paths);
+            assert_eq!(restored.lock().unwrap().last_checked_at, Some(last));
+            // The historical time survives restart; a manual result does not.
+            assert_eq!(restored.lock().unwrap().status, UpdateStatus::Idle);
+        }
+    }
+
+    #[test]
+    fn automatic_candidates_and_failed_attempts_keep_their_result_and_time() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = DataPaths {
+            root: directory.path().into(),
+        };
+        let settings = Settings::default();
+        let shared = UpdateShared::with_history(&settings, &paths);
+        let (tx, _) = std::sync::mpsc::channel();
+        run_check_with_fetch(false, shared.clone(), tx, |_| {
+            Ok(Some(UpdateManifest {
+                version: "9.0.0".into(),
+                url: "https://example.invalid/update".into(),
+                sha256: String::new(),
+                signature: String::new(),
+                notes: "Release notes".into(),
+                pub_date: String::new(),
+                min_compatible_proto: 1,
+            }))
+        });
+        assert!(matches!(
+            shared.lock().unwrap().status,
+            UpdateStatus::Available { .. }
+        ));
+        let (tx, _) = std::sync::mpsc::channel();
+        run_check_with_fetch(true, shared.clone(), tx, |_| Err("Offline".into()));
+        assert_eq!(
+            shared.lock().unwrap().status,
+            UpdateStatus::Failed("Offline".into())
+        );
+        assert!(
+            UpdateShared::with_history(&settings, &paths)
+                .lock()
+                .unwrap()
+                .last_checked_at
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn skipped_checks_leave_history_untouched_and_a_save_failure_keeps_the_result() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = DataPaths {
+            root: directory.path().into(),
+        };
+        let settings = Settings::default();
+        history::save(&paths.root.join("update-check.json"), 1234567890).unwrap();
+        let shared = UpdateShared::with_history(&settings, &paths);
+        for (manual, status) in [
+            (true, UpdateStatus::Checking),
+            (
+                true,
+                UpdateStatus::ReadyToInstall {
+                    version: "9.0.0".into(),
+                },
+            ),
+            (
+                false,
+                UpdateStatus::Available {
+                    version: "9.0.0".into(),
+                    notes: String::new(),
+                },
+            ),
+        ] {
+            shared.lock().unwrap().status = status.clone();
+            let (tx, rx) = std::sync::mpsc::channel();
+            run_check_with_fetch(manual, shared.clone(), tx, |_| {
+                panic!("skipped check must not fetch")
+            });
+            assert_eq!(shared.lock().unwrap().status, status);
+            assert_eq!(shared.lock().unwrap().last_checked_at, Some(1234567890));
+            assert!(rx.try_recv().is_err());
+        }
+        std::fs::remove_file(paths.root.join("update-check.json")).unwrap();
+        std::fs::create_dir(paths.root.join("update-check.json")).unwrap();
+        shared.lock().unwrap().status = UpdateStatus::Idle;
+        let (tx, _) = std::sync::mpsc::channel();
+        run_check_with_fetch(true, shared.clone(), tx, |_| Ok(None));
+        assert_eq!(
+            shared.lock().unwrap().status,
+            UpdateStatus::UpToDate { manual: true }
+        );
+        assert!(shared.lock().unwrap().last_checked_at.unwrap() > 1234567890);
+    }
+}

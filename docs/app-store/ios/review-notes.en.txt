@@ -1,0 +1,22 @@
+Removent 0.1.3 (4), com.alkinum.removent.mobile
+Free iPhone/iPad remote desktop controller, iOS/iPadOS 26+. No Removent account, subscriptions, or in-app purchases. It mirrors a general computer desktop; it is not a software store or a thin client for one hosted service.
+
+REVIEW SETUP — REVIEWER-OWNED COMPUTER
+A computer and local network are required to experience remote control. There is no hosted demo login. The app can open its connection forms and settings without a connection or iCloud sign-in.
+1. On an Apple Silicon Mac with macOS 26+, download the stable desktop app from https://removent.pwp.sh/download/ (GitHub release). Open it and grant Screen Recording and Accessibility permissions as requested. Complete host setup locally and enable the host service.
+2. Put the Mac and iPhone/iPad on the same local network. Allow Local Network access in iOS. Select the Mac from Nearby computers, or enter its address and configured port.
+3. For the simplest native path, generate a 12-digit connection code on the host and enter it in the mobile address field. Confirm the first certificate trust request. If using address-based pairing, enter the host's displayed pairing code when prompted. The host can require admission approval; approve it on the Mac.
+4. Verify screen updates, tap/mouse input, and English keyboard typing in a non-sensitive document. Reveal controls by tapping the picture or corner button. Rotate to landscape, open the keyboard, and use three-finger pan to reach cropped edges. Disconnect using the toolbar.
+5. Remember the computer, reconnect from Saved computers, and inspect Settings → Privacy policy / Support. iCloud is optional and requires the same Apple account on provisioned devices. Core local connections do not require iCloud.
+
+ALTERNATIVE SERVERS
+A configured compatible VNC or Windows RDP server can be entered manually. VNC supports documented RFB authentication; not all proprietary methods are supported. RDP uses its own certificate/authentication flow and has no audio, clipboard, or file redirection in this release.
+
+PERMISSIONS AND BACKGROUND
+Only Local Network permission is requested for discovery/connectivity. Audio is remote playback, not microphone recording. The remote-notification background mode is for CloudKit changes, not perpetual remote desktop execution. After backgrounding, reconnect if prompted.
+
+ATTACHMENTS
+See screenshot-manifest.json and review-demo.mp4 in the prepared package. Demonstration captures use isolated content. They supplement the setup steps and do not provide a hosted review environment or prove WAN/device acceptance.
+
+SUPPORT
+https://removent.pwp.sh/support/ — public support from Alkinum. Review contact is supplied separately in the private generated Connect payload.

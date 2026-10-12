@@ -149,11 +149,11 @@ pub fn form_group(cx: &App) -> Div {
         .w_full()
         .min_w_0()
         .flex_shrink_0()
-        .rounded(px(12.))
+        .rounded(px(10.))
         .bg(cx.theme().group_box)
         .border_1()
         .border_color(cx.theme().border)
-        .shadow_sm()
+        .shadow_none()
 }
 
 /// Form section heading, shared by device metadata and settings.

@@ -68,6 +68,7 @@ impl HomeView {
                 &self.vnc_password_input,
                 "settings.vnc_password_placeholder",
             ),
+            (&self.auth_password_input, "auth.password_placeholder"),
         ] {
             input.update(cx, |input, cx| {
                 input.set_placeholder(t!(key).to_string(), window, cx)
@@ -82,11 +83,50 @@ impl HomeView {
 }
 
 impl HomeView {
+    pub(super) fn reset_authentication_form(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.otp_qr = None;
+        self.otp_secret_visible = false;
+        self.otp_setup_error = false;
+        self.auth_password_pending = false;
+        if self.auth_password_error.take().is_some() {
+            self.set_status(t!("status.ready").to_string(), StatusTone::Info);
+        }
+        let password = self.engine.settings().authentication.password;
+        self.auth_password_input.update(cx, |input, cx| {
+            input.set_value(password, window, cx);
+            input.set_masked(true, window, cx);
+        });
+    }
+
+    pub(super) fn select_authentication(
+        &mut self,
+        mode: removent_core::AuthenticationMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.otp_qr = None;
+        self.otp_secret_visible = false;
+        self.otp_setup_error = false;
+        if mode == removent_core::AuthenticationMode::Password {
+            self.auth_password_pending = self.engine.settings().authentication.mode != mode;
+            self.auth_password_error = None;
+            self.auth_password_input
+                .update(cx, |input, cx| input.focus(window, cx));
+            cx.notify();
+        } else if self.save_authentication(mode, cx) {
+            self.reset_authentication_form(window, cx);
+        }
+    }
+
     pub(super) fn save_authentication(
         &mut self,
         mode: removent_core::AuthenticationMode,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let mut auth = self.engine.settings().authentication;
         auth.mode = mode;
         if mode == removent_core::AuthenticationMode::Password {
@@ -95,16 +135,31 @@ impl HomeView {
         if mode == removent_core::AuthenticationMode::Otp && auth.otp_secret.is_empty() {
             auth.otp_secret = removent_core::AuthenticationSettings::generate_otp_secret();
         }
-        if auth.validate().is_err() {
-            self.set_status(t!("auth.password_required").to_string(), StatusTone::Warn);
+        let saved = if auth.validate().is_err() {
+            let message = t!(if auth.password.len() > 1024 {
+                "auth.password_too_long"
+            } else {
+                "auth.password_required"
+            })
+            .to_string();
+            self.auth_password_error = Some(AuthenticationFormError::InvalidPassword);
+            self.set_status(message, StatusTone::Warn);
+            false
         } else if self.persist_settings(|s| {
             s.authentication = auth;
             if mode != removent_core::AuthenticationMode::PairingCode {
                 s.paired_only = false;
             }
         }) {
+            self.auth_password_pending = false;
+            self.auth_password_error = None;
             self.set_status(t!("status.settings_saved").to_string(), StatusTone::Ok);
-        }
+            true
+        } else {
+            self.auth_password_error = Some(AuthenticationFormError::Save(self.status.clone()));
+            false
+        };
         cx.notify();
+        saved
     }
 }

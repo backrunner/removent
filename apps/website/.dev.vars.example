@@ -1,0 +1,3 @@
+# Local Worker credentials only. Copy to ignored .dev.vars and fill securely.
+ONFIRE_API_KEY=
+# Product and ticket type IDs are configured in wrangler.jsonc.

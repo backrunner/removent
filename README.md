@@ -36,6 +36,26 @@ opens without Gatekeeper warnings.
 curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh | bash
 ```
 
+The installer verifies the release checksum, component signatures and Gatekeeper
+assessment before replacement, and retains the previous app for rollback. Quit
+the desktop and menu bar app and finish active sessions before upgrading. An
+existing running daemon is refreshed; an explicitly stopped daemon stays stopped.
+
+The [installer script](https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh) is publicly accessible from GitHub's `main` branch.
+Pushing changes to `main` updates this URL; users do not need to clone the repository.
+Install directly over SSH without administrator access (replace `user@mac`):
+
+```bash
+ssh user@mac 'curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh | bash -s -- --app-dir "$HOME/Applications" --login'
+```
+
+`--login` starts the background service and enables startup at user login. Omit it
+for installation only; `--start` starts without changing login preferences.
+Starting requires that SSH user to have a logged-in graphical session. First-time
+privacy grants still require System Settings on the Mac. See the
+[SSH installation guide](docs/guides/ssh-install.md) for system-wide installation,
+pinned versions, verification and service commands.
+
 ### First launch
 
 macOS will ask for two permissions — both are required for hosting a session:

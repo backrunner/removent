@@ -19,6 +19,28 @@ Open the DMG and double-click **Removent.app → Install and Open**, or drag the
 
 For a manual replacement, quit the main app and menu bar app and stop the background service first. The installer refuses to replace running code. Prefer the in-app updater for an existing installation.
 
+## Install from the terminal or SSH
+
+The [installer script](https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh) is publicly accessible from GitHub's `main` branch. Pushing script changes to `main` updates this URL; no repository clone is needed.
+
+In a terminal on the target Mac, install the latest stable release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh | bash
+```
+
+From another computer, install into the Mac user's Applications directory and enable background service startup at login (replace `user@mac`):
+
+```bash
+ssh user@mac 'curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh | bash -s -- --app-dir "$HOME/Applications" --login'
+```
+
+`--login` starts the daemon and enables startup at future user logins. Omit it to install only; `--start` starts without changing login preferences. Use `--version v0.1.4` to pin a published release or `--verify-only` to download and verify without installing. Run as the target Mac user, without sudo; `/Applications` may require administrator authorization, while `--app-dir "$HOME/Applications"` uses a user-owned directory.
+
+The installer verifies SHA-256, component signatures and Gatekeeper acceptance before replacement, and retains the previous app for rollback. Quit the main app and menu bar app and finish remote sessions before upgrading. A previously running daemon is refreshed; an explicitly stopped daemon stays stopped unless you request startup. Data, sharing settings and login preferences are preserved.
+
+Starting or refreshing the daemon requires the SSH user to have a logged-in graphical session. First-time Screen Recording and Accessibility approval still requires the Mac's System Settings. Installing the app does not grant these permissions or make a logged-out desktop available.
+
 ## First launch
 
 Open Removent from Applications. To share this Mac, use the menu bar's **Set Up Screen Sharing Permissions…** action. Grant Screen Recording and Accessibility, then restart the background service.

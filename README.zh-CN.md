@@ -33,6 +33,21 @@ Rust relay 跨网络使用 RVP 私有协议，无需托管账号。
 curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh | bash
 ```
 
+脚本在替换前验证发布包 SHA-256、各组件签名和 Gatekeeper，并保留旧应用以便失败时回滚。
+升级前须退出主窗口和菜单栏应用，并结束远程会话。原本运行的 daemon 会更新后重新启动，
+手动停止的服务保持停止，数据、共享设置和登录偏好保留。
+
+[安装脚本](https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh)可通过 GitHub 公开访问，链接对应 `main` 分支已推送的内容。
+脚本推送到 `main` 后，用户无需克隆仓库，即可直接通过 SSH 下载并安装（替换 `user@mac`）：
+
+```bash
+ssh user@mac 'curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh | bash -s -- --app-dir "$HOME/Applications" --login'
+```
+
+`--login` 启动后台服务并启用用户登录自启；省略此参数则仅安装，`--start` 只启动而不改变登录偏好。
+启动要求 SSH 用户已有已登录的图形会话。首次隐私授权仍需在 Mac 的系统设置中完成。
+系统目录安装、指定版本、校验和服务命令见 [SSH 安装说明](docs/guides/ssh-install.md)。
+
 ### 首次启动
 
 macOS 会请求两项权限 —— 共享本机时都必需：

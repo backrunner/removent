@@ -33,6 +33,7 @@ hex = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+tokio-util.workspace = true
 ironrdp-server = { version = "0.13", default-features = false, features = ["helper"] }
 async-trait = "0.1"
 rcgen = { workspace = true }
@@ -40,6 +41,7 @@ rustls = { workspace = true }
 tempfile = "3"
 removent-media-capture = { workspace = true }
 removent-host = { workspace = true }
+removent-relay = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]

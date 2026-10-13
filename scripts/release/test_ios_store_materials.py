@@ -13,6 +13,12 @@ spec.loader.exec_module(store)
 
 
 class StorePackageTests(unittest.TestCase):
+    def visual_metadata(self, output):
+        public = output / "public"
+        public.mkdir()
+        (public / "metadata.json").write_text(json.dumps({"version":"0.1.3","build":"4","bundle_id":"com.alkinum.removent.mobile"}))
+        return public
+
     def test_rebuild_cannot_include_stale_private_files(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -36,18 +42,20 @@ class StorePackageTests(unittest.TestCase):
     def test_unknown_device_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
+            public = self.visual_metadata(output)
             png = bytes([137,80,78,71,13,10,26,10]) + bytes(8) + struct.pack(">II",2064,2752)
             (output / "capture.png").write_bytes(png)
             item = {"file":"capture.png", "device":"unknown", "locale":"en-US", "kind":"settings"}
             (output / "screenshot-manifest.json").write_text(json.dumps({"version":"0.1.3","build":"4","bundle_id":"com.alkinum.removent.mobile","screenshots":[item]*20}))
-            with patch.object(store,"OUTPUT",output), patch.object(store, "PUBLIC", Path(__file__).resolve().parents[2] / "docs/app-store/ios"), self.assertRaisesRegex(ValueError,"Unknown screenshot device"):
+            with patch.object(store,"OUTPUT",output), patch.object(store, "PUBLIC", public), self.assertRaisesRegex(ValueError,"Unknown screenshot device"):
                 store.verify_visuals()
 
     def test_path_traversal_is_rejected_before_read(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
+            public = self.visual_metadata(output)
             (output / "screenshot-manifest.json").write_text(json.dumps({"version":"0.1.3","build":"4","bundle_id":"com.alkinum.removent.mobile","screenshots":[{"file":"../private.json"}]*20}))
-            with patch.object(store,"OUTPUT",output), patch.object(store, "PUBLIC", Path(__file__).resolve().parents[2] / "docs/app-store/ios"), self.assertRaisesRegex(ValueError,"Unsafe screenshot path"):
+            with patch.object(store,"OUTPUT",output), patch.object(store, "PUBLIC", public), self.assertRaisesRegex(ValueError,"Unsafe screenshot path"):
                 store.verify_visuals()
 
 

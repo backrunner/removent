@@ -18,9 +18,9 @@
   <aside class="rv-docs-sidebar" aria-label={context.t('nav.documentation')}>
     <div class="rv-docs-label"><span class="rv-section-dot" aria-hidden="true"></span>{context.t('docs.library')}</div>
     <nav><DocsNavigation items={navigationTree} currentPath={page.routePath} {context} /></nav>
-    <a class="rv-sidebar-release" href="https://github.com/backrunner/removent/releases/tag/v0.1.3">
+    <a class="rv-sidebar-release" href="https://github.com/backrunner/removent/releases/tag/v0.1.4">
       <span class="rv-release-label">{context.t('docs.release')}</span>
-      <strong>0.1.3<Icon name="arrow" size={16} /></strong>
+      <strong>0.1.4<Icon name="arrow" size={16} /></strong>
       <span>{context.t('download.notes')}</span>
     </a>
   </aside>

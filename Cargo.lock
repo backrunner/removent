@@ -7606,7 +7606,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "removent-app"
-version = "0.1.4-beta.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -7639,7 +7639,7 @@ dependencies = [
 
 [[package]]
 name = "removent-cli"
-version = "0.1.4-beta.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "ed25519-dalek 2.2.0",
@@ -7657,7 +7657,7 @@ dependencies = [
 
 [[package]]
 name = "removent-client"
-version = "0.1.4-beta.3"
+version = "0.1.4"
 dependencies = [
  "aes 0.9.3",
  "anyhow",
@@ -7681,6 +7681,7 @@ dependencies = [
  "removent-media-codec",
  "removent-net",
  "removent-proto",
+ "removent-relay-transport",
  "rustls",
  "security-framework",
  "security-framework-sys",
@@ -7690,6 +7691,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-native-tls",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -7698,7 +7700,7 @@ dependencies = [
 
 [[package]]
 name = "removent-core"
-version = "0.1.4-beta.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "der 0.8.2",
@@ -7725,7 +7727,7 @@ dependencies = [
 
 [[package]]
 name = "removent-daemon"
-version = "0.1.4-beta.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "core-foundation 0.10.1",
@@ -7745,7 +7747,7 @@ dependencies = [
 
 [[package]]
 name = "removent-host"
-version = "0.1.4-beta.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "des",
@@ -7769,7 +7771,7 @@ dependencies = [
 
 [[package]]
 name = "removent-input"
-version = "0.1.4-beta.3"
+version = "0.1.4"
 dependencies = [
  "core-graphics 0.25.0",
  "objc2 0.6.5",
@@ -7782,7 +7784,7 @@ dependencies = [
 
 [[package]]
 name = "removent-media-capture"
-version = "0.1.4-beta.3"
+version = "0.1.4"
 dependencies = [
  "block",
  "core-foundation 0.10.1",
@@ -7797,7 +7799,7 @@ dependencies = [
 
 [[package]]
 name = "removent-media-codec"
-version = "0.1.4-beta.3"
+version = "0.1.4"
 dependencies = [
  "apple-cf",
  "opus",
@@ -7811,7 +7813,7 @@ dependencies = [
 
 [[package]]
 name = "removent-mobile"
-version = "0.1.4-beta.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "hex",
@@ -7828,7 +7830,7 @@ dependencies = [
 
 [[package]]
 name = "removent-net"
-version = "0.1.4-beta.3"
+version = "0.1.4"
 dependencies = [
  "bytes",
  "ed25519-dalek 2.2.0",
@@ -7857,7 +7859,7 @@ dependencies = [
 
 [[package]]
 name = "removent-proto"
-version = "0.1.4-beta.3"
+version = "0.1.4"
 dependencies = [
  "bitflags 2.13.2",
  "bytes",
@@ -7868,7 +7870,7 @@ dependencies = [
 
 [[package]]
 name = "removent-relay"
-version = "0.1.4-beta.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "bytes",
@@ -7910,7 +7912,7 @@ dependencies = [
 
 [[package]]
 name = "removent-relay-transport"
-version = "0.1.4-beta.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "bytes",

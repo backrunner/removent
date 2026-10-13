@@ -1,4 +1,4 @@
-Removent 0.1.3 (4), com.alkinum.removent.mobile
+Removent 0.1.4 (5), com.alkinum.removent.mobile
 Free iPhone/iPad remote desktop controller, iOS/iPadOS 26+. No Removent account, subscriptions, or in-app purchases. It mirrors a general computer desktop; it is not a software store or a thin client for one hosted service.
 
 REVIEW SETUP — REVIEWER-OWNED COMPUTER

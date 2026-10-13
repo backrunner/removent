@@ -1,6 +1,6 @@
 # 审核与填写指南
 
-按首次 iOS 提审准备，版本为 0.1.3 (4)。将 metadata.json 和两种语言的描述填入 App Store Connect。首发不需要把修复说明写成更新日志。
+按首次 iOS 提审准备，版本为 0.1.4 (5)。将 metadata.json 和两种语言的描述填入 App Store Connect。首发不需要把修复说明写成更新日志。
 
 审核员自备 Apple Silicon Mac，按 review-notes.en.txt 下载桌面端、授予权限、在同一局域网启用主机，再使用连接码或地址配对。审核说明必须保留需要电脑和局域网的前提。录屏只用于辅助说明，不等同于可访问的演示账户。
 

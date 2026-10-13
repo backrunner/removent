@@ -148,7 +148,7 @@ pub(super) async fn run_native(
     attempt.progress("Negotiating");
     let destination = if let Some(route) = &request.relay {
         format!(
-            "{} · {}",
+            "{} ({})",
             bridge
                 .as_ref()
                 .and_then(|b| b.resolved_room.as_deref())

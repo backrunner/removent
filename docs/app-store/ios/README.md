@@ -7,7 +7,7 @@ rtk proxy python3 scripts/release/ios_store_materials.py --check
 rtk proxy python3 scripts/release/ios_store_materials.py --package --private-config userdata/release/ios-review.private.json
 ```
 
-The output lives in ignored dist/app-store-ios/. Screenshots and video are generated from the native client; source and validation limits are recorded in their manifests. A materials check is not signing, upload, App Review, or legal clearance. Current source version is 0.1.3 (4).
+The output lives in ignored dist/app-store-ios/. Screenshots and video are generated from the native client; source and validation limits are recorded in their manifests. A materials check is not signing, upload, App Review, or legal clearance. Current source version is 0.1.4 (5).
 
 
 Included: `metadata.json`, bilingual descriptions and TestFlight text, English reviewer notes, Chinese review guide, data-flow/privacy/export/age-rating workpapers, dependency inventory and bundled acknowledgements. The ignored private ZIP adds the reviewer contact, evidence manifest, 20 screenshots and native session video. It does not include the website product credential.

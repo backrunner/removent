@@ -12,9 +12,9 @@ On the Mac you want to control, install Removent, [grant permissions](/docs/perm
 
 Removent uses mDNS to discover nearby hosts. Open the app on your controller and select the Mac in the device list.
 
-Starting with v0.1.3-beta.1, Settings provides independent Removent, VNC, and RDP discovery controls. Removent defaults to on; VNC and RDP default to off. Compatibility discovery combines service announcements with standard-port probes on directly attached IPv4 subnets (VNC 5900, RDP 3389), including services that do not advertise. IPv6 and custom ports rely on service announcements or manual entry.
+Settings provides independent Removent, VNC, and RDP discovery controls. Removent defaults to on; VNC and RDP default to off. Starting with v0.1.4, desktop and mobile use Bonjour/mDNS service announcements only. Add unadvertised servers manually, including custom ports.
 
-Scans exclude this machine, point-to-point VPNs, and networks that are not directly attached. They confirm protocol handshakes without logging in. Disabling a protocol stops its discovery and removes its list entries. Selecting a VNC/RDP device prefills its address; you still enter credentials, and discovery does not establish trust.
+Disabling a protocol stops its discovery and removes its list entries. Selecting a VNC/RDP device prefills its address; you still enter credentials, and discovery does not establish trust.
 
 If discovery does not find it, choose **Add connection → Removent** and enter its address. Discovery may be blocked between guest networks, VLANs, or networks with client isolation even when a manually entered address is reachable.
 
@@ -25,6 +25,17 @@ The protocol is selected explicitly. Choosing an unusual port does not change a 
 Enter the PIN displayed by the host. The host must approve the requested access. Native RVP uses SPAKE2 pairing and pinned device certificates with mutual TLS.
 
 After pairing, trusted devices can reconnect within their granted capabilities. Additional capabilities still require approval, and a host configured to deny incoming connections continues to reject them.
+
+## Choose host authentication
+
+The controlled Mac selects the policy in **Settings → Security**. Both desktop and the iPhone/iPad controller follow the host's policy automatically:
+
+- **Pairing code**: enter the host's six-digit PIN, or a host-generated one-time 12-digit connection code. The host chooses whether to remember a device or require pairing on every connection.
+- **Access password**: enter the password configured on the host. Previously paired devices also need it.
+- **Authenticator OTP**: enter the current six-digit code from the configured authenticator. Codes expire and cannot be reused.
+- **No authentication**: no credential prompt. RVP still uses encrypted transport and host certificate verification.
+
+Password and OTP use SPAKE2 proofs and signed mutual confirmation; they are not sent as plaintext credentials. These policies work with direct connections and private relays. A relay's access password and device authorization are checked separately from the host's credentials. Disabling incoming connections still rejects every mode. Changing the host policy invalidates quick resume under the old policy; reconnect and enter the new credential.
 
 ## During a session
 

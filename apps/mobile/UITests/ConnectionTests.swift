@@ -389,25 +389,66 @@ final class ConnectionTests: XCTestCase {
     }
 
     func testUnattendedAuthenticationVideoAndInput() async throws {
+        try await authentication(relay: false)
+    }
+
+    func testRelayUnattendedAuthenticationVideoAndInput() async throws {
+        try await authentication(relay: true)
+    }
+
+    func testRelayPairingVideoAndInput() async throws {
+        try await authentication(relay: true)
+    }
+
+    private func authentication(relay: Bool) async throws {
         let url = URL(string: "http://127.0.0.1:48690")!
         guard let (data, _) = try? await URLSession.shared.data(from: url),
               let initial = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let mode = initial["auth_mode"] as? String, ["password", "otp", "none"].contains(mode) else {
-            throw XCTSkip("Start mobile_fixture with REMOVENT_FIXTURE_AUTH=password, otp or none")
+              let mode = initial["auth_mode"] as? String, ["pairing_code", "password", "otp", "none"].contains(mode) else {
+            throw XCTSkip("Start mobile_fixture with a supported REMOVENT_FIXTURE_AUTH mode")
         }
+        if relay && initial["relay"] as? Bool != true { throw XCTSkip("Start mobile_fixture with REMOVENT_FIXTURE_RELAY=1") }
         let before = initial["inputs"] as? Int ?? 0
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-fresh", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch(); app.buttons["addConnection"].tap()
         let host = app.textFields["connectionHost"]
-        XCTAssertTrue(host.waitForExistence(timeout: 5)); host.tap(); host.typeText("127.0.0.1")
-        let port = app.textFields["connectionPort"]
-        port.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
-        port.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 5) + "48689")
+        XCTAssertTrue(host.waitForExistence(timeout: 5)); host.tap(); host.typeText(relay ? "office" : "127.0.0.1")
+        if relay {
+            app.buttons["dismissKeyboard"].tap()
+            app.switches["useRelay"].coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+            let endpoint = app.textFields["relayEndpoint"]
+            for _ in 0..<4 where !endpoint.isHittable { app.swipeUp() }
+            endpoint.tap(); endpoint.typeText("removent://127.0.0.1:48691")
+            app.buttons["dismissKeyboard"].tap()
+            let transport = app.buttons["relayTransport"]
+            for _ in 0..<4 where !transport.isHittable { app.swipeUp() }
+            transport.tap(); app.buttons["VPS / QUIC"].tap()
+            let password = app.secureTextFields["connectionPassword"]
+            for _ in 0..<4 where !password.isHittable { app.swipeUp() }
+            password.tap(); password.typeText(String(repeating: "22", count: 32))
+            app.buttons["dismissKeyboard"].tap()
+        } else {
+            let port = app.textFields["connectionPort"]
+            port.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
+            port.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 5) + "48689")
+        }
         app.buttons["connectButton"].tap()
         let trust = app.buttons["Trust and connect"]
+        if relay {
+            XCTAssertTrue(app.alerts.staticTexts["Trust this relay?"].waitForExistence(timeout: 10))
+            trust.tap()
+            XCTAssertTrue(app.alerts.staticTexts["Trust this computer?"].waitForExistence(timeout: 10))
+        }
         XCTAssertTrue(trust.waitForExistence(timeout: 8)); trust.tap()
-        if mode == "password" {
+        if mode == "pairing_code" {
+            let field = app.textFields["pairingPIN"]
+            XCTAssertTrue(field.waitForExistence(timeout: 10))
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let fixture = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            field.tap(); field.typeText(try XCTUnwrap(fixture["pin"] as? String))
+            app.buttons["Connect"].tap()
+        } else if mode == "password" {
             let field = app.secureTextFields["authenticationPassword"]
             XCTAssertTrue(field.waitForExistence(timeout: 10)); field.tap(); field.typeText("fixture-password")
             self.capture(app, "Password authentication prompt")
@@ -434,7 +475,7 @@ final class ConnectionTests: XCTestCase {
         let (finalData, _) = try await URLSession.shared.data(from: url)
         let final = try JSONSerialization.jsonObject(with: finalData) as! [String: Any]
         XCTAssertGreaterThan(final["inputs"] as? Int ?? 0, before)
-        self.capture(app, "Unattended \(mode) connected")
+        self.capture(app, "\(mode) connected through \(relay ? "relay" : "direct connection")")
         app.buttons["disconnectButton"].tap()
     }
 

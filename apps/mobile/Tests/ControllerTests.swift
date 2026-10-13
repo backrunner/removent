@@ -3,6 +3,31 @@ import XCTest
 
 @MainActor
 final class ControllerTests: XCTestCase {
+    func testBonjourUsesSharedLocalAddressFilterAndKeepsRemoteAliases() {
+        for address in ["127.0.0.1", "127.42.0.1", "::1", "::ffff:127.0.0.1", "0.0.0.0", "::"] {
+            XCTAssertNil(BonjourDiscovery.remoteHost([address]))
+        }
+        XCTAssertEqual(BonjourDiscovery.remoteHost(["127.0.0.1", "198.51.100.11", "::1"]), "198.51.100.11")
+        XCTAssertEqual(BonjourDiscovery.remoteHost(["2001:db8::11"]), "2001:db8::11")
+        XCTAssertNil(BonjourDiscovery.remoteHost(["localhost", "mac-studio.local."]))
+        var interfaces: UnsafeMutablePointer<ifaddrs>?
+        XCTAssertEqual(getifaddrs(&interfaces), 0)
+        defer { freeifaddrs(interfaces) }
+        var current = interfaces
+        var checked = 0
+        while let node = current {
+            defer { current = node.pointee.ifa_next }
+            guard let address = node.pointee.ifa_addr,
+                  [AF_INET, AF_INET6].contains(Int32(address.pointee.sa_family)) else { continue }
+            var host = [CChar](repeating:0, count:Int(NI_MAXHOST))
+            if getnameinfo(address, socklen_t(address.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 {
+                XCTAssertNil(BonjourDiscovery.remoteHost([String(cString:host)]))
+                checked += 1
+            }
+        }
+        XCTAssertGreaterThan(checked, 0)
+    }
+
     func testNearbyDeduplicationUsesProtocolPortAndBroadcastAliases() throws {
         var bookmark = try JSONDecoder().decode(Bookmark.self, from: Data(#"{"id":"office","name":"br-gateway","protocol":"vnc","host":"192.168.1.11","port":5900,"username":"","domain":"","accept_invalid_certificate":false,"relay":null,"credentials_review_required":false,"password_hint":false}"#.utf8))
         let device = NearbyDevice(id:"discovered", name:"Mac mini", host:"192.168.1.11", port:5900, protocol:.vnc,

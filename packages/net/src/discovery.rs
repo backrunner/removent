@@ -10,6 +10,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
+mod local_addresses;
+pub use local_addresses::LocalDiscoveryAddresses;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeviceEntry {
     pub pairing: Option<removent_core::pairing_invitation::Advertisement>,

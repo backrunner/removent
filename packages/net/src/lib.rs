@@ -10,7 +10,9 @@ pub mod tls;
 pub mod transport;
 pub mod trust;
 
-pub use discovery::{Advertiser, DeviceEntry, DiscoveryBrowser, DiscoveryProtocol};
+pub use discovery::{
+    Advertiser, DeviceEntry, DiscoveryBrowser, DiscoveryProtocol, LocalDiscoveryAddresses,
+};
 pub use error::{NetError, Result};
 pub use pairing::{
     PIN_TTL, PairingChallenge, PairingMsg, PairingProof, client_begin, client_confirm_check,

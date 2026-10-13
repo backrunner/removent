@@ -23,6 +23,32 @@ unsafe fn input<'a>(value: *const c_char) -> anyhow::Result<&'a str> {
     Ok(unsafe { CStr::from_ptr(value) }.to_str()?)
 }
 
+/// Select a remote Bonjour address using desktop's local-interface policy.
+/// No engine, identity, DNS lookup or connection is created.
+/// # Safety
+/// `addresses` is a valid NUL-terminated JSON array of numeric host strings.
+/// Free a non-null result with rm_string_free.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rm_discovery_host(addresses: *const c_char) -> *mut c_char {
+    std::panic::catch_unwind(|| {
+        let input = unsafe { input(addresses) }.ok()?;
+        if input.len() > 16 * 1024 {
+            return None;
+        }
+        let hosts: Vec<String> = serde_json::from_str(input).ok()?;
+        if hosts.len() > 64 {
+            return None;
+        }
+        removent_net::LocalDiscoveryAddresses::load()
+            .ok()?
+            .remote_host(&hosts)
+    })
+    .ok()
+    .flatten()
+    .map(string)
+    .unwrap_or(std::ptr::null_mut())
+}
+
 /// Handle-independent storage call; safe to run on a background queue. Rust's
 /// data-directory lock serializes it with mobile saves and other sync calls.
 /// # Safety

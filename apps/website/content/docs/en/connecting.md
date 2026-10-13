@@ -16,6 +16,8 @@ Settings provides independent Removent, VNC, and RDP discovery controls. Removen
 
 Disabling a protocol stops its discovery and removes its list entries. Selecting a VNC/RDP device prefills its address; you still enter credentials, and discovery does not establish trust.
 
+Starting with v0.1.5, nearby lists exclude this computer for all three protocols using loopback and assigned interface addresses. Local addresses are rechecked when the network changes. A remote computer with the same display name remains visible.
+
 If discovery does not find it, choose **Add connection → Removent** and enter its address. Discovery may be blocked between guest networks, VLANs, or networks with client isolation even when a manually entered address is reachable.
 
 The protocol is selected explicitly. Choosing an unusual port does not change a Removent connection into VNC or RDP.

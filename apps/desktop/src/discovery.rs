@@ -3,7 +3,7 @@
 use crate::engine::UiEvent;
 use removent_client::connection::ConnectionProtocol;
 use removent_core::DiscoverySettings;
-use removent_net::{DeviceEntry, DiscoveryBrowser, DiscoveryProtocol};
+use removent_net::{DeviceEntry, DiscoveryBrowser, DiscoveryProtocol, LocalDiscoveryAddresses};
 use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -58,6 +58,9 @@ async fn run_with_browser(
         let mut advertised = None;
         let mut retry_at = tokio::time::Instant::now();
         let mut previous = BTreeMap::new();
+        let mut local = LocalDiscoveryAddresses::load().ok();
+        let mut interfaces = tokio::time::interval(Duration::from_secs(2));
+        interfaces.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             if browser.is_none() && tokio::time::Instant::now() >= retry_at {
                 match start(browse_protocol) {
@@ -87,10 +90,17 @@ async fn run_with_browser(
                         .map(|(id, entry)| (id.clone(), entry.clone())),
                 );
             }
-            let next = visible_devices(protocol, &my_fp, &combined);
+            // An unknown interface snapshot must not expose our own service.
+            let next = local
+                .as_ref()
+                .map(|local| visible_devices_with_addresses(protocol, &my_fp, &combined, local))
+                .unwrap_or_default();
             publish(protocol, &previous, &next, &events);
             previous = next;
             tokio::select! {
+                _ = interfaces.tick() => {
+                    local = LocalDiscoveryAddresses::load().ok();
+                }
                 result = settings.changed() => {
                     if result.is_err() || !enabled(*settings.borrow_and_update(), protocol) {
                         break;
@@ -127,14 +137,26 @@ async fn changed(source: &mut Option<DiscoveryTable>) -> Result<(), watch::error
 
 type VisibleDevices = BTreeMap<String, (String, SocketAddr, Vec<String>)>;
 
+#[cfg(test)]
 fn visible_devices(
     protocol: ConnectionProtocol,
     my_fp: &str,
     table: &HashMap<String, DeviceEntry>,
 ) -> VisibleDevices {
-    let mut entries: BTreeMap<String, &DeviceEntry> = BTreeMap::new();
+    visible_devices_with_addresses(protocol, my_fp, table, &LocalDiscoveryAddresses::default())
+}
+
+fn visible_devices_with_addresses(
+    protocol: ConnectionProtocol,
+    my_fp: &str,
+    table: &HashMap<String, DeviceEntry>,
+    local: &LocalDiscoveryAddresses,
+) -> VisibleDevices {
+    let mut entries: BTreeMap<String, (&DeviceEntry, SocketAddr)> = BTreeMap::new();
     for entry in table.values() {
-        let Some(addr) = entry.addr else { continue };
+        let Some(addr) = local.remote_addr(entry) else {
+            continue;
+        };
         let id = if protocol == ConnectionProtocol::Removent {
             if entry.short_fp.is_empty() || entry.short_fp == my_fp {
                 continue;
@@ -147,19 +169,14 @@ fn visible_devices(
         };
         if entries
             .get(&id)
-            .is_none_or(|current| entry.seen_at > current.seen_at)
+            .is_none_or(|(current, _)| entry.seen_at > current.seen_at)
         {
-            entries.insert(id, entry);
+            entries.insert(id, (entry, addr));
         }
     }
     entries
         .into_iter()
-        .map(|(id, entry)| {
-            (
-                id,
-                (entry.name.clone(), entry.addr.unwrap(), entry.hosts.clone()),
-            )
-        })
+        .map(|(id, (entry, addr))| (id, (entry.name.clone(), addr, entry.hosts.clone())))
         .collect()
 }
 
@@ -255,6 +272,31 @@ mod tests {
     }
 
     #[test]
+    fn discovery_filters_loopback_for_every_protocol() {
+        for protocol in [
+            ConnectionProtocol::Removent,
+            ConnectionProtocol::Vnc,
+            ConnectionProtocol::Rdp,
+        ] {
+            for address in [
+                "127.0.0.1:5900",
+                "127.42.0.1:5900",
+                "[::1]:5900",
+                "[::ffff:127.0.0.1]:5900",
+                "0.0.0.0:5900",
+                "[::]:5900",
+            ] {
+                let device = entry("Mac Studio", "peer", Some(address));
+                let table = HashMap::from([(device.instance.clone(), device)]);
+                assert!(
+                    visible_devices(protocol, "mine", &table).is_empty(),
+                    "{protocol:?}: {address}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn native_deduplicates_identity_and_filters_self_and_unresolved_entries() {
         let older = entry("old", "peer", Some("192.168.1.2:48688"));
         let newer = entry("new", "peer", Some("192.168.1.3:48688"));
@@ -279,6 +321,41 @@ mod tests {
             visible["peer"],
             ("new".into(), "192.168.1.3:48688".parse().unwrap(), vec![])
         );
+    }
+
+    #[test]
+    fn assigned_addresses_filter_all_protocols_and_refresh_removes_stale_rows() {
+        for protocol in [
+            ConnectionProtocol::Removent,
+            ConnectionProtocol::Vnc,
+            ConnectionProtocol::Rdp,
+        ] {
+            let mut own = entry("own", "other identity", Some("127.0.0.1:5900"));
+            own.hosts = vec!["192.168.1.4".into(), "mac-studio.local.".into()];
+            let remote = entry("Mac Studio", "remote", Some("192.168.1.11:5900"));
+            let table = HashMap::from([
+                (own.instance.clone(), own),
+                (remote.instance.clone(), remote),
+            ]);
+            let local = LocalDiscoveryAddresses::from_hosts(["192.168.1.4"]);
+            let previous = visible_devices_with_addresses(protocol, "mine", &table, &local);
+            assert_eq!(previous.len(), 1);
+            assert_eq!(
+                previous.values().next().unwrap().1,
+                "192.168.1.11:5900".parse().unwrap()
+            );
+            let next = visible_devices_with_addresses(
+                protocol,
+                "mine",
+                &table,
+                &LocalDiscoveryAddresses::from_hosts(["192.168.1.4", "192.168.1.11"]),
+            );
+            assert!(next.is_empty());
+            let (tx, rx) = std::sync::mpsc::channel();
+            publish(protocol, &previous, &next, &tx);
+            assert!(matches!(rx.try_recv().unwrap(), UiEvent::DeviceLost(_)));
+            assert!(rx.try_recv().is_err());
+        }
     }
 
     #[test]

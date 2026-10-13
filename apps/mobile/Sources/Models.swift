@@ -59,7 +59,7 @@ struct Bookmark: Codable, Identifiable {
     }
 }
 
-struct NearbyDevice: Identifiable {
+struct NearbyDevice: Identifiable, Equatable {
     var id: String
     var name: String
     var host: String

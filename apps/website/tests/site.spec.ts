@@ -128,7 +128,7 @@ test('grouped documentation and mobile contents keep bilingual guides reachable'
   await page.locator('.rv-doc-shortcuts a[href="/docs/relay/"]').click();
   await expect(page.locator('.rv-docs-sidebar a[aria-current="page"]')).toHaveText('Private relay');
   await expect(page.locator('.rv-prose, .sd-prose').first()).toContainText('check_interval_secs = 86400');
-  await expect(page.locator('.rv-sidebar-release')).toHaveAttribute('href', /v0\.1\.4$/);
+  await expect(page.locator('.rv-sidebar-release')).toHaveAttribute('href', /v0\.1\.5$/);
   await page.screenshot({ path: testInfo.outputPath('relay-light.png'), fullPage: false });
   await page.locator('.sd-theme-toggle').click();
   await page.screenshot({ path: testInfo.outputPath('relay-dark.png'), fullPage: false });
@@ -147,7 +147,7 @@ test('download stays usable when the release lookup fails', async ({ page }, tes
   await ready(page, '/download');
   await expect(page.locator('.rv-release-meta')).toContainText('Live version lookup is unavailable.');
   await expect(page.locator('.rv-release .rv-primary')).toHaveAttribute('href', 'https://github.com/backrunner/removent/releases');
-  await expect(page.getByRole('link', { name: /v0.1.4/ })).toHaveAttribute('href', /v0\.1\.4$/);
+  await expect(page.getByRole('link', { name: /v0.1.5/ })).toHaveAttribute('href', /v0\.1\.5$/);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: testInfo.outputPath('download-mobile.png'), fullPage: true });
 });

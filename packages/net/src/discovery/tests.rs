@@ -147,6 +147,13 @@ async fn compatibility_protocols_resolve_and_remove_over_multicast() {
                     if let Some(entry) = rx.borrow_and_update().get(&fullname) {
                         assert_eq!(entry.name, name);
                         assert_eq!(entry.addr, Some("127.0.0.1:3391".parse().unwrap()));
+                        assert!(
+                            LocalDiscoveryAddresses::load()
+                                .unwrap()
+                                .remote_addr(entry)
+                                .is_none(),
+                            "nearby lists must hide an actual local VNC/RDP announcement"
+                        );
                         break;
                     }
                     rx.changed().await.unwrap();
@@ -304,6 +311,13 @@ async fn advertise_and_browse_loopback() {
     let entry = wait_for_entry(&mut rx, &fp, false, false).await;
     assert_eq!(entry.name, "TestMac");
     assert_eq!(entry.addr, Some("127.0.0.1:48699".parse().unwrap()));
+    assert!(
+        LocalDiscoveryAddresses::load()
+            .unwrap()
+            .remote_addr(&entry)
+            .is_none(),
+        "nearby lists must hide an actual local Removent announcement"
+    );
     assert_eq!(entry.caps, Caps::all());
 
     let ad = removent_core::pairing_invitation::Advertisement {

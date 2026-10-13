@@ -8,9 +8,12 @@ final class BonjourDiscovery: NSObject, ObservableObject, @preconcurrency NetSer
     @Published var error: String?
     private var browsers: [NetServiceBrowser] = []
     private var services: [String:NetService] = [:]
+    private var excludeLocal = true
+    private var refreshTimer: Timer?
 
-    func start(removent: Bool, vnc: Bool, rdp: Bool) {
+    func start(removent: Bool, vnc: Bool, rdp: Bool, excludeLocal: Bool = true) {
         stop(); error = nil
+        self.excludeLocal = excludeLocal
         var types: [String] = []
         if removent { types += ["_removent._udp."] }
         if vnc { types += ["_rfb._tcp."] }
@@ -19,8 +22,17 @@ final class BonjourDiscovery: NSObject, ObservableObject, @preconcurrency NetSer
             let browser = NetServiceBrowser(); browser.delegate = self
             browsers.append(browser); browser.searchForServices(ofType:type, inDomain:"local.")
         }
+        if excludeLocal && !types.isEmpty {
+            refreshTimer = Timer.scheduledTimer(withTimeInterval:2, repeats:true) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    for service in Array(self.services.values) { self.netServiceDidResolveAddress(service) }
+                }
+            }
+        }
     }
     func stop() {
+        refreshTimer?.invalidate(); refreshTimer = nil
         for browser in browsers { browser.delegate = nil; browser.stop() }
         for service in services.values { service.delegate = nil; service.stop() }
         browsers = []; services = [:]; devices = []
@@ -49,21 +61,34 @@ final class BonjourDiscovery: NSObject, ObservableObject, @preconcurrency NetSer
                 return String(cString:result)
             }
         }.sorted { !$0.contains(":") && $1.contains(":") } ?? []
-        let host = addresses.first ?? service.hostName
-        guard let host else { return }
-        let proto: ConnectionProtocol = service.type == "_removent._udp." ? .removent : service.type == "_rfb._tcp." ? .vnc : .rdp
+        let host = Self.remoteHost(addresses) ?? (excludeLocal ? nil : (addresses.first ?? service.hostName))
         let id = key(service)
-        devices.removeAll { $0.id == id }
+        guard let host else {
+            if devices.contains(where: { $0.id == id }) { devices.removeAll { $0.id == id } }
+            return
+        }
+        let proto: ConnectionProtocol = service.type == "_removent._udp." ? .removent : service.type == "_rfb._tcp." ? .vnc : .rdp
         let txt = service.txtRecordData().map(NetService.dictionary(fromTXTRecord:)) ?? [:]
         let locator = txt["pair"].flatMap { String(data:$0, encoding:.utf8) }
         let expires = txt["pair-exp"].flatMap { String(data:$0, encoding:.utf8) }.flatMap(TimeInterval.init)
-        devices.append(NearbyDevice(id:id, name:service.name, host:host, port:service.port, protocol:proto, advertisedHosts:addresses + [service.hostName].compactMap { $0 }, pairingLocator:locator, pairingExpiresAt:expires, pairingIdentity:txt["fp"].flatMap { String(data:$0, encoding:.utf8) }))
+        let device = NearbyDevice(id:id, name:service.name, host:host, port:service.port, protocol:proto, advertisedHosts:addresses + [service.hostName].compactMap { $0 }, pairingLocator:locator, pairingExpiresAt:expires, pairingIdentity:txt["fp"].flatMap { String(data:$0, encoding:.utf8) })
+        if devices.first(where: { $0.id == id }) == device { return }
+        devices.removeAll { $0.id == id }; devices.append(device)
         devices.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    static func remoteHost(_ addresses: [String]) -> String? {
+        guard let data = try? JSONSerialization.data(withJSONObject:addresses),
+              let json = String(data:data, encoding:.utf8),
+              let result = json.withCString({ rm_discovery_host($0) }) else { return nil }
+        defer { rm_string_free(result) }
+        return String(cString:result)
     }
 
     static func resolvePairing(_ locator: String) async throws -> NearbyDevice {
         let discovery = BonjourDiscovery()
-        discovery.start(removent:true, vnc:false, rdp:false)
+        // Explicit invitation lookup is a connection request, not a nearby row.
+        discovery.start(removent:true, vnc:false, rdp:false, excludeLocal:false)
         defer { discovery.stop() }
         let deadline = Date().addingTimeInterval(10)
         var settled = false

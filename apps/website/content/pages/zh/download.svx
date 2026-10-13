@@ -13,7 +13,7 @@ description: "为 Apple 芯片 Mac 获取 Removent，免费开源，采用 Apach
 
 ## Stable 正式版
 
-[下载 v0.1.4 并查看版本说明](https://github.com/backrunner/removent/releases/tag/v0.1.4)。本次正式版包含有界连接恢复、仅使用服务广播的局域网发现、更清晰的认证设置，以及同时重启桌面、托盘和后台服务的更新流程。独立 relay 的安装方式见[中继文档](/docs/relay)。
+[下载 v0.1.5 并查看版本说明](https://github.com/backrunner/removent/releases/tag/v0.1.5)。本次补丁版修复局域网发现显示本机的问题，Removent、VNC 和 RDP 均排除回环地址和本机网卡地址。独立 relay 的安装方式见[中继文档](/docs/relay)。
 
 Stable 和 Beta 更新渠道均可将此前的 `0.1.4-beta.N` 升级到本次正式版。桌面 App 要求 Apple Silicon 和 macOS 26 或更新版本。CloudKit Production 记录交换已在同一台 Mac 的独立数据目录之间验证；Mac 与 iPhone 真机之间的同步仍待验收。
 

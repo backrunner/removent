@@ -1,4 +1,4 @@
-//! Supplementary ScreenCaptureKit FFI: image buffer extraction and block buffer copying.
+//! Supplementary ScreenCaptureKit FFI: image extraction and PCM buffer-list copying.
 
 #![allow(non_snake_case)]
 
@@ -6,7 +6,6 @@ use std::os::raw::{c_int, c_void};
 
 pub type CMSampleBufferRef = *mut c_void;
 pub type CVPixelBufferRef = *mut c_void;
-pub type CMBlockBufferRef = *mut c_void;
 pub type CMFormatDescriptionRef = *mut c_void;
 pub type OSStatus = c_int;
 
@@ -27,7 +26,22 @@ pub struct AudioStreamBasicDescription {
 
 pub const K_AUDIO_FORMAT_LINEAR_PCM: u32 = u32::from_be_bytes(*b"lpcm");
 pub const K_AUDIO_FORMAT_FLAG_IS_FLOAT: u32 = 1;
+pub const K_AUDIO_FORMAT_FLAG_IS_BIG_ENDIAN: u32 = 1 << 1;
 pub const K_AUDIO_FORMAT_FLAG_IS_NON_INTERLEAVED: u32 = 1 << 5;
+
+#[repr(C)]
+pub struct AudioBuffer {
+    pub channels: u32,
+    pub byte_size: u32,
+    pub data: *mut c_void,
+}
+
+/// Space for the at-most-two buffers in our stereo capture configuration.
+#[repr(C)]
+pub struct StereoAudioBufferList {
+    pub count: u32,
+    pub buffers: [AudioBuffer; 2],
+}
 
 /// ABI-compatible with CoreMedia's CMTime.
 #[repr(C)]
@@ -44,22 +58,20 @@ unsafe extern "C" {
 
     pub fn CMSampleBufferGetPresentationTimeStamp(sbuf: CMSampleBufferRef) -> CMTime;
 
-    pub fn CMSampleBufferGetDataBuffer(sbuf: CMSampleBufferRef) -> CMBlockBufferRef;
-
     pub fn CMSampleBufferGetFormatDescription(sbuf: CMSampleBufferRef) -> CMFormatDescriptionRef;
+
+    pub fn CMSampleBufferGetNumSamples(sbuf: CMSampleBufferRef) -> isize;
+
+    pub fn CMSampleBufferCopyPCMDataIntoAudioBufferList(
+        sbuf: CMSampleBufferRef,
+        frame_offset: i32,
+        num_frames: i32,
+        buffer_list: *mut StereoAudioBufferList,
+    ) -> OSStatus;
 
     pub fn CMAudioFormatDescriptionGetStreamBasicDescription(
         desc: CMFormatDescriptionRef,
     ) -> *const AudioStreamBasicDescription;
-
-    pub fn CMBlockBufferGetDataLength(theBuffer: CMBlockBufferRef) -> usize;
-
-    pub fn CMBlockBufferCopyDataBytes(
-        theBuffer: CMBlockBufferRef,
-        offsetToData: usize,
-        dataLength: usize,
-        destination: *mut c_void,
-    ) -> OSStatus;
 
     pub fn CVPixelBufferLockBaseAddress(pixelBuffer: CVPixelBufferRef, lockFlags: u32) -> OSStatus;
 

@@ -10,10 +10,10 @@ pub enum AudioError {
     InvalidFrameLength { expected: usize, got: usize },
 }
 
-pub const SAMPLE_RATE: u32 = 48_000;
-pub const CHANNELS: usize = 2;
+pub const SAMPLE_RATE: u32 = removent_proto::AUDIO_SAMPLE_RATE;
+pub const CHANNELS: usize = removent_proto::AUDIO_CHANNELS;
 /// Samples per frame (10ms).
-pub const FRAME_SAMPLES_PER_CHANNEL: usize = SAMPLE_RATE as usize / 100;
+pub const FRAME_SAMPLES_PER_CHANNEL: usize = removent_proto::AUDIO_FRAME_SAMPLES_PER_CHANNEL;
 /// Maximum buffer needed to encode one frame.
 pub const MAX_PACKET_BYTES: usize = 400;
 

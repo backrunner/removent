@@ -1,7 +1,7 @@
 //! ScreenCaptureKit screen frame + system audio capture (FR-10/20).
 //!
 //! Video output is BGRA (stride = width * 4); audio output is 48kHz stereo i16,
-//! chunked to Opus frame size (960 samples/channel) and delivered over a channel
+//! chunked to Opus frame size (480 samples/channel) and delivered over a channel
 //! to the host send loop.
 //! Requires Screen Recording TCC permission (requirements.md §6).
 
@@ -55,10 +55,11 @@ impl From<SCError> for CaptureError {
     }
 }
 
-const SAMPLES_PER_FRAME: usize = 960; // 10ms @48kHz
-const CHANNELS: usize = 2;
-/// Duration of one audio frame in microseconds (960 samples @ 48 kHz).
-const FRAME_DURATION_US: i64 = SAMPLES_PER_FRAME as i64 * 1_000_000 / 48_000;
+const SAMPLES_PER_FRAME: usize = removent_proto::AUDIO_FRAME_SAMPLES_PER_CHANNEL;
+const CHANNELS: usize = removent_proto::AUDIO_CHANNELS;
+/// Duration of one audio frame in microseconds (480 samples @ 48 kHz).
+const FRAME_DURATION_US: i64 =
+    SAMPLES_PER_FRAME as i64 * 1_000_000 / removent_proto::AUDIO_SAMPLE_RATE as i64;
 /// Minimum interval between audio drop warnings.
 const DROP_WARN_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -184,52 +185,87 @@ fn copy_screen_bgra(sb: &CMSampleBuffer) -> Option<(Vec<u8>, i64)> {
     Some((bgra, pts))
 }
 
-/// Validates that the audio buffer is 32-bit float interleaved LPCM
-/// (returns None on unexpected formats).
-fn audio_is_f32_interleaved(sb: &CMSampleBuffer) -> bool {
-    // SAFETY: sb is valid; the returned reference is owned by sb, read-only use.
-    let desc = unsafe { ffi::CMSampleBufferGetFormatDescription(sb.as_ptr().cast()) };
+/// Copy the configured 48 kHz stereo float PCM layout, including the planar
+/// buffers emitted by ScreenCaptureKit. CoreMedia copies into an AudioBufferList
+/// so buffer boundaries and non-contiguous backing storage remain authoritative.
+fn copy_audio_samples(sb: &CMSampleBuffer) -> Option<Vec<f32>> {
+    // SAFETY: the callback owns a valid sample buffer throughout this copy.
+    unsafe { copy_audio_samples_ref(sb.as_ptr().cast()) }
+}
+
+unsafe fn copy_audio_samples_ref(sb: ffi::CMSampleBufferRef) -> Option<Vec<f32>> {
+    let desc = unsafe { ffi::CMSampleBufferGetFormatDescription(sb) };
     if desc.is_null() {
-        return false;
+        return None;
     }
     let asbd = unsafe { ffi::CMAudioFormatDescriptionGetStreamBasicDescription(desc) };
     if asbd.is_null() {
-        return false;
+        return None;
     }
     let asbd = unsafe { &*asbd };
-    asbd.format_id == ffi::K_AUDIO_FORMAT_LINEAR_PCM
-        && asbd.bits_per_channel == 32
-        && asbd.channels_per_frame == CHANNELS as u32
-        && asbd.format_flags & ffi::K_AUDIO_FORMAT_FLAG_IS_FLOAT != 0
-        && asbd.format_flags & ffi::K_AUDIO_FORMAT_FLAG_IS_NON_INTERLEAVED == 0
-}
-
-fn copy_audio_samples(sb: &CMSampleBuffer) -> Option<Vec<f32>> {
-    use crate::sck_ffi::CMSampleBufferGetDataBuffer;
-    if !audio_is_f32_interleaved(sb) {
-        // Warn only once on format mismatch to avoid per-frame log spam.
+    let planar = asbd.format_flags & ffi::K_AUDIO_FORMAT_FLAG_IS_NON_INTERLEAVED != 0;
+    let bytes_per_frame = if planar { 4 } else { 4 * CHANNELS as u32 };
+    if asbd.format_id != ffi::K_AUDIO_FORMAT_LINEAR_PCM
+        || asbd.sample_rate != f64::from(removent_proto::AUDIO_SAMPLE_RATE)
+        || asbd.bits_per_channel != 32
+        || asbd.channels_per_frame != CHANNELS as u32
+        || asbd.format_flags & ffi::K_AUDIO_FORMAT_FLAG_IS_FLOAT == 0
+        || asbd.format_flags & ffi::K_AUDIO_FORMAT_FLAG_IS_BIG_ENDIAN != 0
+        || asbd.bytes_per_frame != bytes_per_frame
+    {
         static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            tracing::warn!("audio sample buffer is not f32 interleaved LPCM; skipping audio");
+            tracing::warn!(
+                rate = asbd.sample_rate,
+                channels = asbd.channels_per_frame,
+                bits = asbd.bits_per_channel,
+                flags = asbd.format_flags,
+                "unsupported screen capture audio format; skipping audio"
+            );
         }
         return None;
     }
-    // SAFETY: valid sample buffer; the data block reference is owned by sb.
-    let bb = unsafe { CMSampleBufferGetDataBuffer(sb.as_ptr().cast()) };
-    if bb.is_null() {
+    let frames = unsafe { ffi::CMSampleBufferGetNumSamples(sb) };
+    // Bound allocation and the i32/u32 conversions below to one second of PCM.
+    if !(1..=48_000).contains(&frames) {
         return None;
     }
-    let len = unsafe { ffi::CMBlockBufferGetDataLength(bb) }; // byte count of f32 interleaved data
-    let mut bytes = vec![0u8; len];
-    unsafe { ffi::CMBlockBufferCopyDataBytes(bb, 0, len, bytes.as_mut_ptr().cast()) };
-    Some(
-        bytes
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-            .collect(),
-    )
+    let frames = frames as usize;
+    let mut samples = vec![0.0f32; frames * CHANNELS];
+    let mut list = ffi::StereoAudioBufferList {
+        count: if planar { 2 } else { 1 },
+        buffers: [
+            ffi::AudioBuffer {
+                channels: if planar { 1 } else { CHANNELS as u32 },
+                byte_size: frames as u32 * bytes_per_frame,
+                data: samples.as_mut_ptr().cast(),
+            },
+            ffi::AudioBuffer {
+                channels: 1,
+                byte_size: frames as u32 * 4,
+                // SAFETY: planar right channel occupies the second half of samples.
+                data: unsafe { samples.as_mut_ptr().add(frames) }.cast(),
+            },
+        ],
+    };
+    // SAFETY: the list ABI matches AudioBufferList and each writable buffer is
+    // backed by samples until copying completes. CoreMedia checks PCM readiness.
+    let status = unsafe {
+        ffi::CMSampleBufferCopyPCMDataIntoAudioBufferList(sb, 0, frames as i32, &mut list)
+    };
+    if status != 0 {
+        static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            tracing::warn!(status, "screen capture audio copy failed; skipping audio");
+        }
+        return None;
+    }
+    if planar {
+        let (left, right) = samples.split_at(frames);
+        Some(left.iter().zip(right).flat_map(|(&l, &r)| [l, r]).collect())
+    } else {
+        Some(samples)
+    }
 }
 
 impl SckOutput {
@@ -362,8 +398,8 @@ pub fn start_display_capture(
         .set_minimum_frame_interval(&frame_interval_60fps)
         .set_captures_audio(audio_tx.is_some())
         .set_excludes_current_process_audio(true)
-        .set_sample_rate(48_000)
-        .set_channel_count(2);
+        .set_sample_rate(removent_proto::AUDIO_SAMPLE_RATE as i32)
+        .set_channel_count(CHANNELS as i32);
 
     let (stopped_tx, stopped_rx) = mpsc::channel(1);
     let mut stream = SCStream::new_with_delegate(&filter, &config, StoppedDelegate { stopped_tx })
@@ -404,6 +440,10 @@ pub fn start_display_capture(
 }
 
 #[cfg(test)]
+#[path = "sck/audio_tests.rs"]
+mod audio_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -421,7 +461,7 @@ mod tests {
         assert_eq!(frame.pts_micros, 5000);
     }
 
-    /// pts advances by exactly one frame duration (20 ms) per emitted frame.
+    /// pts advances by exactly one frame duration (10 ms) per emitted frame.
     #[test]
     fn chunker_pts_advances_per_frame() {
         let mut c = AudioChunker::new();

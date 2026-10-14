@@ -89,6 +89,102 @@ async fn fixture(
 }
 
 #[tokio::test]
+async fn missing_late_and_closed_audio_do_not_stop_video() {
+    use removent_media_codec::{Application, AudioEncoder, VideoEncoder};
+    use removent_proto::{
+        AudioPacketHeader, VideoFrameHeader, build_audio_packet, build_video_frame, video_flags,
+    };
+    let (mut session, peer) = fixture(Caps::all(), None).await;
+    let mut encoder = VideoEncoder::new(CodecId::Hevc, 64, 64, 3000, 30).unwrap();
+    let encoded = encoder
+        .encode_bgra(&[40, 80, 160, 255].repeat(64 * 64), 0)
+        .unwrap()
+        .remove(0);
+    let mut stream = peer.conn.open_media_stream().await.unwrap();
+    let _video = AbortOnDrop(tokio::spawn(async move {
+        for n in 0..160 {
+            let wire = build_video_frame(
+                &VideoFrameHeader {
+                    frame_id: n,
+                    pts_us: n as i64 * 100_000,
+                    flags: video_flags::KEYFRAME,
+                    codec: CodecId::Hevc,
+                    width: 64,
+                    height: 64,
+                    payload_len: encoded.data.len() as u32,
+                },
+                &encoded.data,
+            );
+            if stream.write_all(&wire).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }));
+    let first = tokio::time::timeout(Duration::from_secs(5), session.decoded_bgra_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!((first.width, first.height), (64, 64));
+    // The old dispatcher killed healthy video at the ten-second audio deadline.
+    tokio::time::sleep(Duration::from_secs(11)).await;
+    let later = tokio::time::timeout(Duration::from_secs(2), session.decoded_bgra_rx.recv())
+        .await
+        .unwrap()
+        .expect("video must survive absent audio");
+    assert!(later.pts_us > 10_000_000);
+
+    // Optional audio can arrive after that deadline and still be decoded.
+    let mut audio = peer.conn.open_media_stream().await.unwrap();
+    let mut encoder = AudioEncoder::new(96, Application::Audio).unwrap();
+    let (seq, payload) = encoder
+        .encode_frame(&[10_000, -10_000].repeat(removent_proto::AUDIO_FRAME_SAMPLES_PER_CHANNEL))
+        .unwrap();
+    audio
+        .write_all(&build_audio_packet(
+            &AudioPacketHeader {
+                seq,
+                pts_us: later.pts_us,
+                flags: 0,
+                payload_len: payload.len() as u16,
+            },
+            &payload,
+        ))
+        .await
+        .unwrap();
+    let pcm = tokio::time::timeout(Duration::from_secs(2), session.decoded_pcm_rx.recv())
+        .await
+        .unwrap()
+        .expect("late audio must decode");
+    assert_eq!(
+        pcm.len(),
+        removent_proto::AUDIO_FRAME_SAMPLES_PER_CHANNEL * removent_proto::AUDIO_CHANNELS
+    );
+    audio.finish().unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), session.decoded_bgra_rx.recv())
+            .await
+            .unwrap()
+            .is_some(),
+        "audio EOF must retain video"
+    );
+    session.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn missing_video_still_closes_media_at_the_startup_deadline() {
+    let (mut session, _peer) = fixture(Caps::all(), None).await;
+    assert!(
+        tokio::time::timeout(Duration::from_secs(12), session.decoded_bgra_rx.recv())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    session.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn receiver_stall_drives_host_adaptation_and_keeps_input_live() {
     use removent_core::{AdaptationController, QualityPreset};
     use removent_media_codec::VideoEncoder;

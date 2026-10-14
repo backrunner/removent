@@ -13,6 +13,11 @@ pub const STREAM_TYPE_AUDIO: u8 = 0x02;
 pub const VIDEO_HEADER_LEN: usize = 27;
 pub const AUDIO_HEADER_LEN: usize = 14;
 
+/// RVP audio is 48 kHz stereo Opus in 10 ms packets (§6.2).
+pub const AUDIO_SAMPLE_RATE: u32 = 48_000;
+pub const AUDIO_CHANNELS: usize = 2;
+pub const AUDIO_FRAME_SAMPLES_PER_CHANNEL: usize = AUDIO_SAMPLE_RATE as usize / 100;
+
 pub const CONTROL_LEN_PREFIX: usize = 4;
 
 pub const MAX_CONTROL_MSG_LEN: u32 = 8 * 1024 * 1024;

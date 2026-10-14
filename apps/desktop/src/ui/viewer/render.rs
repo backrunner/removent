@@ -201,8 +201,8 @@ impl Render for ViewerView {
                                 // by input instead, independent of image layout sizing.
                                 let picture = ObjectFit::Contain.get_bounds(bounds, image.size(0));
                                 if let Err(error) = window.paint_image(
+                                    bounds,
                                     picture,
-                                    Default::default(),
                                     Default::default(),
                                     image,
                                     0,

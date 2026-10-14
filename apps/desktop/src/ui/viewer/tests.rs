@@ -60,6 +60,36 @@ fn setup(cx: &mut TestAppContext) -> (Fixture, &mut VisualTestContext) {
 }
 
 #[gpui::test]
+fn decoded_picture_is_uploaded_for_painting(cx: &mut TestAppContext) {
+    let (fixture, cx) = setup(cx);
+    for (width, height) in [(1280., 720.), (480., 320.), (640., 900.)] {
+        cx.simulate_resize(size(px(width), px(height)));
+        cx.update(|window, cx| {
+            fixture.viewer.update(cx, |view, cx| {
+                view.handle_frame(
+                    VideoFrame {
+                        width: 64,
+                        height: 36,
+                        data: [40, 80, 160, 255].repeat(64 * 36),
+                        pts_us: 0,
+                    },
+                    window,
+                );
+                cx.notify();
+            });
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let image = fixture.viewer.read(cx).current.as_ref().unwrap();
+            assert!(
+                window.has_image_atlas_entry(image),
+                "the decoded frame must reach paint_image, not just geometry and frame counters"
+            );
+        });
+    }
+}
+
+#[gpui::test]
 fn info_toggle_and_panel_clicks_stay_local(cx: &mut TestAppContext) {
     let (mut fixture, cx) = setup(cx);
     cx.run_until_parked();

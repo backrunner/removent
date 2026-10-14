@@ -41,44 +41,62 @@ pub(super) async fn media_dispatch_loop(
         feedback.clone(),
         cmd_tx.clone(),
     )));
-    let expected = if audio_enabled { 2 } else { 1 };
-    let startup = async {
-        for _ in 0..expected {
-            let Ok(mut stream) = conn.accept_media_stream().await else {
-                return false;
-            };
-            let mut first = [0u8; 1];
-            if stream.read_exact(&mut first).await.is_err() {
-                continue;
+    let mut headers = tokio::task::JoinSet::new();
+    let mut video_tx = Some(bgra_tx);
+    let mut audio_tx = audio_enabled.then_some(pcm_tx);
+    let video_deadline = tokio::time::sleep(Duration::from_secs(10));
+    tokio::pin!(video_deadline);
+    // Audio can be silent or unavailable even when negotiated. Its absence or
+    // EOF must never tear down an already running video stream. Keep accepting
+    // late audio, but bound header tasks from malformed/duplicate streams.
+    let mut accepted = 0;
+    loop {
+        tokio::select! {
+            _ = &mut video_deadline, if video_tx.is_some() => {
+                tracing::warn!("video stream failed to start within deadline");
+                return;
             }
-            match first[0] {
-                STREAM_TYPE_VIDEO => media.spawn(video_recv_loop(
-                    stream,
-                    bgra_tx.clone(),
-                    cmd_tx.clone(),
-                    last_kf.clone(),
-                    feedback.clone(),
-                )),
-                STREAM_TYPE_AUDIO => media.spawn(audio_recv_loop(stream, pcm_tx.clone())),
-                other => {
-                    tracing::warn!(t = other, "unknown media stream type");
-                    continue;
+            stream = conn.accept_media_stream(), if accepted < 8 && (video_tx.is_some() || audio_tx.is_some()) => {
+                let Ok(mut stream) = stream else { return };
+                accepted += 1;
+                headers.spawn(async move {
+                    let mut first = [0u8; 1];
+                    stream.read_exact(&mut first).await.map(|_| (first[0], stream))
+                });
+            }
+            header = headers.join_next(), if !headers.is_empty() => {
+                match header {
+                    Some(Ok(Ok((STREAM_TYPE_VIDEO, stream)))) if video_tx.is_some() => {
+                        let tx = video_tx.take().unwrap();
+                        let cmd_tx = cmd_tx.clone();
+                        let last_kf = last_kf.clone();
+                        let feedback = feedback.clone();
+                        media.spawn(async move {
+                            video_recv_loop(stream, tx, cmd_tx, last_kf, feedback).await;
+                            STREAM_TYPE_VIDEO
+                        });
+                    }
+                    Some(Ok(Ok((STREAM_TYPE_AUDIO, stream)))) if audio_tx.is_some() => {
+                        let tx = audio_tx.take().unwrap();
+                        media.spawn(async move {
+                            audio_recv_loop(stream, tx).await;
+                            STREAM_TYPE_AUDIO
+                        });
+                    }
+                    Some(Ok(Ok((kind, _)))) => tracing::warn!(kind, "unexpected or duplicate media stream"),
+                    _ => tracing::warn!("media stream header failed"),
                 }
-            };
+            }
+            ended = media.join_next(), if !media.is_empty() => {
+                match ended {
+                    Some(Ok(STREAM_TYPE_AUDIO)) => tracing::warn!("audio stream ended; retaining video"),
+                    // Video EOF/failure closes the frame channel promptly, even
+                    // when an optional audio stream/header is still pending.
+                    _ => return,
+                }
+            }
         }
-        true
-    };
-    if !matches!(
-        tokio::time::timeout(Duration::from_secs(10), startup).await,
-        Ok(true)
-    ) {
-        tracing::warn!("media streams failed to start within deadline");
-        return;
     }
-    // Only the video loop should keep the frame channel open from here.
-    drop(bgra_tx);
-    drop(pcm_tx);
-    while media.join_next().await.is_some() {}
 }
 
 /// Rebuild the decoder on demand (hot) from the frame header: on CONFIG_CHANGED or a

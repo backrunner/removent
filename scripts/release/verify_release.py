@@ -46,6 +46,9 @@ def verify_bundle(bundle):
     assert p['CFBundleIconFile'] == 'AppIcon'
     assert (bundle / 'Contents/Resources/AppIcon.icns').stat().st_size > 1000
     assert (bundle / 'Contents/MacOS/removent-cli').is_file()
+    cli_setup = bundle / 'Contents/Resources/install-cli.sh'
+    assert cli_setup.read_bytes() == (ROOT / 'apps/installer/install-cli.sh').read_bytes()
+    run('/bin/bash', '-n', str(cli_setup))
     host = bundle / 'Contents/Helpers/RemoventHost.app'
     host_info = plistlib.loads((host / 'Contents/Info.plist').read_bytes())
     assert host_info['CFBundleIdentifier'] == 'com.alkinum.removent.host'

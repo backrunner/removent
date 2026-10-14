@@ -75,7 +75,7 @@ user-session service requires the SSH user to have a graphical `gui/<uid>` sessi
 `--login` refers to future **user login**, not pre-login system boot. A user-session
 daemon does not unlock FileVault or provide a logged-out desktop.
 
-Use the installed CLI (change the path for `/Applications`):
+New builds register both `removent` and `removent-cli` automatically. If `/usr/local/bin` is not writable, setup uses `~/.local/bin` and configures zsh, bash and fish for the installing user. Open a new terminal or login session to load the PATH change. Existing unrelated commands are preserved; a setup failure is reported after keeping the verified app installed. Releases predating the bundled `install-cli.sh` helper still use the full path below. For scripts with a restricted PATH, the full path always works (change it for `/Applications`):
 
 ```bash
 REMOVENT_CLI="$HOME/Applications/Removent.app/Contents/MacOS/removent-cli"

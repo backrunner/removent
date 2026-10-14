@@ -119,13 +119,15 @@ def main():
                 temporary.replace(tray_login)
         if not before['stopped_by_user']:
             service('start', installed_cli)
-        for relative in ['Contents/MacOS/removent', 'Contents/MacOS/removentd',
+        for relative in ['Contents/MacOS/removent', 'Contents/MacOS/removent-cli', 'Contents/MacOS/removentd',
                          'Contents/Helpers/RemoventTray.app/Contents/MacOS/RemoventTray']:
             expected = hashlib.sha256((source / relative).read_bytes()).hexdigest()
             actual = hashlib.sha256((destination / relative).read_bytes()).hexdigest()
             if expected != actual:
                 raise RuntimeError(f'Installed binary differs from build: {relative}')
             print(f'Verified {relative}: {actual}')
+        cli_setup = subprocess.run(['/bin/bash', str(destination / 'Contents/Resources/install-cli.sh'),
+                                    str(destination)], cwd=ROOT)
         run('/usr/bin/open', '--env', f'REMOVENT_DATA_DIR={data}', str(destination))
     except Exception:
         print(f'Installation failed. Previous app retained at {backup}; service state needs checking.')
@@ -136,6 +138,8 @@ def main():
     if backup.exists():
         shutil.rmtree(backup)
     print(f'Installed current checkout at {destination}')
+    if cli_setup.returncode:
+        raise SystemExit('App installed, but terminal command setup needs attention; see the error above.')
 
 
 if __name__ == '__main__':

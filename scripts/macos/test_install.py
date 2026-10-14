@@ -358,5 +358,28 @@ sys.exit(subprocess.call(args))
         file.write_bytes(plistlib.dumps(value))
         self.assert_old(self.run_install())
 
+    def test_cli_registration_runs_after_commit_and_before_requested_start(self):
+        helper = self.root / 'source.app/Contents/Resources/install-cli.sh'
+        helper.parent.mkdir(parents=True)
+        helper.write_text('#!/bin/bash\n[ -f "$1/Contents/MacOS/new" ] || exit 9\n'
+                          'printf "cli setup %s\\n" "$1" >> "$INSTALL_TEST_ROOT/calls"\n')
+        result = self.run_install('--start')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f'cli setup {self.destination}', self.calls())
+        self.assertLess(self.calls().index('cli setup '), self.calls().index('service start'))
+        self.assert_clean()
+
+    def test_cli_setup_failure_keeps_verified_app_and_reports_partial_success(self):
+        helper = self.root / 'source.app/Contents/Resources/install-cli.sh'
+        helper.parent.mkdir(parents=True)
+        helper.write_text('#!/bin/bash\nprintf "Existing command preserved\\n" >&2\nexit 1\n')
+        result = self.run_install('--start')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('App installed, but terminal command setup needs attention', result.stderr)
+        self.assertIn('Existing command preserved', result.stderr)
+        self.assertTrue((self.destination / 'Contents/MacOS/new').exists())
+        self.assertIn('service start', self.calls())
+        self.assert_clean()
+
 
 if __name__ == '__main__': unittest.main()

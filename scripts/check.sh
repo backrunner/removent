@@ -6,4 +6,4 @@ python3 scripts/check_layout.py
 for scope in build release relay macos; do
     python3 -m unittest discover -s "scripts/$scope" -p 'test_*.py'
 done
-while IFS= read -r script; do bash -n "$script"; done < <(find scripts apps/tray/Tests -name '*.sh')
+while IFS= read -r script; do bash -n "$script"; done < <(find scripts apps/tray/Tests apps/installer -name '*.sh')

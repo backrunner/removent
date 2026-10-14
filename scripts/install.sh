@@ -256,6 +256,13 @@ if [ "$resume" = yes ]; then
 fi
 committed=yes
 printf '==> Installed Removent %s at %s\n' "$version" "$destination"
+cli_setup_failed=no
+cli_setup="$destination/Contents/Resources/install-cli.sh"
+if [ -f "$cli_setup" ]; then
+    bash "$cli_setup" "$destination" || cli_setup_failed=yes
+else
+    printf '==> This release predates automatic terminal commands; use the full CLI path below.\n'
+fi
 if [ "$login" = yes ]; then "$cli" daemon login-on
 elif [ "$start" = yes ]; then "$cli" daemon start; fi
 if [ "$resume" = yes ] || [ "$start" = yes ]; then
@@ -272,3 +279,4 @@ System Settings and a logged-in graphical session. Check actual grants with:
   "$cli" daemon status
 After setup, use "$cli" pairing generate to authorize a connection by code.
 EOF
+[ "$cli_setup_failed" = no ] || fail 'App installed, but terminal command setup needs attention; see the error above'

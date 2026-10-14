@@ -90,7 +90,11 @@ pub(super) async fn cmd_daemon(action: &str) -> anyhow::Result<()> {
         let service_action = action.to_owned();
         // launchctl and the startup readiness wait are blocking operations.
         let status = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-            let exe = std::env::current_exe()?.with_file_name("removentd");
+            // Global command aliases point into the bundle. Resolve them before
+            // locating the sibling host, including platforms that retain argv[0].
+            let exe = std::env::current_exe()?
+                .canonicalize()?
+                .with_file_name("removentd");
             let service = removent_core::service::Service::new(paths, exe)?;
             match service_action.as_str() {
                 "start" => service.start()?,

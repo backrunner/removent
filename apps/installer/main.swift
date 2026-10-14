@@ -1,6 +1,6 @@
-// The bundle entry point. Installed copies exec the Rust app immediately.
+// The bundle entry point. Installed copies register the CLI and exec the Rust app.
 // Copies opened from a read-only DMG (including App Translocation) offer a
-// standard, explicit installation without shell scripts or administrator access.
+// standard, explicit installation without administrator access.
 import AppKit
 import Darwin
 
@@ -113,6 +113,40 @@ if readOnly {
         _ = alert(tr("Installation could not finish", "安装未完成"), error.localizedDescription,
                   [tr("OK", "好")])
         exit(1)
+    }
+}
+
+// Covers DMG installation, drag-and-drop installation and the first launch after
+// an update. Build/staging bundles do not take over the user's terminal commands.
+let applicationDirectories = ["/Applications", fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path]
+if applicationDirectories.contains(source.deletingLastPathComponent().path) {
+    let task = Process()
+    let output = Pipe()
+    task.executableURL = URL(fileURLWithPath: "/bin/bash")
+    task.arguments = [source.appendingPathComponent("Contents/Resources/install-cli.sh").path, source.path]
+    task.standardOutput = FileHandle.nullDevice
+    task.standardError = output
+    do {
+        try task.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        if task.terminationStatus != 0 {
+            let detail = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            throw NSError(domain: "RemoventInstaller", code: Int(task.terminationStatus),
+                          userInfo: [NSLocalizedDescriptionKey: detail])
+        }
+        UserDefaults.standard.removeObject(forKey: "cliSetupError")
+    } catch {
+        // Keep the app usable and show a persistent conflict only once. Retry on
+        // every launch so resolving permissions or a name conflict repairs setup.
+        let detail = error.localizedDescription
+        if UserDefaults.standard.string(forKey: "cliSetupError") != detail {
+            _ = alert(tr("Terminal commands could not be set up", "终端命令未能配置"),
+                tr("Removent can still open. Resolve the issue below and reopen the app to retry.\n\n\(detail)",
+                   "Removent 仍可正常打开。解决以下问题后，重新打开应用即可重试。\n\n\(detail)"),
+                [tr("Continue", "继续")])
+            UserDefaults.standard.set(detail, forKey: "cliSetupError")
+        }
     }
 }
 

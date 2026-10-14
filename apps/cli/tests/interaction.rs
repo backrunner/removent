@@ -198,6 +198,65 @@ fn help_version_and_invalid_arguments_do_not_touch_the_daemon_or_logs() {
 }
 
 #[test]
+fn installed_command_aliases_run_the_cli_and_keep_json_clean() {
+    let cli = Cli::new("En");
+    let home = cli.root.path().join("user home");
+    let bundle = cli.root.path().join("Applications/Removent.app");
+    let executable = bundle.join("Contents/MacOS/removent-cli");
+    let bin = home.join(".local/bin");
+    std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_removent-cli"), &executable).unwrap();
+    let installed = Command::new("/bin/bash")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../installer/install-cli.sh"
+        ))
+        .arg(&bundle)
+        .arg(&bin)
+        .env("HOME", &home)
+        .env("PATH", "/usr/bin:/bin")
+        .env_remove("ZDOTDIR")
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("BASH_ENV")
+        .output()
+        .unwrap();
+    assert!(installed.status.success(), "{}", stderr(&installed));
+    for name in ["removent", "removent-cli"] {
+        let run = |args: &[&str]| {
+            Command::new(name)
+                .args(args)
+                .env("PATH", &bin)
+                .env("HOME", &home)
+                .env("REMOVENT_DATA_DIR", cli.root.path())
+                .env_remove("RUST_LOG")
+                .output()
+                .unwrap()
+        };
+        for args in [&[][..], &["--help"], &["--version"]] {
+            let output = run(args);
+            assert!(output.status.success(), "{}", stderr(&output));
+            assert!(output.stderr.is_empty());
+            assert!(!output.stdout.is_empty());
+        }
+        assert!(!cli.root.path().join("logs").exists());
+    }
+    let server = cli.serve("{\"type\":\"status\",\"running\":false}\n", Duration::ZERO);
+    let output = Command::new("removent")
+        .args(["daemon", "status"])
+        .env("PATH", &bin)
+        .env("HOME", &home)
+        .env("REMOVENT_DATA_DIR", cli.root.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(output.stderr.is_empty());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["type"], "status");
+    assert!(server.join().unwrap().contains("status"));
+}
+
+#[test]
 fn successful_json_is_clean_even_when_stdout_and_stderr_are_combined() {
     let cli = Cli::new("En");
     let server = cli.serve("{\"type\":\"pairing_pin\",\"pin\":\"123456\"}\n{\"type\":\"status\",\"running\":false,\"host_ready\":false}\n", Duration::ZERO);

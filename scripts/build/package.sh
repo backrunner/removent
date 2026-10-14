@@ -108,6 +108,7 @@ cp assets/branding/AppIcon.icns "$BUNDLE/Contents/Resources/AppIcon.icns"
 # TCC needs a stable app identity for the actual process performing capture.
 python3 scripts/build/package_host.py "$BUNDLE" "$TARGET_DIR/release/removentd" "$BASE_VERSION" "$BUILD_VERSION"
 cp "$TARGET_DIR/release/removent-cli" "$BUNDLE/Contents/MacOS/removent-cli"
+cp apps/installer/install-cli.sh "$BUNDLE/Contents/Resources/install-cli.sh"
 
 # Embed the tray: the main app auto-launches it on startup (main.rs autostart_tray looks in Contents/Helpers).
 mkdir -p "$BUNDLE/Contents/Helpers"

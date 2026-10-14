@@ -33,7 +33,12 @@ macro_rules! setting {
 }
 
 pub const SETTINGS: &[Setting] = &[
-    setting!("device_name", Kind::Text(63), false, true),
+    setting!(
+        "device_name",
+        Kind::Text(super::DEVICE_NAME_MAX_BYTES),
+        false,
+        true
+    ),
     setting!(
         "language",
         Kind::Choice(&["System", "En", "ZhCn"]),

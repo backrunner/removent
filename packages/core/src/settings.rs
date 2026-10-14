@@ -130,19 +130,33 @@ impl Default for Settings {
     }
 }
 
+const DEVICE_NAME_MAX_BYTES: usize = 63;
+
+fn normalized_default_device_name(name: &str) -> String {
+    let filtered: String = name.chars().filter(|c| !c.is_control()).collect();
+    let name = filtered.trim();
+    let mut end = name.len().min(DEVICE_NAME_MAX_BYTES);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    let name = name[..end].trim();
+    if name.is_empty() {
+        "Mac".into()
+    } else {
+        name.into()
+    }
+}
+
 fn default_device_name() -> String {
     if let Ok(name) = std::env::var("REMOVENT_DEVICE_NAME") {
-        return name;
+        return normalized_default_device_name(&name);
     }
     // System hostname (macOS: same source as `scutil --get LocalHostName`).
     let mut buf = [0u8; 256];
     let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
     if rc == 0 {
         let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-        let name = String::from_utf8_lossy(&buf[..end]).trim().to_string();
-        if !name.is_empty() {
-            return name;
-        }
+        return normalized_default_device_name(&String::from_utf8_lossy(&buf[..end]));
     }
     "Mac".to_string()
 }
@@ -241,6 +255,24 @@ pub fn atomic_write(path: &PathBuf, bytes: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn generated_device_names_fit_the_settings_catalog_without_splitting_utf8() {
+        for (input, expected) in [
+            ("runner".repeat(20), "runner".repeat(10) + "run"),
+            ("界".repeat(30), "界".repeat(21)),
+            ("x".repeat(62) + "界", "x".repeat(62)),
+            ("  Office Mac  ".into(), "Office Mac".into()),
+            ("\r\n\t".into(), "Mac".into()),
+        ] {
+            let name = normalized_default_device_name(&input);
+            assert_eq!(name, expected);
+            assert_eq!(
+                control::find("device_name").unwrap().parse(&name).unwrap(),
+                name
+            );
+        }
+    }
 
     #[test]
     fn concurrent_setting_edits_preserve_service_switch() {

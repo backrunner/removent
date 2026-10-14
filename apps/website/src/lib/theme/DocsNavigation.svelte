@@ -2,17 +2,16 @@
   import { SidebarTree } from 'svedocs/theme';
   import type { SvedocsTreeItem } from 'svedocs/core';
   import type { SvedocsThemeContext } from 'svedocs/theme/types';
-  import Icon from '../Icon.svelte';
 
   let { items = [], currentPath, context }: {
     items: SvedocsTreeItem[]; currentPath: string; context: SvedocsThemeContext;
   } = $props();
 
   const groups = [
-    { key: 'start', icon: 'book', slugs: ['', 'installation', 'permissions'] },
-    { key: 'connect', icon: 'network', slugs: ['connecting', 'vnc', 'rdp'] },
-    { key: 'operate', icon: 'server', slugs: ['hosting', 'relay'] },
-    { key: 'reference', icon: 'layers', slugs: ['quality', 'security', 'building'] }
+    { key: 'start', slugs: ['', 'installation', 'permissions'] },
+    { key: 'connect', slugs: ['connecting', 'vnc', 'rdp'] },
+    { key: 'operate', slugs: ['hosting', 'relay'] },
+    { key: 'reference', slugs: ['quality', 'security', 'building'] }
   ];
   // Group the framework's localized tree; it remains the authority for URLs,
   // titles and nested navigation. Unrecognized future pages remain visible.
@@ -27,7 +26,7 @@
     {@const links = items.filter(item => group.slugs.includes(slug(item)))}
     {#if links.length}
       <div class="rv-nav-group">
-        <p class="rv-nav-group-title"><Icon name={group.icon} size={14} />{context.t(`docs.group.${group.key}`)}</p>
+        <p class="rv-nav-group-title">{context.t(`docs.group.${group.key}`)}</p>
         <SidebarTree items={links} {currentPath} />
       </div>
     {/if}

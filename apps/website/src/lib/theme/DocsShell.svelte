@@ -4,6 +4,7 @@
   import type { SvedocsDocsShellProps } from 'svedocs/theme/types';
   import DocsNavigation from './DocsNavigation.svelte';
   import Icon from '../Icon.svelte';
+  import ScrollArea from './ScrollArea.svelte';
   let { page, navigationTree = [], content, context, tocController, themeComponents = {} }: SvedocsDocsShellProps = $props();
   let overview = $derived(page.scopePath === '/docs');
   let tocOpen = $state(false);
@@ -17,11 +18,13 @@
 <div class="rv-docs-shell">
   <aside class="rv-docs-sidebar" aria-label={context.t('nav.documentation')}>
     <div class="rv-docs-label">{context.t('docs.library')}</div>
-    <nav><DocsNavigation items={navigationTree} currentPath={page.routePath} {context} /></nav>
+    <ScrollArea currentPath={page.routePath}>
+      <nav><DocsNavigation items={navigationTree} currentPath={page.routePath} {context} /></nav>
+    </ScrollArea>
     <a class="rv-sidebar-release" href="https://github.com/backrunner/removent/releases/tag/v0.1.5">
       <span class="rv-release-label">{context.t('docs.release')}</span>
-      <strong>0.1.5<Icon name="arrow" size={16} /></strong>
-      <span>{context.t('download.notes')}</span>
+      <strong>0.1.5</strong>
+      <Icon name="arrow" size={14} />
     </a>
   </aside>
   <main id="content" class="rv-docs-main">
@@ -38,9 +41,9 @@
         </header>
         {#if overview}
           <div class="rv-doc-shortcuts">
-            {#each shortcuts as item, index}
+            {#each shortcuts as item}
               <a href={resolveLocalizedHref(item.href, context)}>
-                <span class="rv-shortcut-icon"><Icon name={item.icon} size={21} /><small>0{index + 1}</small></span>
+                <span class="rv-shortcut-icon"><Icon name={item.icon} size={18} /></span>
                 <strong>{context.t(`docs.shortcut.${item.key}`)}</strong><Icon name="arrow" size={17} />
               </a>
             {/each}
@@ -49,19 +52,30 @@
         {#if page.headings.length}
         <details class="rv-mobile-toc" bind:open={tocOpen}>
           <summary>{context.t('toc.label')}<Icon name="down" size={15} /></summary>
+          <ScrollArea>
           <nav aria-label={context.t('toc.label')}>
             {#each page.headings as heading}
               <a class="sd-toc-link sd-depth-{heading.depth}" href={'#' + heading.id}
-                onclick={() => { tocController?.activate(heading.id); tocOpen = false; }}>{heading.text}</a>
+                onclick={event => {
+                  // Native toggle events are queued. Close the element too so a fast
+                  // keyboard activation works before bind:open receives that event.
+                  const details = event.currentTarget.closest('details');
+                  event.currentTarget.blur();
+                  if (details) details.open = false;
+                  tocController?.activate(heading.id);
+                  tocOpen = false;
+                }}>{heading.text}</a>
             {/each}
           </nav>
+          </ScrollArea>
         </details>
         {/if}
       </svelte:fragment>
     </Article>
   </main>
   <div class="rv-docs-toc">
-    <TableOfContents {page} controller={tocController} {context} />
+    {#if page.headings.length}<div class="rv-toc-label">{context.t('toc.label')}</div>{/if}
+    <ScrollArea currentPath={page.routePath} activeSelector=".sd-toc-link.sd-active"><TableOfContents {page} controller={tocController} {context} /></ScrollArea>
     <div class="rv-doc-resources">
       <a href="https://github.com/backrunner/removent"><Icon name="layers" size={15} />{context.t('site.github')}<span aria-hidden="true">↗</span></a>
       <a href={`${page.routePath.replace(/\/$/, '')}/index.md`}><Icon name="book" size={15} />{context.t('docs.markdown')}<span aria-hidden="true">↗</span></a>

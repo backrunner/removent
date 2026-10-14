@@ -180,6 +180,7 @@ impl HomeView {
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .child(
                             t!(match self.auth_mode {
+                                removent_core::AuthenticationMode::SystemAccount => "auth.system",
                                 removent_core::AuthenticationMode::Password => "auth.password",
                                 removent_core::AuthenticationMode::Otp => "auth.otp",
                                 _ => "pairing.entry_title",
@@ -193,12 +194,18 @@ impl HomeView {
                         .text_color(colors.muted_foreground)
                         .child(
                             t!(match self.auth_mode {
+                                removent_core::AuthenticationMode::SystemAccount =>
+                                    "auth.system_desc",
                                 removent_core::AuthenticationMode::Password => "auth.password_desc",
                                 removent_core::AuthenticationMode::Otp => "auth.otp_desc",
                                 _ => "pairing.entry_desc",
                             })
                             .to_string(),
                         ),
+                )
+                .when(
+                    self.auth_mode == removent_core::AuthenticationMode::SystemAccount,
+                    |el| el.child(form_input(&self.auth_username_input)),
                 )
                 .child(form_input(&self.pin_input))
                 .child(
@@ -215,7 +222,7 @@ impl HomeView {
                         .child(
                             Button::new("submit-pin")
                                 .disabled({
-                                    let pin = self.pin_input.read(cx).value();
+                                    let pin = self.authentication_input(cx);
                                     !self.auth_mode.valid_input(&pin)
                                 })
                                 .label(t!("auth.connect").to_string())

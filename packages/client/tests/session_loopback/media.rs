@@ -43,7 +43,10 @@ async fn full_session_pair_negotiate_media() {
         let host_clip_for_cfg = host_clip.clone();
         *HOST_CLIP.lock().unwrap() = Some(host_clip);
         let cfg = HostConfig {
-            authentication: Default::default(),
+            authentication: removent_core::AuthenticationSettings {
+                mode: removent_core::AuthenticationMode::PairingCode,
+                ..Default::default()
+            },
             auth_paths: None,
             audio_available: true,
             preapproved_only: false,
@@ -191,6 +194,7 @@ async fn full_session_pair_negotiate_media() {
         server_addr,
         &client_id,
         ClientConfig {
+            host_identity_verified: false,
             pairing_code: None,
             device_name: "ClientLoop".into(),
             caps: Caps::all(),

@@ -3,7 +3,13 @@ use removent_core::{AuthenticationMode as Mode, AuthenticationSettings, PeerReco
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn deny_all_rejects_before_any_credential_prompt_or_otp_consumption() {
-    for mode in [Mode::PairingCode, Mode::Password, Mode::Otp, Mode::None] {
+    for mode in [
+        Mode::SystemAccount,
+        Mode::PairingCode,
+        Mode::Password,
+        Mode::Otp,
+        Mode::None,
+    ] {
         let dir = tempfile::tempdir().unwrap();
         let paths = DataPaths {
             root: dir.path().into(),
@@ -43,6 +49,7 @@ async fn attempt_over(
     let (client_id, _cd) = identity_for("AuthClient");
     let (host_id, _hd) = identity_for("AuthHost");
     let client_fp = client_id.fingerprint_hex();
+    let host_fingerprint = host_id.fingerprint;
     let (server, _) = make_server_endpoint(
         "127.0.0.1:0".parse().unwrap(),
         &host_id,
@@ -209,7 +216,7 @@ async fn attempt_over(
     let (endpoint, _) = make_client_endpoint(
         "127.0.0.1:0".parse().unwrap(),
         &client_id,
-        PinState::new([], true),
+        PinState::new([host_fingerprint], false),
     )
     .unwrap();
     let result = tokio::time::timeout(
@@ -219,6 +226,7 @@ async fn attempt_over(
             address,
             &client_id,
             ClientConfig {
+                host_identity_verified: true,
                 pairing_code: None,
                 device_name: "AuthClient".into(),
                 caps: Caps::all(),
@@ -486,6 +494,47 @@ async fn cancelling_password_input_releases_connection_promptly() {
             AdmissionMode::AlwaysAsk,
             DataPaths {
                 root: dir.path().into()
+            }
+        )
+        .await,
+        (false, 1)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn system_account_rejects_other_users_and_cancel_without_pin_fallback() {
+    for carrier in [None, Some(false), Some(true)] {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = DataPaths {
+            root: directory.path().into(),
+        };
+        let input = removent_proto::SystemCredentials {
+            username: "root".into(),
+            password: "synthetic-password".into(),
+        }
+        .encode();
+        assert_eq!(
+            attempt_over(
+                AuthenticationSettings::default(),
+                Some(input),
+                true,
+                AdmissionMode::AlwaysAsk,
+                paths,
+                carrier
+            )
+            .await,
+            (false, 1)
+        );
+    }
+    let directory = tempfile::tempdir().unwrap();
+    assert_eq!(
+        attempt(
+            AuthenticationSettings::default(),
+            None,
+            false,
+            AdmissionMode::AlwaysAsk,
+            DataPaths {
+                root: directory.path().into()
             }
         )
         .await,

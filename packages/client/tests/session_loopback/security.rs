@@ -74,6 +74,7 @@ async fn session_accept_cannot_skip_confirmation_or_invitation_proof() {
                 addr,
                 &client_id,
                 ClientConfig {
+                    host_identity_verified: false,
                     pairing_code: invitation.then(|| {
                         removent_core::pairing_invitation::PairingCode::parse("123456654321")
                             .unwrap()

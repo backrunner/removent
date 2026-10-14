@@ -55,6 +55,7 @@ async fn pair_with_grants(
         }
         let cfg = HostConfig {
             authentication: AuthenticationSettings {
+                mode: removent_core::AuthenticationMode::PairingCode,
                 pairing_policy: policy,
                 ..Default::default()
             },
@@ -123,6 +124,7 @@ async fn pair_with_grants(
             addr,
             &client_id,
             ClientConfig {
+                host_identity_verified: false,
                 pairing_code: code,
                 device_name: "PairClient".into(),
                 caps: Caps::all(),

@@ -1,6 +1,107 @@
 use super::*;
 use tempfile::tempdir;
 
+#[test]
+fn wake_settings_roundtrip_preserve_credentials_and_concurrent_edits() {
+    let dir = tempdir().unwrap();
+    let paths = DataPaths {
+        root: dir.path().into(),
+    };
+    let mut store = SavedConnections::load(&paths).unwrap();
+    let config =
+        crate::wake_on_lan::WakeOnLan::parse("021122334455", "192.168.1.255", "9").unwrap();
+    let entry = store
+        .upsert(SavedConnection {
+            host: "office.local".into(),
+            port: 5900,
+            protocol: ConnectionProtocol::Vnc,
+            password_hint: true,
+            password_key: Some("existing-secret".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    let mut other = SavedConnections::load(&paths).unwrap();
+    let mut renamed = entry.clone();
+    renamed.name = "New name".into();
+    other.upsert(renamed).unwrap();
+    let updated = store
+        .set_wake_on_lan(&entry.id, Some(config.clone()))
+        .unwrap();
+    assert_eq!(updated.name, "New name");
+    assert_eq!(updated.password_key, entry.password_key);
+    assert!(updated.password_hint);
+    assert_eq!(
+        SavedConnections::load(&paths).unwrap().all()[0].wake_on_lan,
+        Some(config.clone())
+    );
+    let mut edited = updated.clone();
+    edited.wake_on_lan = None; // ordinary connection form does not carry wake fields
+    edited.name = "Edited".into();
+    edited.username = "updated-account".into();
+    assert_eq!(store.upsert(edited).unwrap().wake_on_lan, Some(config));
+    assert!(
+        store
+            .set_wake_on_lan(&entry.id, None)
+            .unwrap()
+            .wake_on_lan
+            .is_none()
+    );
+    let old: SavedConnection = serde_json::from_str(r#"{"host":"old.local","port":5900}"#).unwrap();
+    assert!(old.wake_on_lan.is_none());
+    store.remove(&entry.id).unwrap();
+    assert!(
+        store
+            .set_wake_on_lan(
+                &entry.id,
+                Some(
+                    crate::wake_on_lan::WakeOnLan::parse("021122334455", "255.255.255.255", "9")
+                        .unwrap()
+                )
+            )
+            .is_err()
+    );
+    assert!(store.all().is_empty());
+}
+
+#[test]
+fn discovery_wake_configuration_is_atomic_and_does_not_clear_existing_credentials() {
+    let mut store = SavedConnections::in_memory();
+    let target = SavedConnection {
+        host: "192.168.1.10".into(),
+        port: 5900,
+        protocol: ConnectionProtocol::Vnc,
+        ..Default::default()
+    };
+    let invalid = crate::wake_on_lan::WakeOnLan {
+        mac_address: "bad".into(),
+        destination: std::net::Ipv4Addr::BROADCAST,
+        port: 9,
+    };
+    assert!(
+        store
+            .configure_discovered_wake(target.clone(), invalid)
+            .is_err()
+    );
+    assert!(store.all().is_empty());
+    let mut credentialed = target.clone();
+    credentialed.password_hint = true;
+    credentialed.password_key = Some("keep-this-secret".into());
+    let previous = store.upsert(credentialed).unwrap();
+    let config =
+        crate::wake_on_lan::WakeOnLan::parse("021122334455", "255.255.255.255", "9").unwrap();
+    let configured = store.configure_discovered_wake(target, config).unwrap();
+    assert_eq!(configured.id, previous.id);
+    assert_eq!(configured.password_key, previous.password_key);
+    assert!(configured.password_hint);
+    assert_eq!(store.all().len(), 1);
+    let mut changed = SavedConnection::from_request(
+        &request(ConnectionProtocol::Vnc, "another.local", 5900),
+        "Another",
+    );
+    changed.id = configured.id;
+    assert!(store.upsert(changed).unwrap().wake_on_lan.is_none());
+}
+
 fn request(protocol: ConnectionProtocol, host: &str, port: u16) -> ConnectionRequest {
     ConnectionRequest {
         pairing_code: None,

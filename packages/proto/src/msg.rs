@@ -332,15 +332,16 @@ pub enum ControlMsg {
     },
 }
 
-/// Host-selected native connection authentication. Pairing remains the legacy default.
+/// Host-selected native connection authentication. Append variants for wire compatibility.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthenticationMode {
-    #[default]
     PairingCode,
     Password,
     Otp,
     None,
+    #[default]
+    SystemAccount,
 }
 impl AuthenticationMode {
     pub fn valid_input(self, value: &str) -> bool {
@@ -350,6 +351,76 @@ impl AuthenticationMode {
                 value.len() == 6 && value.bytes().all(|b| b.is_ascii_digit())
             }
             Self::None => value.is_empty(),
+            Self::SystemAccount => SystemCredentials::decode(value).is_some(),
+        }
+    }
+}
+
+/// Ephemeral system credentials. Never persist or include their values in logs.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SystemCredentials {
+    pub username: String,
+    pub password: String,
+}
+impl std::fmt::Debug for SystemCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SystemCredentials([redacted])")
+    }
+}
+impl SystemCredentials {
+    pub fn valid(&self) -> bool {
+        !self.username.is_empty()
+            && self.username.len() <= 256
+            && !self.username.chars().any(char::is_control)
+            && !self.password.is_empty()
+            && self.password.len() <= 1024
+            && !self.password.contains('\0')
+    }
+    /// The existing controller/FFI credential channel transports a JSON envelope.
+    pub fn encode(&self) -> String {
+        serde_json::to_string(self).expect("credential serialization")
+    }
+    pub fn decode(value: &str) -> Option<Self> {
+        if value.len() > 8192 {
+            return None;
+        }
+        let credentials: Self = serde_json::from_str(value).ok()?;
+        credentials.valid().then_some(credentials)
+    }
+}
+
+#[cfg(test)]
+mod system_credentials_tests {
+    use super::*;
+    #[test]
+    fn system_credentials_are_bounded_and_redacted() {
+        assert_eq!(
+            AuthenticationMode::default(),
+            AuthenticationMode::SystemAccount
+        );
+        let mut input = SystemCredentials {
+            username: "owner".into(),
+            password: "private-login-password".into(),
+        };
+        assert!(AuthenticationMode::SystemAccount.valid_input(&input.encode()));
+        assert!(!format!("{input:?}").contains("private-login-password"));
+        assert!(SystemCredentials::decode("123456").is_none());
+        input.username = "root\0owner".into();
+        assert!(!input.valid());
+        input.username = "owner".into();
+        input.password = "x".repeat(1025);
+        assert!(!input.valid());
+        input.password.clear();
+        assert!(!input.valid());
+        for (mode, index) in [
+            (AuthenticationMode::PairingCode, 0),
+            (AuthenticationMode::Password, 1),
+            (AuthenticationMode::Otp, 2),
+            (AuthenticationMode::None, 3),
+            (AuthenticationMode::SystemAccount, 4),
+        ] {
+            assert_eq!(postcard::to_allocvec(&mode).unwrap(), vec![index]);
         }
     }
 }

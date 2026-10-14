@@ -119,6 +119,7 @@ pub struct HomeView {
     /// transition replays on each open (animation state is keyed by id and may survive remount).
     dialog_seq: u64,
     pin_input: Entity<InputState>,
+    auth_username_input: Entity<InputState>,
     auth_mode: removent_core::AuthenticationMode,
     auth_password_input: Entity<InputState>,
     otp_qr: Option<qrcode::QrCode>,
@@ -375,3 +376,4 @@ mod sidebar;
 mod tests;
 mod timestamps;
 mod updates;
+mod wake;

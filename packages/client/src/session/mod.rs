@@ -39,6 +39,9 @@ pub enum ConnectError {
 
 /// Connection configuration.
 pub struct ClientConfig {
+    /// Caller pins the host certificate or supplies first-use certificate confirmation.
+    /// System passwords must never be sent over a permissive, unconfirmed TLS session.
+    pub host_identity_verified: bool,
     pub pairing_code: Option<removent_core::pairing_invitation::PairingCode>,
     pub device_name: String,
     pub caps: Caps,

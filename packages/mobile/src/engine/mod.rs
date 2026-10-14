@@ -439,7 +439,7 @@ impl Engine {
                 let mut s = self.shared.state.lock().unwrap();
                 ensure!(
                     s.auth_mode.valid_input(&pin),
-                    "Enter a valid password or six-digit code"
+                    "Enter a valid system account, password or six-digit code"
                 );
                 ensure!(s.generation == generation, "Connection was cancelled");
                 s.pin

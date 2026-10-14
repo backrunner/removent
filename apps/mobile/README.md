@@ -5,8 +5,10 @@ host; the mobile app shares the Rust controller session engine with Removent
 desktop and presents it through a small SwiftUI shell.
 
 The controller supports native Removent/RVP, VNC / Apple Remote Desktop, and
-RDP connection forms. Native sessions follow the desktop host authentication policy: pairing code (default),
-access password, authenticator OTP, or no authentication. Policy and OTP setup live in
+RDP connection forms. Native sessions follow the desktop host authentication policy: system account (default), pairing code,
+access password, authenticator OTP, or no authentication. System account authentication
+uses the username and login password of the account running Removent on the Mac;
+the controller first verifies the host certificate and never saves the login password. Policy and OTP setup live in
 desktop Settings → Security; the mobile app prompts only for the required credential.
 Desktop Security settings also choose whether paired controllers must pair each connection.
 Enter a host-generated 12-digit connection code in the address field to connect by Bonjour on

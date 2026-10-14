@@ -152,11 +152,11 @@ pub(super) fn resume_policy_matches(
     {
         return false;
     }
-    resume_store().lock().unwrap().get(fp).is_some_and(|entry| {
-        entry.policy.unwrap_or_else(|| {
-            removent_core::AuthenticationSettings::default().policy_fingerprint()
-        }) == auth.policy_fingerprint()
-    })
+    resume_store()
+        .lock()
+        .unwrap()
+        .get(fp)
+        .is_some_and(|entry| entry.policy == Some(auth.policy_fingerprint()))
 }
 
 pub fn clear_resume_registry() {

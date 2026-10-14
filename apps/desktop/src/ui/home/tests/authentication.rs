@@ -1,5 +1,75 @@
 use super::*;
 
+fn open_authentication_choices(cx: &mut gpui::VisualTestContext) {
+    let bounds = cx.debug_bounds("authentication-picker").unwrap();
+    cx.simulate_mouse_move(bounds.center(), None, Default::default());
+    cx.simulate_click(bounds.center(), Default::default());
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn system_account_prompt_validates_both_fields_and_clears_credentials(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let directory = tempfile::tempdir().unwrap();
+    let paths = removent_core::DataPaths {
+        root: directory.path().into(),
+    };
+    let (commands, _rx) = tokio::sync::mpsc::channel(1);
+    let engine = Engine::for_ui_test(paths, commands);
+    assert_eq!(
+        engine.settings().authentication.mode,
+        removent_core::AuthenticationMode::SystemAccount
+    );
+    let slot = Rc::new(std::cell::RefCell::new(None));
+    let out = slot.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        let view = cx.new(|cx| HomeView::new(engine, window, cx));
+        *out.borrow_mut() = Some(view.clone());
+        gpui_component::Root::new(AnyView::from(view), window, cx)
+    });
+    let view = slot.borrow_mut().take().unwrap();
+    cx.simulate_resize(gpui::size(px(860.), px(600.)));
+    for cancel in [false, true] {
+        let (tx, mut answer) = oneshot::channel();
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle_event(
+                    UiEvent::ClientNeedsPin {
+                        generation: view.engine.client_generation(),
+                        mode: removent_core::AuthenticationMode::SystemAccount,
+                        tx,
+                    },
+                    window,
+                    cx,
+                );
+                assert!(view.auth_username_input.focus_handle(cx).is_focused(window));
+                view.submit_pin(window, cx);
+                assert!(view.pin_dialog.is_some(), "empty fields cannot submit");
+                view.auth_username_input
+                    .update(cx, |input, cx| input.set_value("owner", window, cx));
+                view.pin_input.update(cx, |input, cx| {
+                    input.set_value("synthetic-password", window, cx)
+                });
+                if cancel {
+                    view.cancel_pin(window, cx);
+                } else {
+                    view.submit_pin(window, cx);
+                }
+                assert!(view.pin_input.read(cx).value().is_empty());
+                assert!(view.auth_username_input.read(cx).value().is_empty());
+            })
+        });
+        if cancel {
+            assert!(answer.try_recv().is_err());
+        } else {
+            let credentials =
+                removent_proto::SystemCredentials::decode(&answer.try_recv().unwrap()).unwrap();
+            assert_eq!(credentials.username, "owner");
+            assert_eq!(credentials.password, "synthetic-password");
+        }
+    }
+}
+
 #[gpui::test]
 fn authentication_settings_persist_each_mode_and_require_password(cx: &mut TestAppContext) {
     cx.update(gpui_component::init);
@@ -25,7 +95,8 @@ fn authentication_settings_persist_each_mode_and_require_password(cx: &mut TestA
     cx.simulate_resize(gpui::size(px(860.), px(700.)));
     cx.run_until_parked();
     assert!(cx.debug_bounds("authentication-password-editor").is_none());
-    let password = cx.debug_bounds("authentication-1").unwrap();
+    open_authentication_choices(cx);
+    let password = cx.debug_bounds("authentication-2").unwrap();
     cx.simulate_mouse_move(password.center(), None, Default::default());
     cx.simulate_click(password.center(), Default::default());
     cx.run_until_parked();
@@ -34,7 +105,7 @@ fn authentication_settings_persist_each_mode_and_require_password(cx: &mut TestA
             .unwrap()
             .authentication
             .mode,
-        removent_core::AuthenticationMode::PairingCode
+        removent_core::AuthenticationMode::SystemAccount
     );
     assert!(cx.debug_bounds("authentication-password-editor").is_some());
     assert!(cx.debug_bounds("authentication-pending").is_some());
@@ -56,7 +127,7 @@ fn authentication_settings_persist_each_mode_and_require_password(cx: &mut TestA
     cx.update(|_, cx| {
         assert_eq!(
             view.read(cx).engine.settings().authentication.mode,
-            removent_core::AuthenticationMode::PairingCode
+            removent_core::AuthenticationMode::SystemAccount
         );
     });
     // The limit is UTF-8 bytes, not character count; an invalid save button is inert.
@@ -76,7 +147,7 @@ fn authentication_settings_persist_each_mode_and_require_password(cx: &mut TestA
             .unwrap()
             .authentication
             .mode,
-        removent_core::AuthenticationMode::PairingCode
+        removent_core::AuthenticationMode::SystemAccount
     );
     // Exactly 1024 bytes remains valid; the enabled save action commits the draft.
     let valid = format!("{}a", "界".repeat(341));
@@ -98,14 +169,15 @@ fn authentication_settings_persist_each_mode_and_require_password(cx: &mut TestA
         removent_core::AuthenticationMode::Password
     );
     for (selector, mode) in [
-        ("authentication-2", removent_core::AuthenticationMode::Otp),
-        ("authentication-3", removent_core::AuthenticationMode::None),
+        ("authentication-3", removent_core::AuthenticationMode::Otp),
+        ("authentication-4", removent_core::AuthenticationMode::None),
         (
-            "authentication-0",
+            "authentication-1",
             removent_core::AuthenticationMode::PairingCode,
         ),
     ] {
         cx.run_until_parked();
+        open_authentication_choices(cx);
         let bounds = cx.debug_bounds(selector).unwrap();
         assert!(bounds.right() <= px(860.));
         cx.simulate_mouse_move(bounds.center(), None, Default::default());
@@ -148,7 +220,8 @@ fn authentication_password_drafts_restore_saved_values_and_survive_save_failure(
     let view = slot.borrow_mut().take().unwrap();
     cx.simulate_resize(gpui::size(px(860.), px(700.)));
     cx.run_until_parked();
-    let password = cx.debug_bounds("authentication-1").unwrap();
+    open_authentication_choices(cx);
+    let password = cx.debug_bounds("authentication-2").unwrap();
     cx.simulate_click(password.center(), Default::default());
     view.update_in(cx, |view, window, cx| {
         view.auth_password_input.update(cx, |input, cx| {
@@ -176,7 +249,8 @@ fn authentication_password_drafts_restore_saved_values_and_survive_save_failure(
         );
     });
     // A persistence error retains the draft and the old active mode, permitting retry.
-    let password = cx.debug_bounds("authentication-1").unwrap();
+    open_authentication_choices(cx);
+    let password = cx.debug_bounds("authentication-2").unwrap();
     cx.simulate_click(password.center(), Default::default());
     view.update_in(cx, |view, window, cx| {
         view.auth_password_input.update(cx, |input, cx| {
@@ -296,7 +370,7 @@ fn otp_setup_hides_password_and_secrets_and_resets_reveals_on_navigation(cx: &mu
     assert!(cx.debug_bounds("otp-qr-visible").is_none());
     for selector in ["otp-toggle-qr", "otp-toggle-secret"] {
         let bounds = cx.debug_bounds(selector).unwrap();
-        if bounds.bottom() > px(700.) {
+        if bounds.bottom() > px(650.) {
             cx.simulate_event(gpui::ScrollWheelEvent {
                 position: gpui::point(px(700.), px(500.)),
                 delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-250.))),
@@ -344,7 +418,8 @@ fn otp_setup_hides_password_and_secrets_and_resets_reveals_on_navigation(cx: &mu
         assert!(state.otp_qr.is_none());
         assert!(!state.otp_secret_visible);
     });
-    let password = cx.debug_bounds("authentication-1").unwrap();
+    open_authentication_choices(cx);
+    let password = cx.debug_bounds("authentication-2").unwrap();
     cx.simulate_click(password.center(), Default::default());
     cx.run_until_parked();
     assert!(cx.debug_bounds("otp-setup").is_none());

@@ -205,6 +205,13 @@ final class ControllerModel: ObservableObject {
             } else { disconnect(dismiss:false) }
         } catch { self.error = error.localizedDescription; certificatePrompt = nil }
     }
+    func submitSystemAccount(username: String, password: String) {
+        do {
+            let data = try JSONEncoder().encode(["username": username.trimmingCharacters(in: .whitespacesAndNewlines), "password": password])
+            guard let payload = String(data: data, encoding: .utf8) else { return }
+            submitPIN(payload)
+        } catch { self.error = L("Check the username and password and try again.", "请检查用户名和密码后重试。") }
+    }
     func submitPIN(_ pin: String) {
         do {
             try call(["op":"pin", "generation":generation, "pin":pin]); needsPIN = false
@@ -330,6 +337,7 @@ final class ControllerModel: ObservableObject {
             authenticationMode = event["mode"] as? String ?? "pairing_code"
             needsPIN = true; isConnecting = false
             switch authenticationMode {
+            case "system_account": status = L("Enter the system username and login password of the account running Removent on the remote Mac", "输入远程 Mac 上运行 Removent 的系统用户名和登录密码")
             case "password": status = L("Enter the password configured on the computer", "输入电脑上设置的访问口令")
             case "otp": status = L("Enter the current code from your authenticator", "输入验证器中的当前动态验证码")
             default: status = L("Enter the PIN shown on the computer", "输入电脑上显示的配对码")

@@ -1,5 +1,10 @@
 use super::*;
 
+mod authentication;
+mod system_account;
+
+use authentication::run_authentication;
+
 pub(super) async fn expect_msg(
     source: &mut ControlSource,
     what: &'static str,
@@ -92,7 +97,8 @@ pub async fn serve_connection(
                 // software AV1 codec is available on every build and is still
                 // opt-in during negotiation.
                 feature_bits: removent_proto::feature_bits::SOFTWARE_AV1
-                    | removent_proto::feature_bits::AUTH_METHODS,
+                    | removent_proto::feature_bits::AUTH_METHODS
+                    | removent_proto::feature_bits::SYSTEM_ACCOUNT_AUTH,
                 device_name: cfg.device_name.clone(),
                 // Honest resume verdict (§7.4): Some(true) only when the presented token
                 // validated; Some(false) tells the client to fall back to full
@@ -209,7 +215,9 @@ pub async fn serve_connection(
 
     if matches!(
         cfg.authentication.mode,
-        removent_core::AuthenticationMode::Password | removent_core::AuthenticationMode::Otp
+        removent_core::AuthenticationMode::Password
+            | removent_core::AuthenticationMode::Otp
+            | removent_core::AuthenticationMode::SystemAccount
     ) {
         if hello.feature_bits & removent_proto::feature_bits::AUTH_METHODS == 0 {
             let _ = sink
@@ -219,6 +227,17 @@ pub async fn serve_connection(
                 .await;
             return Err(HostError::Rejected(
                 "Update the controller to use this authentication method".into(),
+            ));
+        }
+        if cfg.authentication.mode == removent_core::AuthenticationMode::SystemAccount
+            && hello.feature_bits & removent_proto::feature_bits::SYSTEM_ACCOUNT_AUTH == 0
+        {
+            sink.send(ControlMsg::SessionReject {
+                reason: removent_proto::RejectReason::Denied,
+            })
+            .await?;
+            return Err(HostError::Rejected(
+                "Update the controller to use system account authentication".into(),
             ));
         }
         if let Err(error) = run_authentication(&conn, identity, &peer_fp, cfg).await {
@@ -539,107 +558,4 @@ pub(super) fn new_token() -> [u8; 16] {
     let mut t = [0u8; 16];
     rand::rng().fill_bytes(&mut t);
     t
-}
-
-// ---------------- media loops ----------------
-
-/// Password and TOTP use the same PAKE identity/transcript binding as pairing.
-/// TOTP offers three independently blinded candidates for +/- one 30s clock step.
-async fn run_authentication(
-    conn: &RvpConnection,
-    identity: &DeviceIdentity,
-    peer_fp: &str,
-    cfg: &HostConfig,
-) -> Result<(), HostError> {
-    use removent_core::AuthenticationMode;
-    use removent_net::PairingMsg;
-    let (mut sink, mut source) =
-        tokio::time::timeout(Duration::from_secs(15), conn.accept_pairing())
-            .await
-            .map_err(|_| HostError::Timeout("authentication stream"))??;
-    let begin = tokio::time::timeout(Duration::from_secs(15), source.next())
-        .await
-        .map_err(|_| HostError::Timeout("authentication begin"))?
-        .transpose()?
-        .ok_or(HostError::Timeout("authentication begin"))?;
-    // Host-wide bucket prevents bypass by generating fresh device identities.
-    if !pairing_begin_limiter().lock().unwrap().allow(
-        &format!("auth:{}", identity.fingerprint_hex()),
-        std::time::Instant::now(),
-    ) {
-        return Err(HostError::Rejected(
-            "Too many authentication attempts; retry in five seconds".into(),
-        ));
-    }
-    let step = now_unix() / 30;
-    let candidates = if cfg.authentication.mode == AuthenticationMode::Password {
-        vec![(0, cfg.authentication.password.clone())]
-    } else {
-        let totp = cfg.authentication.totp().map_err(HostError::Rejected)?;
-        [step.saturating_sub(1), step, step + 1]
-            .into_iter()
-            .map(|step| (step, totp.generate(step * 30).to_string()))
-            .collect()
-    };
-    let mut states = Vec::new();
-    for (step, secret) in candidates {
-        states.push((
-            step,
-            removent_net::host_on_begin_with_secret(&begin, &secret)?,
-        ));
-    }
-    sink.send(PairingMsg::AuthChallenge {
-        mode: cfg.authentication.mode,
-        challenges: states
-            .iter()
-            .map(|(_, hs)| {
-                let PairingMsg::Challenge { nonce_h, msg_h } = &hs.reply else {
-                    unreachable!()
-                };
-                removent_net::PairingChallenge {
-                    nonce_h: *nonce_h,
-                    msg_h: msg_h.clone(),
-                }
-            })
-            .collect(),
-    })
-    .await?;
-    let verify = tokio::time::timeout(Duration::from_secs(300), source.next())
-        .await
-        .map_err(|_| HostError::Timeout("authentication input"))?
-        .transpose()?
-        .ok_or(HostError::Timeout("authentication input"))?;
-    let PairingMsg::AuthVerify { proofs } = verify else {
-        return Err(HostError::Rejected("Expected authentication proof".into()));
-    };
-    if proofs.len() != states.len() {
-        return Err(HostError::Rejected(
-            "Invalid authentication proof count".into(),
-        ));
-    }
-    for ((step, hs), proof) in states.into_iter().zip(proofs) {
-        let (confirm, shared) = removent_net::host_verify(hs, &proof.into(), identity, peer_fp)?;
-        if shared.is_some() {
-            if cfg.authentication.mode == AuthenticationMode::Otp {
-                if step.abs_diff(now_unix() / 30) > 1 {
-                    break;
-                }
-                let paths = cfg.auth_paths.as_ref().ok_or_else(|| {
-                    HostError::Rejected("OTP replay storage is unavailable".into())
-                })?;
-                cfg.authentication
-                    .consume_otp(paths, step)
-                    .map_err(HostError::Rejected)?;
-            }
-            sink.send(confirm).await?;
-            return Ok(());
-        }
-    }
-    sink.send(PairingMsg::Confirm {
-        ok: false,
-        confirm_h: [0; 32],
-        sig_h: vec![],
-    })
-    .await?;
-    Err(HostError::Rejected("Authentication failed".into()))
 }

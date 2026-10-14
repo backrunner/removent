@@ -133,6 +133,7 @@ pub(super) async fn run_native(
     expected = trust.expected;
     let clip = MemoryClipboard::new();
     let config = || removent_client::ClientConfig {
+        host_identity_verified: expected.is_some() || trust.needs_confirmation,
         pairing_code: request.pairing_code.clone(),
         device_name: identity.device_name.clone(),
         caps: Caps {

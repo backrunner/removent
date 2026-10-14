@@ -410,6 +410,7 @@ impl HomeView {
         let id_connect = entry.id.clone();
         let id_edit = entry.id.clone();
         let id_remove = entry.id.clone();
+        let wake_target = entry.clone();
         let home = cx.entity().downgrade();
 
         let meta_row = |label: String, value: String| {
@@ -527,7 +528,13 @@ impl HomeView {
                                             move |menu, _, _| {
                                                 let home = home.clone();
                                                 let id_remove = id_remove.clone();
-                                                menu.item(
+                                                HomeView::wake_menu(
+                                                    menu,
+                                                    wake_target.clone(),
+                                                    home.clone(),
+                                                )
+                                                .separator()
+                                                .item(
                                                     PopupMenuItem::new(
                                                         t!("saved.remove").to_string(),
                                                     )

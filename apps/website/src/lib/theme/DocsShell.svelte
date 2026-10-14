@@ -16,7 +16,7 @@
 </script>
 <div class="rv-docs-shell">
   <aside class="rv-docs-sidebar" aria-label={context.t('nav.documentation')}>
-    <div class="rv-docs-label"><span class="rv-section-dot" aria-hidden="true"></span>{context.t('docs.library')}</div>
+    <div class="rv-docs-label">{context.t('docs.library')}</div>
     <nav><DocsNavigation items={navigationTree} currentPath={page.routePath} {context} /></nav>
     <a class="rv-sidebar-release" href="https://github.com/backrunner/removent/releases/tag/v0.1.5">
       <span class="rv-release-label">{context.t('docs.release')}</span>
@@ -32,7 +32,6 @@
             {#each breadcrumbs as item, i}
               {#if i > 0}<span aria-hidden="true">/</span>{/if}<a href={item.path}>{item.label}</a>
             {/each}
-            <span class="rv-heading-rule" aria-hidden="true"></span><span class="rv-doc-format">{context.t('docs.guide')}</span>
           </nav>
           <h1>{page.title}</h1>
           {#if page.description}<p class="sd-doc-lede">{page.description}</p>{/if}

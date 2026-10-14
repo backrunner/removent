@@ -5,6 +5,7 @@ struct SessionView: View {
     @State private var keyboard = false
     @State private var stats = false
     @State private var pin = ""
+    @State private var systemUsername = ""
     @State private var certificateAlertPresented = false
     @State private var certificateAlert: CertificatePrompt?
     @State private var modifiers = 0
@@ -22,6 +23,7 @@ struct SessionView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var pinFocused: Bool
+    @FocusState private var systemUsernameFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -167,7 +169,9 @@ struct SessionView: View {
         // Focus the rendered native field so system OTP providers can offer a code.
         .task(id: "\(model.needsPIN)-\(model.authenticationMode)") {
             pin = ""
-            pinFocused = model.needsPIN
+            systemUsername = ""
+            pinFocused = model.needsPIN && model.authenticationMode != "system_account"
+            systemUsernameFocused = model.needsPIN && model.authenticationMode == "system_account"
         }
         .task(id: model.certificatePrompt?.id) {
             certificateAlertPresented = false
@@ -256,9 +260,20 @@ struct SessionView: View {
                     if model.needsPIN {
                         Image(systemName: "lock.shield").font(.system(size: 32)).foregroundStyle(.tint)
                             .accessibilityHidden(true)
-                        Text(model.authenticationMode == "password" ? L("Access password", "访问口令") : model.authenticationMode == "otp" ? L("OTP verification", "OTP 验证") : L("Pair with computer", "与电脑配对")).font(.title3.bold())
+                        Text(model.authenticationMode == "system_account" ? L("System account", "系统账户") : model.authenticationMode == "password" ? L("Access password", "访问口令") : model.authenticationMode == "otp" ? L("OTP verification", "OTP 验证") : L("Pair with computer", "与电脑配对")).font(.title3.bold())
                         Text(model.status).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                        if model.authenticationMode == "password" {
+                        if model.authenticationMode == "system_account" {
+                            TextField(L("System username", "系统用户名"), text: $systemUsername)
+                                .textContentType(.username).textInputAutocapitalization(.never).autocorrectionDisabled()
+                                .focused($systemUsernameFocused).submitLabel(.next)
+                                .onSubmit { systemUsernameFocused = false; pinFocused = true }
+                                .padding(12).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                                .accessibilityIdentifier("authenticationUsername")
+                            SecureField(L("Login password", "登录密码"), text: $pin)
+                                .textContentType(.password).focused($pinFocused)
+                                .padding(12).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                                .accessibilityIdentifier("authenticationSystemPassword")
+                        } else if model.authenticationMode == "password" {
                             SecureField(L("Access password", "访问口令"), text: $pin)
                                 .textContentType(.password).focused($pinFocused)
                                 .padding(12).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
@@ -281,10 +296,16 @@ struct SessionView: View {
                                 .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
                                 .accessibilityIdentifier("otpAutofillHint")
                         }
-                        Button { pinFocused = false; model.submitPIN(pin) } label: {
+                        Button {
+                            pinFocused = false
+                            if model.authenticationMode == "system_account" {
+                                model.submitSystemAccount(username: systemUsername, password: pin)
+                            } else { model.submitPIN(pin) }
+                            pin = ""
+                        } label: {
                             Text(L("Connect", "连接")).frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(PrimaryActionStyle()).controlSize(.large).disabled(model.authenticationMode == "password" ? pin.isEmpty || pin.utf8.count > 1024 : pin.count != 6)
+                        .buttonStyle(PrimaryActionStyle()).controlSize(.large).disabled(model.authenticationMode == "system_account" ? systemUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || systemUsername.utf8.count > 256 || pin.isEmpty || pin.utf8.count > 1024 : model.authenticationMode == "password" ? pin.isEmpty || pin.utf8.count > 1024 : pin.count != 6)
                         .accessibilityIdentifier("pairingConnect")
                     } else if model.certificateDestination != nil {
                         Image(systemName: "checkmark.shield").font(.system(size: 32)).foregroundStyle(.tint)

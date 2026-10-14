@@ -118,16 +118,30 @@ impl LocalDiscoveryAddresses {
     }
 
     fn select(&self, mut candidates: Vec<SocketAddr>) -> Option<SocketAddr> {
-        candidates.retain(|addr| usable(*addr));
+        // Check identity before discarding unusable endpoints. Bonjour can omit
+        // the zone from a local link-local address while retaining an old A record.
         if candidates
             .iter()
-            .any(|addr| self.0.contains(&canonical(*addr)))
+            .any(|addr| self.identifies_this_host(*addr))
         {
             return None;
         }
+        candidates.retain(|addr| usable(*addr));
         candidates.sort_by_key(|addr| (addr.is_ipv6(), *addr));
         candidates.dedup();
         candidates.into_iter().next()
+    }
+
+    fn identifies_this_host(&self, addr: SocketAddr) -> bool {
+        let addr = canonical(addr);
+        // Loopback/unspecified records may accompany a valid remote endpoint.
+        if addr.ip().is_loopback() || addr.ip().is_unspecified() {
+            return false;
+        }
+        self.0.contains(&addr)
+            || matches!(addr, SocketAddr::V6(v6)
+                if v6.ip().is_unicast_link_local() && v6.scope_id() == 0
+                    && self.0.iter().any(|local| local.ip() == addr.ip()))
     }
 }
 
@@ -164,6 +178,10 @@ fn usable(addr: SocketAddr) -> bool {
 }
 
 fn parse_host(host: &str, port: u16) -> Option<SocketAddr> {
+    let host = host
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(host);
     let (ip, scope) = host.split_once('%').unwrap_or((host, "0"));
     let ip: IpAddr = ip.parse().ok()?;
     match ip {
@@ -243,6 +261,49 @@ mod tests {
         assert_eq!(
             local.remote_addr(&entry("[2001:db8::11]:3389", &[])),
             Some("[2001:db8::11]:3389".parse().unwrap())
+        );
+    }
+    #[test]
+    fn all_interfaces_and_unscoped_local_evidence_hide_the_whole_service() {
+        let local = LocalDiscoveryAddresses::from_hosts([
+            "192.168.1.22",
+            "192.168.1.189",
+            "10.8.0.2",
+            "2001:db8::22",
+            "2001:db8::189",
+            "fe80::22%8",
+        ]);
+        for host in [
+            "192.168.1.22",
+            "192.168.1.189",
+            "10.8.0.2",
+            "::ffff:192.168.1.22",
+            "2001:db8::22",
+            "2001:db8::189",
+            "fe80::22",
+            "[fe80::22%8]",
+            "[2001:db8::22]",
+        ] {
+            // A stale/other primary address must not conceal a local alternative.
+            let device = entry("192.0.2.50:5900", &[host]);
+            assert!(local.remote_addr(&device).is_none(), "{host}");
+            assert!(
+                local
+                    .remote_host(&["192.0.2.50".into(), host.into()])
+                    .is_none(),
+                "{host}"
+            );
+        }
+        // The same link-local bytes on a different, explicit interface are distinct.
+        assert!(
+            local
+                .remote_addr(&entry("[fe80::22%9]:5900", &[]))
+                .is_some()
+        );
+        assert!(
+            local
+                .remote_addr(&entry("192.168.1.23:5900", &[]))
+                .is_some()
         );
     }
     #[test]

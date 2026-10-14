@@ -1,6 +1,7 @@
 //! Authentication and admission settings.
 
 use super::*;
+use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 
 impl HomeView {
     pub(super) fn render_security_settings(&self, cx: &mut Context<Self>) -> Div {
@@ -42,34 +43,36 @@ impl HomeView {
                             cx,
                         ))
                         .child({
-                            let view = cx.entity();
-                            segmented(
-                                "authentication",
-                                &[
-                                    t!("auth.pairing").to_string(),
-                                    t!("auth.password").to_string(),
-                                    t!("auth.otp").to_string(),
-                                    t!("auth.none").to_string(),
-                                ],
-                                match mode {
-                                    removent_core::AuthenticationMode::PairingCode => 0,
-                                    removent_core::AuthenticationMode::Password => 1,
-                                    removent_core::AuthenticationMode::Otp => 2,
-                                    removent_core::AuthenticationMode::None => 3,
-                                },
-                                Rc::new(move |i, _, window, app| {
-                                    view.update(app, |this, cx| {
-                                        let mode = match i {
-                                            1 => removent_core::AuthenticationMode::Password,
-                                            2 => removent_core::AuthenticationMode::Otp,
-                                            3 => removent_core::AuthenticationMode::None,
-                                            _ => removent_core::AuthenticationMode::PairingCode,
-                                        };
-                                        this.select_authentication(mode, window, cx);
-                                    })
-                                }),
-                                cx,
-                            )
+                            let view = cx.weak_entity();
+                            let options = [
+                                (removent_core::AuthenticationMode::SystemAccount, "auth.system"),
+                                (removent_core::AuthenticationMode::PairingCode, "auth.pairing"),
+                                (removent_core::AuthenticationMode::Password, "auth.password"),
+                                (removent_core::AuthenticationMode::Otp, "auth.otp"),
+                                (removent_core::AuthenticationMode::None, "auth.none"),
+                            ];
+                            let title = options.iter().find(|(value, _)| *value == mode).unwrap().1;
+                            Button::new("authentication-picker")
+                                .debug_selector(|| "authentication-picker".into())
+                                .outline().w(px(260.)).max_w_full().justify_start()
+                                .child(div().flex().items_center().w_full().gap_2()
+                                    .child(div().flex_1().child(t!(title).to_string()))
+                                    .child(icon_16("chevron-down")))
+                                .dropdown_menu(move |mut menu, _, _| {
+                                    for (i, (value, key)) in options.into_iter().enumerate() {
+                                        let view = view.clone();
+                                        menu = menu.item(PopupMenuItem::element(move |_, _| {
+                                            div().debug_selector(move || format!("authentication-{i}"))
+                                                .child(t!(key).to_string())
+                                        }).checked(value == mode).on_click(move |_, window, cx| {
+                                            let _ = view.update(cx, |this, cx| this.select_authentication(value, window, cx));
+                                        }));
+                                    }
+                                    menu
+                                })
+                        })
+                        .when(mode == removent_core::AuthenticationMode::SystemAccount, |el| {
+                            el.child(div().text_size(px(12.)).text_color(colors.muted_foreground).child(t!("auth.system_hint").to_string()))
                         })
                         .when(mode == removent_core::AuthenticationMode::Password, |el| {
                             let editor = div()
@@ -87,6 +90,7 @@ impl HomeView {
                                         .text_color(colors.muted_foreground)
                                         .child(if self.auth_password_pending {
                                             let active = t!(match committed_mode {
+                                                removent_core::AuthenticationMode::SystemAccount => "auth.system",
                                                 removent_core::AuthenticationMode::PairingCode =>
                                                     "auth.pairing",
                                                 removent_core::AuthenticationMode::Password =>

@@ -101,6 +101,19 @@ impl HomeView {
         let pin_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(t!("home.pin_placeholder").to_string())
         });
+        let auth_username_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t!("auth.system_username").to_string())
+        });
+        let username_sub = cx.subscribe_in(
+            &auth_username_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    window.focus(&this.pin_input.focus_handle(cx), cx);
+                }
+                cx.notify();
+            },
+        );
         let search_sub = cx.subscribe(&search_input, |_, _, _: &InputEvent, cx| cx.notify());
         let pin_sub = cx.subscribe_in(
             &pin_input,
@@ -117,7 +130,13 @@ impl HomeView {
             },
         );
 
-        let mut subscriptions = vec![sub_activation, sub_appearance, search_sub, pin_sub];
+        let mut subscriptions = vec![
+            sub_activation,
+            sub_appearance,
+            search_sub,
+            pin_sub,
+            username_sub,
+        ];
         for (input, is_name) in [(&device_name_input, true), (&vnc_password_input, false)] {
             subscriptions.push(
                 cx.subscribe(input, move |this, _, ev: &InputEvent, cx| match ev {
@@ -194,6 +213,7 @@ impl HomeView {
             admission: None,
             pin_dialog: None,
             pin_input,
+            auth_username_input,
             auth_mode: Default::default(),
             auth_password_input,
             otp_qr: None,

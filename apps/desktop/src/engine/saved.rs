@@ -77,6 +77,22 @@ impl Engine {
         Ok(store.remove_with_password(id)?)
     }
 
+    pub fn set_wake_on_lan(
+        &self,
+        target: &SavedConnection,
+        config: Option<removent_client::wake_on_lan::WakeOnLan>,
+    ) -> Result<SavedConnection> {
+        let mut store = SavedConnections::load(&self.paths)?;
+        if target.id.is_empty() {
+            // Discovery cannot provide a MAC reliably. Preserve the endpoint as a
+            // bookmark so its manually configured wake action survives going offline.
+            let config = config.ok_or_else(|| anyhow::anyhow!("configure a wake request first"))?;
+            Ok(store.configure_discovered_wake(target.clone(), config)?)
+        } else {
+            Ok(store.set_wake_on_lan(&target.id, config)?)
+        }
+    }
+
     /// Short-fingerprint set of trusted devices (the "Paired" marker in the device list).
     pub fn trusted_short_fps(&self) -> std::collections::HashSet<String> {
         PeersStore::load(&self.paths)

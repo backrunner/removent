@@ -135,22 +135,51 @@ impl DaemonState {
         // Save before acknowledging so a failed write cannot re-enable remote
         // access after a reboot. Preserve settings changed by another client.
         let mut settings = self.settings.lock().unwrap();
-        *settings = Settings::update(&self.paths, |s| s.host_enabled = on)?;
+        let mut next = Settings::update(&self.paths, |s| s.host_enabled = on)?;
         if self.login_window {
-            crate::login_window::restrict(&mut settings);
+            crate::login_window::restrict(&mut next);
         }
-        if self.enabled.swap(on, Ordering::SeqCst) != on {
-            self.enabled_watch.send_replace(on);
-            self.broadcast(IpcEvent::StateChanged { running: on });
+        self.apply_settings(&mut settings, next);
+        Ok(())
+    }
+
+    /// Reconcile all persisted host settings, including the service switch and
+    /// listener configuration. The same lock order as set_enabled prevents a
+    /// concurrent reload from restoring an older in-memory snapshot.
+    pub fn reload_settings(&self) -> removent_core::Result<()> {
+        let mut current = self.settings.lock().unwrap();
+        let mut next = Settings::load_strict(&self.paths)?;
+        next.authentication
+            .validate()
+            .map_err(removent_core::CoreError::Serialization)?;
+        if self.login_window {
+            crate::login_window::restrict(&mut next);
         }
-        if !on {
+        self.apply_settings(&mut current, next);
+        Ok(())
+    }
+
+    fn apply_settings(&self, current: &mut Settings, next: Settings) {
+        let restart = removent_core::settings::control::host_changed(current, &next);
+        let enabled = next.host_enabled;
+        let policy_changed = current.authentication != next.authentication
+            || current.admission != next.admission
+            || current.paired_only != next.paired_only;
+        *current = next;
+        let changed = self.enabled.swap(enabled, Ordering::SeqCst) != enabled;
+        if restart || changed {
+            self.enabled_watch.send_replace(enabled);
+        }
+        if changed {
+            self.broadcast(IpcEvent::StateChanged { running: enabled });
+        }
+        if policy_changed || !enabled {
+            if let Err(error) = removent_core::pairing_invitation::Invitation::revoke(&self.paths) {
+                tracing::warn!(%error, "failed to revoke invitation after reloading settings");
+            }
             self.clear_pin();
             removent_host::session::clear_resume_registry();
-            if let Err(error) = removent_core::pairing_invitation::Invitation::revoke(&self.paths) {
-                tracing::warn!(%error, "failed to revoke invitation after disabling host");
-            }
         }
-        Ok(())
     }
 
     /// Pairing PIN display: stash and broadcast it for management ends to present.

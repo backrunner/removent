@@ -160,6 +160,25 @@ action.allow: 允许
 action.deny: 拒绝
 action.open: 打开
 action.save: 保存
+wol.title: "Wake-on-LAN"
+wol.send: "发送 Wake-on-LAN"
+wol.configure: "配置 Wake-on-LAN…"
+wol.mac: "目标网卡 MAC 地址"
+wol.destination: "发送地址（IPv4）"
+wol.port: "UDP 端口"
+wol.hint: "向指定地址发送唤醒包。目标须支持并开启网络唤醒，广播通常限于同一局域网。配置仅保存在本机。"
+wol.invalid_mac: "请输入有效的网卡 MAC 地址，例如 02:11:22:33:44:55。"
+wol.invalid_destination: "请输入 IPv4 广播地址或可达的 IPv4 地址。"
+wol.invalid_port: "请输入 1 到 65535 之间的 UDP 端口。"
+wol.sending: "正在发送唤醒请求…"
+wol.sent: "唤醒请求已发送，请稍后连接目标。"
+wol.send_failed: "唤醒请求发送失败：%{err}。请检查网络与发送地址后重试。"
+wol.missing_config: "未找到唤醒配置，请重新配置目标的 Wake-on-LAN。"
+wol.saved: "唤醒配置已保存，可在目标的右键菜单中发送。"
+wol.save_failed: "唤醒配置保存失败：%{err}。请检查数据目录后重试。"
+wol.clear: "移除配置"
+wol.cleared: "唤醒配置已移除。"
+wol.save_first: "请先填写账户并保存 RDP 连接，再从右键菜单配置 Wake-on-LAN。"
 action.edit: 编辑
 action.back: 返回
 
@@ -342,7 +361,7 @@ sync.relay_fingerprint: "中继指纹"
 sync.host_fingerprint: "主机指纹"
 
 auth.title: "连接认证方式"
-auth.hint: "选择主控端的认证方式。口令、OTP 和无认证支持无人值守连接。"
+auth.hint: "默认使用系统账户，也可选择其他认证方式。"
 auth.pairing: "配对码"
 auth.password: "访问口令"
 auth.otp: "OTP"
@@ -418,3 +437,9 @@ auth.otp_expand: "展开"
 auth.otp_collapse: "收起"
 auth.otp_manual_label: "手动绑定"
 auth.otp_manual_hint: "无法扫码时，可复制密钥到验证器中手动添加。"
+
+auth.system: "系统账户"
+auth.system_desc: "输入远程 Mac 上运行 Removent 的系统用户名和登录密码。"
+auth.system_hint: "由 macOS 验证运行共享服务的账户，系统登录密码不会保存在 Removent 中。"
+auth.system_username: "系统用户名"
+auth.system_password: "登录密码"

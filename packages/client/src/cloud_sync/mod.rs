@@ -84,11 +84,14 @@ impl ConnectionData {
         Ok(())
     }
     fn same_scope(&self, other: &Self) -> bool {
+        self.same_destination(other)
+            && self.username == other.username
+            && self.domain == other.domain
+    }
+    fn same_destination(&self, other: &Self) -> bool {
         self.protocol == other.protocol
             && self.host == other.host
             && self.port == other.port
-            && self.username == other.username
-            && self.domain == other.domain
             && self.relay == other.relay
     }
     fn to_local(&self, id: &str, previous: Option<&SavedConnection>) -> SavedConnection {
@@ -109,6 +112,9 @@ impl ConnectionData {
         if let Some(previous) = previous {
             entry.added_at_unix = previous.added_at_unix;
             entry.last_used_unix = previous.last_used_unix;
+            if self.same_destination(&Self::from(previous)) {
+                entry.wake_on_lan = previous.wake_on_lan.clone();
+            }
             if self.same_scope(&Self::from(previous)) {
                 entry.password_hint = previous.password_hint;
                 entry.credentials_review_required = previous.credentials_review_required;

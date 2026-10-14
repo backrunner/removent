@@ -136,6 +136,17 @@ REMOVENT_CLI=/Applications/Removent.app/Contents/MacOS/removent-cli
 "$REMOVENT_CLI" daemon ensure         # Watchdog start; respects an explicit stop
 ```
 
+Use the [CLI settings guide](cli.md) to query, change or reset local settings.
+
+CLI diagnostics are written to the rotating `logs/removent-cli.log` file by
+default. Add `--verbose` (or `-v`) to also show logs and error causes in the
+terminal; `RUST_LOG` controls their level. Successful service queries and actions
+retain their JSON output so scripts and the menu bar app can parse them.
+Failures go to stderr with a recovery step and exit code 1; invalid arguments
+use exit code 2. An unavailable daemon is a failed query, not an automatic start.
+Use `daemon --help`, `pairing --help`, `ping --help` or `--version` without
+connecting to the daemon or creating log files.
+
 `stop`/`restart` interrupt any active session; the tray disables restart while a
 session is reported. The bundle launcher also accepts `--server`, optional
 `--login` and `--tray`, e.g.:

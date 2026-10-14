@@ -145,6 +145,15 @@ fn metadata_round_trip_excludes_secrets_and_requires_local_trust() {
     let a = paths(&a);
     let b = paths(&b);
     let entry = bookmark(&a, "Office");
+    SavedConnections::load(&a)
+        .unwrap()
+        .set_wake_on_lan(
+            &entry.id,
+            Some(
+                crate::wake_on_lan::WakeOnLan::parse("021122334455", "192.168.1.255", "9").unwrap(),
+            ),
+        )
+        .unwrap();
     activate(&a, "user");
     activate(&b, "user");
     let records = pending(&a, "user");
@@ -155,6 +164,7 @@ fn metadata_round_trip_excludes_secrets_and_requires_local_trust() {
         "accept_invalid_certificate",
         "local-secret",
         "last_used_unix",
+        "wake_on_lan",
     ] {
         assert!(!encoded.contains(secret));
     }
@@ -164,12 +174,18 @@ fn metadata_round_trip_excludes_secrets_and_requires_local_trust() {
     assert!(!stored.all()[0].password_hint);
     assert!(stored.all()[0].password_key.is_none());
     assert!(!stored.all()[0].accept_invalid_certificate);
+    assert!(stored.all()[0].wake_on_lan.is_none());
 }
 #[test]
 fn remote_rename_preserves_local_credential_but_scope_change_detaches_it() {
     let dir = tempfile::tempdir().unwrap();
     let paths = paths(&dir);
     let entry = bookmark(&paths, "Before");
+    let wake = crate::wake_on_lan::WakeOnLan::parse("021122334455", "192.168.1.255", "9").unwrap();
+    SavedConnections::load(&paths)
+        .unwrap()
+        .set_wake_on_lan(&entry.id, Some(wake.clone()))
+        .unwrap();
     activate(&paths, "user");
     let mut remote = pending(&paths, "user").remove(0);
     ack(&paths, "user");
@@ -177,11 +193,21 @@ fn remote_rename_preserves_local_credential_but_scope_change_detaches_it() {
     remote.payload.data.as_mut().unwrap().name = "After".into();
     receive(&paths, "user", vec![remote.clone()]);
     assert_eq!(
+        SavedConnections::load(&paths).unwrap().all()[0].wake_on_lan,
+        Some(wake.clone())
+    );
+    assert_eq!(
         SavedConnections::load(&paths).unwrap().all()[0]
             .password_key
             .as_deref(),
         Some("local-secret")
     );
+    remote.payload.revision = revision();
+    remote.payload.data.as_mut().unwrap().username = "different-account".into();
+    receive(&paths, "user", vec![remote.clone()]);
+    let changed_account = SavedConnections::load(&paths).unwrap();
+    assert!(changed_account.all()[0].password_key.is_none());
+    assert_eq!(changed_account.all()[0].wake_on_lan, Some(wake));
     remote.payload.revision = revision();
     remote.payload.data.as_mut().unwrap().host = "another.local".into();
     receive(&paths, "user", vec![remote]);
@@ -189,6 +215,7 @@ fn remote_rename_preserves_local_credential_but_scope_change_detaches_it() {
     assert_eq!(entries.all()[0].id, entry.id);
     assert!(entries.all()[0].password_key.is_none());
     assert!(!entries.all()[0].accept_invalid_certificate);
+    assert!(entries.all()[0].wake_on_lan.is_none());
 }
 #[test]
 fn independent_edits_merge_and_same_field_conflicts_survive_restart() {

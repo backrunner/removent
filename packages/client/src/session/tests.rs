@@ -69,6 +69,7 @@ async fn fixture(
         ControlSource::new(recv, ControlCodec),
         ack,
         ClientConfig {
+            host_identity_verified: false,
             pairing_code: None,
             device_name: "test".into(),
             caps,

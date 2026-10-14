@@ -469,7 +469,7 @@ async fn raw_backlog_coalesces_to_latest_without_dropping_future_capture() {
     assert_eq!(rx.recv().await, Some(5));
 }
 
-async fn quic_pair() -> (
+pub(super) async fn quic_pair() -> (
     [removent_net::quinn::Endpoint; 2],
     RvpConnection,
     RvpConnection,
@@ -834,6 +834,7 @@ fn every_connection_policy_rejects_even_matching_fresh_resume_token() {
     let fp = "every-connection-resume-test";
     let token = [91; 16];
     let auth = removent_core::AuthenticationSettings {
+        mode: removent_core::AuthenticationMode::PairingCode,
         pairing_policy: removent_core::authentication::PairingPolicy::EveryConnection,
         ..Default::default()
     };
@@ -850,7 +851,10 @@ async fn resume_handshake_rechecks_revoked_trust_and_reduced_capability_grants()
         let (_endpoints, client, host) = quic_pair().await;
         let fp = hex::encode(host.peer_fingerprint().unwrap());
         let token = [47; 16];
-        let auth = removent_core::AuthenticationSettings::default();
+        let auth = removent_core::AuthenticationSettings {
+            mode: removent_core::AuthenticationMode::PairingCode,
+            ..Default::default()
+        };
         remember_resume(&fp, &token, &test_ack(), Caps::all(), None);
         remember_resume_policy(&fp, &auth);
         let mut peers = PeersStore::in_memory();
@@ -933,4 +937,15 @@ async fn resume_handshake_rechecks_revoked_trust_and_reduced_capability_grants()
         let _ = task.await;
         invalidate_resume(&fp);
     }
+}
+
+#[test]
+fn resume_without_recorded_authentication_policy_is_rejected() {
+    let fingerprint = "unrecorded-system-auth-policy";
+    remember_resume(fingerprint, &[17; 16], &test_ack(), Caps::all(), None);
+    assert!(!resume_policy_matches(
+        fingerprint,
+        &removent_core::AuthenticationSettings::default()
+    ));
+    invalidate_resume(fingerprint);
 }

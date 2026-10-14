@@ -20,7 +20,7 @@
   <section class="rv-hero" aria-labelledby="hero-title">
     <div class="rv-hero-copy">
       <a class="rv-announcement" href="https://github.com/backrunner/removent/releases/tag/v0.1.5"><span>0.1.5</span>{t('hero.release')}<Icon name="arrow" size={14} /></a>
-      <p class="rv-eyebrow"><span class="rv-blue-line" aria-hidden="true"></span>{t('hero.eyebrow')}</p>
+      <p class="rv-eyebrow">{t('hero.eyebrow')}</p>
       <h1 id="hero-title">{t('hero.line1')}<br /><span>{t('hero.line2')}</span></h1>
       <p class="rv-hero-description">{t('hero.description')}</p>
       <div class="rv-actions"><a class="rv-button rv-primary" href={resolveLocalizedHref('/download', context)}><Icon name="down" size={18} />{t('hero.download')}</a><a class="rv-button rv-secondary" href={resolveLocalizedHref('/docs', context)}>{t('hero.guide')}<Icon name="arrow" size={17} /></a></div>

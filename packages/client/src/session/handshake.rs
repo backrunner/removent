@@ -104,6 +104,7 @@ pub async fn connect_session_with_confirmation(
             // Honest declaration: file-transfer/two-way-audio are both unimplemented.
             feature_bits: removent_proto::feature_bits::SOFTWARE_AV1
                 | removent_proto::feature_bits::AUTH_METHODS
+                | removent_proto::feature_bits::SYSTEM_ACCOUNT_AUTH
                 | if cfg.pairing_code.is_some() {
                     removent_proto::feature_bits::PAIRING_INVITATION
                 } else {
@@ -151,6 +152,7 @@ pub async fn connect_session_with_confirmation(
             peer_fp_full,
             pin_request,
             cfg.pairing_code.clone(),
+            cfg.host_identity_verified,
         );
         pairing_rx = Some(rx);
         pairing_task = Some(AbortOnDrop(handle));

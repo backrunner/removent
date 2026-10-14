@@ -52,6 +52,7 @@ pub(super) fn spawn_pairing_initiator(
     fp_peer_full: String,
     pin_request: PinRequest,
     invitation: Option<removent_core::pairing_invitation::PairingCode>,
+    host_identity_verified: bool,
 ) -> (
     tokio::task::JoinHandle<()>,
     oneshot::Receiver<Result<(), String>>,
@@ -66,6 +67,7 @@ pub(super) fn spawn_pairing_initiator(
             &fp_peer_full,
             pin_request,
             invitation,
+            host_identity_verified,
         )
         .await;
         match &result {
@@ -84,6 +86,7 @@ pub(super) async fn run_pairing(
     fp_peer_full: &str,
     pin_request: PinRequest,
     invitation: Option<removent_core::pairing_invitation::PairingCode>,
+    host_identity_verified: bool,
 ) -> Result<(), ConnectError> {
     let (mut psink, mut psource) = conn.open_pairing().await?;
 
@@ -105,6 +108,39 @@ pub(super) async fn run_pairing(
         .transpose()
         .map_err(ConnectError::Net)?
         .ok_or(ConnectError::Timeout("pairing challenge"))?;
+    if let PairingMsg::SystemChallenge { nonce_h } = challenge {
+        if !host_identity_verified || invitation.is_some() {
+            return Err(ConnectError::Pairing(
+                "Confirm the host certificate before using a system account".into(),
+            ));
+        }
+        let (tx, rx) = oneshot::channel();
+        pin_request(removent_proto::AuthenticationMode::SystemAccount, tx);
+        let value = tokio::time::timeout(Duration::from_secs(300), rx)
+            .await
+            .map_err(|_| ConnectError::Timeout("system account input"))?
+            .map_err(|_| ConnectError::Pairing("authentication cancelled".into()))?;
+        let credentials = removent_proto::SystemCredentials::decode(&value)
+            .ok_or_else(|| ConnectError::Pairing("Invalid system username or password".into()))?;
+        drop(value);
+        psink
+            .send(PairingMsg::SystemVerify {
+                nonce_c,
+                nonce_h,
+                credentials,
+            })
+            .await?;
+        let confirm = tokio::time::timeout(Duration::from_secs(30), psource.next())
+            .await
+            .map_err(|_| ConnectError::Timeout("system account verification"))?
+            .transpose()?
+            .ok_or(ConnectError::Timeout("system account verification"))?;
+        return match confirm {
+            PairingMsg::SystemConfirm { nonce_c: c, nonce_h: h, ok: true }
+                if c == nonce_c && h == nonce_h => Ok(()),
+            _ => Err(ConnectError::Pairing("System account authentication failed; check the sharing user's username and login password".into())),
+        };
+    }
     let (mode, challenges) = match &challenge {
         PairingMsg::Challenge { .. } => (
             removent_proto::AuthenticationMode::PairingCode,
@@ -247,3 +283,110 @@ pub(super) fn peer_verifying_key(conn: &RvpConnection) -> Option<ed25519_dalek::
     ed25519_dalek::VerifyingKey::from_bytes(&key).ok()
 }
 // ---------------- media receive ----------------
+
+#[cfg(test)]
+mod system_account_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn system_credentials_require_host_trust_and_a_matching_success_confirmation() {
+        for (trusted, accepted, replay, expected) in [
+            (true, true, false, true),
+            (false, true, false, false),
+            (true, false, false, false),
+            (true, true, true, false),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let identity = removent_core::identity::load_or_create(
+                &removent_core::DataPaths {
+                    root: dir.path().into(),
+                },
+                "auth-fixture",
+            )
+            .unwrap();
+            let (host, _) = removent_net::make_server_endpoint(
+                "127.0.0.1:0".parse().unwrap(),
+                &identity,
+                removent_net::PinState::new([], true),
+            )
+            .unwrap();
+            let (client, _) = removent_net::make_client_endpoint(
+                "127.0.0.1:0".parse().unwrap(),
+                &identity,
+                removent_net::PinState::new([identity.fingerprint], false),
+            )
+            .unwrap();
+            let (c, h) = tokio::join!(
+                client
+                    .connect(host.local_addr().unwrap(), "removent")
+                    .unwrap(),
+                async { host.accept().await.unwrap().await }
+            );
+            let client_conn = RvpConnection::new(c.unwrap());
+            let host_conn = RvpConnection::new(h.unwrap());
+            let server = host_conn.clone();
+            let host_task = tokio::spawn(async move {
+                let (mut sink, mut source) = server.accept_pairing().await.unwrap();
+                let PairingMsg::Begin { nonce_c, .. } = source.next().await.unwrap().unwrap()
+                else {
+                    panic!("begin");
+                };
+                let nonce_h = [7; 16];
+                sink.send(PairingMsg::SystemChallenge { nonce_h })
+                    .await
+                    .unwrap();
+                if !trusted {
+                    return;
+                }
+                let PairingMsg::SystemVerify {
+                    nonce_c: c,
+                    nonce_h: h,
+                    credentials,
+                } = source.next().await.unwrap().unwrap()
+                else {
+                    panic!("system credentials");
+                };
+                assert_eq!((c, h), (nonce_c, nonce_h));
+                assert_eq!(credentials.username, "owner");
+                assert_eq!(credentials.password, "test-password");
+                sink.send(PairingMsg::SystemConfirm {
+                    nonce_c,
+                    nonce_h: if replay { [0; 16] } else { nonce_h },
+                    ok: accepted,
+                })
+                .await
+                .unwrap();
+            });
+            let result = tokio::time::timeout(
+                Duration::from_secs(5),
+                run_pairing(
+                    client_conn,
+                    &identity,
+                    &identity.fingerprint_hex(),
+                    &identity.fingerprint_hex(),
+                    Box::new(move |mode, tx| {
+                        assert!(
+                            trusted,
+                            "unconfirmed hosts must not even request credentials"
+                        );
+                        assert_eq!(mode, removent_proto::AuthenticationMode::SystemAccount);
+                        tx.send(
+                            removent_proto::SystemCredentials {
+                                username: "owner".into(),
+                                password: "test-password".into(),
+                            }
+                            .encode(),
+                        )
+                        .unwrap();
+                    }),
+                    None,
+                    trusted,
+                ),
+            )
+            .await
+            .unwrap();
+            assert_eq!(result.is_ok(), expected);
+            host_task.await.unwrap();
+        }
+    }
+}

@@ -53,20 +53,22 @@ pub(super) fn parse_args(raw: &[String]) -> anyhow::Result<PingArgs> {
     }
     anyhow::ensure!(
         target.is_some() != relay_profile.is_some(),
-        "Provide a target or --relay-profile FILE"
+        t!("args.target_or_profile")
     );
+    anyhow::ensure!(count > 0, t!("args.count_invalid"));
+    anyhow::ensure!(timeout > 0, t!("args.timeout_invalid"));
     if target
         .as_ref()
         .is_some_and(|t| t.contains("://") && !t.starts_with("removent://"))
     {
-        bail!("Use removent://host:port");
+        bail!(t!("args.invalid_scheme"));
     }
     Ok(PingArgs {
         target: target.unwrap_or_default(),
         relay_profile,
         pin,
-        count: count.max(1),
-        timeout: Duration::from_secs(timeout.max(1)),
+        count,
+        timeout: Duration::from_secs(timeout),
         name,
     })
 }

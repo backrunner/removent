@@ -33,7 +33,10 @@ async fn resume_rejected_falls_back_to_full_negotiation() {
             is_main: true,
         };
         let mk_cfg = || HostConfig {
-            authentication: Default::default(),
+            authentication: removent_core::AuthenticationSettings {
+                mode: removent_core::AuthenticationMode::PairingCode,
+                ..Default::default()
+            },
             auth_paths: None,
             audio_available: true,
             preapproved_only: false,
@@ -116,6 +119,7 @@ async fn resume_rejected_falls_back_to_full_negotiation() {
     )
     .unwrap();
     let mk_cfg = || ClientConfig {
+        host_identity_verified: false,
         pairing_code: None,
         device_name: "RejectClient".into(),
         caps: Caps::all(),

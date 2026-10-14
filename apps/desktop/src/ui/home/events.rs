@@ -165,12 +165,18 @@ impl HomeView {
                 self.auth_mode = mode;
                 self.pin_input.update(cx, |s, cx| {
                     s.set_masked(
-                        mode == removent_core::AuthenticationMode::Password,
+                        matches!(
+                            mode,
+                            removent_core::AuthenticationMode::Password
+                                | removent_core::AuthenticationMode::SystemAccount
+                        ),
                         window,
                         cx,
                     );
                     s.set_placeholder(
                         t!(match mode {
+                            removent_core::AuthenticationMode::SystemAccount =>
+                                "auth.system_password",
                             removent_core::AuthenticationMode::Password => "auth.password",
                             removent_core::AuthenticationMode::Otp => "auth.otp",
                             _ => "home.pin_placeholder",
@@ -183,7 +189,11 @@ impl HomeView {
                 self.pin_dialog = Some(PinDialog::Entry(tx));
                 // Start from an empty field and hand it the keyboard focus.
                 self.clear_pin_input(window, cx);
-                let focus = self.pin_input.focus_handle(cx);
+                let focus = if mode == removent_core::AuthenticationMode::SystemAccount {
+                    self.auth_username_input.focus_handle(cx)
+                } else {
+                    self.pin_input.focus_handle(cx)
+                };
                 window.focus(&focus, cx);
             }
             UiEvent::SessionReady { codec, .. } => {

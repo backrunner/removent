@@ -160,6 +160,25 @@ action.allow: Allow
 action.deny: Deny
 action.open: Open
 action.save: Save
+wol.title: "Wake-on-LAN"
+wol.send: "Send Wake-on-LAN"
+wol.configure: "Configure Wake-on-LAN…"
+wol.mac: "Target network adapter MAC address"
+wol.destination: "Destination address (IPv4)"
+wol.port: "UDP port"
+wol.hint: "Send a wake packet to this address. The target must support and enable network wake. Broadcasts usually stay on the local network. Settings are stored on this device only."
+wol.invalid_mac: "Enter a valid adapter MAC address, such as 02:11:22:33:44:55."
+wol.invalid_destination: "Enter an IPv4 broadcast address or reachable IPv4 address."
+wol.invalid_port: "Enter a UDP port from 1 to 65535."
+wol.sending: "Sending wake request…"
+wol.sent: "Wake request sent. Try connecting to the target shortly."
+wol.send_failed: "Could not send the wake request: %{err}. Check the network and destination, then retry."
+wol.missing_config: "Wake settings were not found. Configure Wake-on-LAN for this target again."
+wol.saved: "Wake settings saved. Use the target’s context menu to send a request."
+wol.save_failed: "Could not save wake settings: %{err}. Check the data directory, then retry."
+wol.clear: "Remove settings"
+wol.cleared: "Wake settings removed."
+wol.save_first: "Save the RDP connection with an account first, then configure Wake-on-LAN from its context menu."
 action.edit: Edit
 action.back: Back
 
@@ -342,7 +361,7 @@ sync.relay_fingerprint: "Relay fingerprint"
 sync.host_fingerprint: "Host fingerprint"
 
 auth.title: "Connection authentication"
-auth.hint: "Choose how controllers authenticate. Password, OTP and no authentication allow unattended connections."
+auth.hint: "System account is the default. Other authentication methods remain available."
 auth.pairing: "Pairing code"
 auth.password: "Access password"
 auth.otp: "OTP"
@@ -418,3 +437,9 @@ auth.otp_expand: "Show"
 auth.otp_collapse: "Hide"
 auth.otp_manual_label: "Enter a setup key"
 auth.otp_manual_hint: "If you cannot scan, copy the key into your authenticator."
+
+auth.system: "System account"
+auth.system_desc: "Enter the username and login password of the account running Removent on the remote Mac."
+auth.system_hint: "Verifies the account running the sharing service with macOS. Its login password is never stored in Removent."
+auth.system_username: "System username"
+auth.system_password: "Login password"

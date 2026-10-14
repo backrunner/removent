@@ -23,6 +23,9 @@ pub struct SavedConnection {
     pub domain: String,
     pub accept_invalid_certificate: bool,
     pub relay: Option<RelayRoute>,
+    /// Local network-specific advanced configuration; not included in cloud sync.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wake_on_lan: Option<crate::wake_on_lan::WakeOnLan>,
     /// Whether the request carried a password. The secret itself is in the
     /// Keychain under `password_key`; this flag decides whether reconnecting needs a
     /// keychain lookup (and a form fallback when the item is gone).
@@ -49,6 +52,7 @@ impl Default for SavedConnection {
             domain: String::new(),
             accept_invalid_certificate: false,
             relay: None,
+            wake_on_lan: None,
             password_hint: false,
             credentials_review_required: false,
             password_key: None,
@@ -127,11 +131,15 @@ impl SavedConnection {
     /// Two entries are the same bookmark when they target the same endpoint with
     /// the same credentials fields (a re-save updates the memo name in place).
     fn same_endpoint(&self, other: &Self) -> bool {
+        self.same_wake_target(other)
+            && self.username == other.username
+            && self.domain == other.domain
+    }
+
+    fn same_wake_target(&self, other: &Self) -> bool {
         self.protocol == other.protocol
             && self.host == other.host
             && self.port == other.port
-            && self.username == other.username
-            && self.domain == other.domain
             && self.relay == other.relay
     }
 
@@ -260,6 +268,9 @@ impl SavedConnections {
             )
         };
         if let Some(index) = existing {
+            if entry.wake_on_lan.is_none() && self.entries[index].same_wake_target(&entry) {
+                entry.wake_on_lan = self.entries[index].wake_on_lan.clone();
+            }
             entry.id = self.entries[index].id.clone();
             entry.added_at_unix = self.entries[index].added_at_unix;
             self.entries[index] = entry.clone();
@@ -344,6 +355,51 @@ impl SavedConnections {
             } else {
                 Ok(false)
             }
+        })
+    }
+
+    /// Updates only local wake settings, preserving credentials and concurrent edits.
+    pub fn set_wake_on_lan(
+        &mut self,
+        id: &str,
+        config: Option<crate::wake_on_lan::WakeOnLan>,
+    ) -> Result<SavedConnection> {
+        let config = config
+            .map(|c| c.validated())
+            .transpose()
+            .map_err(|e| CoreError::Serialization(e.to_string()))?;
+        self.transaction(|next| {
+            let entry = next
+                .entries
+                .iter_mut()
+                .find(|e| e.id == id)
+                .ok_or_else(|| {
+                    CoreError::Serialization(
+                        "this bookmark was removed; create a new connection".into(),
+                    )
+                })?;
+            entry.wake_on_lan = config;
+            Ok(entry.clone())
+        })
+    }
+
+    /// Discovery configuration and bookmark creation commit atomically.
+    pub fn configure_discovered_wake(
+        &mut self,
+        mut target: SavedConnection,
+        config: crate::wake_on_lan::WakeOnLan,
+    ) -> Result<SavedConnection> {
+        let config = config
+            .validated()
+            .map_err(|e| CoreError::Serialization(e.to_string()))?;
+        self.transaction(|next| {
+            if let Some(entry) = next.entries.iter_mut().find(|e| e.same_endpoint(&target)) {
+                entry.wake_on_lan = Some(config);
+                return Ok(entry.clone());
+            }
+            target.id.clear();
+            target.wake_on_lan = Some(config);
+            next.upsert_inner(target)
         })
     }
 

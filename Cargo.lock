@@ -7652,6 +7652,7 @@ dependencies = [
  "removent-relay-transport",
  "rust-i18n",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 
@@ -7750,9 +7751,11 @@ name = "removent-host"
 version = "0.1.5"
 dependencies = [
  "anyhow",
+ "core-foundation 0.10.1",
  "des",
  "futures",
  "hex",
+ "libc",
  "rand 0.10.3",
  "removent-core",
  "removent-input",
@@ -7865,6 +7868,7 @@ dependencies = [
  "bytes",
  "postcard",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

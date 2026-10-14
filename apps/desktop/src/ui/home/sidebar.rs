@@ -1,4 +1,5 @@
 use super::*;
+use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 
 impl HomeView {
     pub(super) fn saved_discovery_match(&self, row: &DeviceRow) -> Option<&SavedConnection> {
@@ -140,7 +141,9 @@ impl HomeView {
                         .border_color(colors.border.opacity(0.8))
                 });
         }
-        el
+        let target = self.discovered_wake_target(row);
+        let home = cx.weak_entity();
+        el.context_menu(move |menu, _, _| HomeView::wake_menu(menu, target.clone(), home.clone()))
     }
 
     pub(super) fn render_saved_row(
@@ -215,7 +218,48 @@ impl HomeView {
                         .border_color(colors.border.opacity(0.8))
                 });
         }
-        el
+        let target = entry.clone();
+        let home = cx.weak_entity();
+        el.context_menu(move |menu, _, cx| {
+            let busy = home.upgrade().is_none_or(|home| {
+                let home = home.read(cx);
+                home.connecting.is_some() || home.connection_save_task.is_some()
+            });
+            let edit_home = home.clone();
+            let edit_id = target.id.clone();
+            let remove_home = home.clone();
+            let remove_id = target.id.clone();
+            HomeView::wake_menu(menu, target.clone(), home.clone())
+                .separator()
+                .item(
+                    PopupMenuItem::new(t!("action.edit").to_string())
+                        .disabled(busy)
+                        .on_click(move |_, window, cx| {
+                            let _ = edit_home.update(cx, |this, cx| {
+                                if this.connecting.is_none()
+                                    && this.connection_save_task.is_none()
+                                    && let Some(entry) =
+                                        this.saved.iter().find(|s| s.id == edit_id).cloned()
+                                {
+                                    this.open_connection_dialog(Some(&entry), window, cx);
+                                }
+                            });
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new(t!("saved.remove").to_string())
+                        .icon(icon_16("trash-2"))
+                        .disabled(busy)
+                        .on_click(move |_, _, cx| {
+                            let _ = remove_home.update(cx, |this, cx| {
+                                if this.connecting.is_none() && this.connection_save_task.is_none()
+                                {
+                                    this.remove_saved(&remove_id, cx);
+                                }
+                            });
+                        }),
+                )
+        })
     }
 
     pub(super) fn render_sidebar(

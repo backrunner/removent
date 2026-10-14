@@ -69,7 +69,8 @@ impl AuthenticationSettings {
             .build()
             .map_err(|_| "Invalid OTP secret".into())
     }
-    /// Bind resumption to the current credentials; changing them invalidates old tokens.
+    /// Bind resumption to the configured policy and app-managed authentication secrets.
+    /// System passwords are OS-owned and are checked again on full authentication.
     pub fn policy_fingerprint(&self) -> [u8; 32] {
         Sha256::digest(serde_json::to_vec(self).expect("authentication serialization")).into()
     }
@@ -146,7 +147,7 @@ mod tests {
         );
     }
     #[test]
-    fn legacy_settings_default_to_pairing_and_invalid_password_never_commits() {
+    fn missing_authentication_defaults_to_system_account_and_invalid_password_never_commits() {
         let dir = tempfile::tempdir().unwrap();
         let paths = crate::DataPaths {
             root: dir.path().into(),
@@ -154,14 +155,14 @@ mod tests {
         let mut settings: crate::Settings = toml::from_str("device_name = \"Legacy\"").unwrap();
         assert_eq!(
             settings.authentication.mode,
-            AuthenticationMode::PairingCode
+            AuthenticationMode::SystemAccount
         );
         settings.save(&paths).unwrap();
         settings.authentication.mode = AuthenticationMode::Password;
         assert!(settings.save(&paths).is_err());
         assert_eq!(
             crate::Settings::load(&paths).unwrap().authentication.mode,
-            AuthenticationMode::PairingCode
+            AuthenticationMode::SystemAccount
         );
         settings.authentication.password = "test secret".into();
         settings.save(&paths).unwrap();
@@ -170,5 +171,11 @@ mod tests {
             settings.authentication
         );
         assert!(!format!("{settings:?}").contains("test secret"));
+        let existing: crate::Settings =
+            toml::from_str("[authentication]\nmode = \"pairing_code\"").unwrap();
+        assert_eq!(
+            existing.authentication.mode,
+            AuthenticationMode::PairingCode
+        );
     }
 }

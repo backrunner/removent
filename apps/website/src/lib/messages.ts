@@ -4,7 +4,7 @@ export const en = {
   'site.overview': 'Overview', 'site.download': 'Download', 'site.github': 'Source on GitHub',
   'site.home': 'Removent home',
   'hero.release': 'See what’s new',
-  'docs.library': 'DOCUMENTATION', 'docs.guide': 'GUIDE', 'docs.release': 'LATEST STABLE',
+  'docs.library': 'Documentation', 'docs.guide': 'GUIDE', 'docs.release': 'Latest stable',
   'docs.group.start': 'Getting started', 'docs.group.connect': 'Connections',
   'docs.group.operate': 'Hosting & relay', 'docs.group.reference': 'Reference',
   'docs.shortcut.install': 'Install the app', 'docs.shortcut.pair': 'First connection',

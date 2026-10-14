@@ -51,6 +51,19 @@ pub enum PairingMsg {
         fp_c: String,
         locator: String,
     },
+    SystemChallenge {
+        nonce_h: [u8; 16],
+    },
+    SystemVerify {
+        nonce_c: [u8; 16],
+        nonce_h: [u8; 16],
+        credentials: removent_proto::SystemCredentials,
+    },
+    SystemConfirm {
+        nonce_c: [u8; 16],
+        nonce_h: [u8; 16],
+        ok: bool,
+    },
 }
 
 // Flat payloads prevent untrusted authentication frames from recursively

@@ -21,6 +21,10 @@ async fn shutdown_reaps_connection_waiting_for_pairing() {
         settings: Settings {
             host_port: addr.port(),
             vnc_enabled: false,
+            authentication: removent_core::AuthenticationSettings {
+                mode: removent_proto::AuthenticationMode::PairingCode,
+                ..Default::default()
+            },
             ..Settings::default()
         },
         input_sink: None,

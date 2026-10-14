@@ -1,4 +1,4 @@
-//! removent-cli: M1 smoke-test tool (milestones.md M1).
+//! Removent service management, pairing and connection diagnostics.
 //!
 //! Usage:
 //! ```text
@@ -26,36 +26,69 @@ use std::time::{Duration, Instant};
 rust_i18n::i18n!("locales");
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> std::process::ExitCode {
     let paths = DataPaths::resolve();
     if std::env::args().nth(1).as_deref() == Some("cloud-sync") {
         // Bounded stdin/stdout protocol for the user-owned CloudKit helper. Never
         // initialize host identity, touch Keychain, or log connection payloads.
-        use std::io::Read;
-        let mut input = String::new();
-        std::io::stdin()
-            .take(8 * 1024 * 1024 + 1)
-            .read_to_string(&mut input)?;
-        anyhow::ensure!(input.len() <= 8 * 1024 * 1024, "Sync command too large");
-        let result = serde_json::from_str(&input)
-            .map_err(removent_core::CoreError::from)
-            .and_then(|command| removent_client::cloud_sync::dispatch(&paths, command));
-        let response = match result {
-            Ok(value) => serde_json::json!({"ok":true,"value":value}),
-            Err(error) => serde_json::json!({"ok":false,"error":error.to_string()}),
+        return match cloud_sync(&paths) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => output::report(error, false),
         };
-        println!("{}", response);
-        return Ok(());
     }
-    removent_core::logging::init_logging(&paths);
-    removent_core::logging::install_panic_hook(&paths);
-    let settings = removent_core::Settings::load(&paths).unwrap_or_default();
+    let settings = removent_core::Settings::load_strict(&paths).unwrap_or_default();
     rust_i18n::set_locale(removent_core::resolve_locale(settings.language));
-
     let raw: Vec<String> = std::env::args().skip(1).collect();
-    match raw.first().map(String::as_str) {
-        Some("identity") => {
-            let identity = identity::load_or_create(&paths, &settings.device_name)?;
+    let options = match args::parse(&raw) {
+        Ok(options) => options,
+        Err(error) => return output::report(error, false),
+    };
+    // Help, version and invalid arguments do not create diagnostic files.
+    match options.command {
+        args::Command::Help(key) => {
+            print!("{}", t!(key));
+            return std::process::ExitCode::SUCCESS;
+        }
+        args::Command::Version => {
+            println!("removent-cli {}", env!("CARGO_PKG_VERSION"));
+            return std::process::ExitCode::SUCCESS;
+        }
+        _ => {}
+    }
+    removent_core::logging::init_component_logging(&paths, "removent-cli", options.verbose);
+    removent_core::logging::install_panic_hook(&paths);
+    match run(options.command, &paths, &settings).await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => output::report(error, options.verbose),
+    }
+}
+
+fn cloud_sync(paths: &DataPaths) -> anyhow::Result<()> {
+    use std::io::Read;
+    let mut input = String::new();
+    std::io::stdin()
+        .take(8 * 1024 * 1024 + 1)
+        .read_to_string(&mut input)?;
+    anyhow::ensure!(input.len() <= 8 * 1024 * 1024, "Sync command too large");
+    let result = serde_json::from_str(&input)
+        .map_err(removent_core::CoreError::from)
+        .and_then(|command| removent_client::cloud_sync::dispatch(paths, command));
+    let response = match result {
+        Ok(value) => serde_json::json!({"ok":true,"value":value}),
+        Err(error) => serde_json::json!({"ok":false,"error":error.to_string()}),
+    };
+    println!("{}", response);
+    Ok(())
+}
+
+async fn run(
+    command: args::Command,
+    paths: &DataPaths,
+    settings: &removent_core::Settings,
+) -> anyhow::Result<()> {
+    match command {
+        args::Command::Identity => {
+            let identity = identity::load_or_create(paths, &settings.device_name)?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&serde_json::json!({
@@ -65,31 +98,11 @@ async fn main() -> anyhow::Result<()> {
             );
             Ok(())
         }
-        Some("ping") => cmd_ping(parse_args(&raw[1..])?).await,
-        Some("pairing") => {
-            let action = raw.get(1).map(String::as_str).unwrap_or("show");
-            if action == "watch" {
-                return daemon::watch_pairing().await;
-            }
-            anyhow::ensure!(
-                matches!(action, "show" | "generate" | "revoke"),
-                "Use pairing show|watch|generate|revoke"
-            );
-            cmd_daemon(&format!("pairing-{action}")).await
-        }
-        Some("daemon") => {
-            let action = raw.get(1).map(String::as_str).unwrap_or("status");
-            cmd_daemon(action).await
-        }
-        Some("--help") | Some("-h") | None => {
-            print!("{}", t!("usage"));
-            Ok(())
-        }
-        Some(other) => {
-            eprintln!("{}\n", t!("error.unknown_subcommand", cmd = other));
-            print!("{}", t!("usage"));
-            std::process::exit(2);
-        }
+        args::Command::Ping(args) => cmd_ping(args).await,
+        args::Command::PairingWatch => daemon::watch_pairing().await,
+        args::Command::Daemon(action) => cmd_daemon(&action).await,
+        args::Command::Settings(options) => settings::run(options, paths).await,
+        args::Command::Help(_) | args::Command::Version => unreachable!("handled before logging"),
     }
 }
 
@@ -132,9 +145,14 @@ mod tests {
     }
 }
 
+mod args;
 mod daemon;
+mod output;
 mod ping;
+mod settings;
 use daemon::cmd_daemon;
+use ping::cmd_ping;
+#[cfg(test)]
+use ping::parse_args;
 #[cfg(test)]
 use ping::resolve_target;
-use ping::{cmd_ping, parse_args};

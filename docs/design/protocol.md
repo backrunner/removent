@@ -104,9 +104,9 @@ Client                                Host
 
 ### 4.3.1 可选的无人值守认证（2026-10-01）
 
-认证策略仅由 desktop 被控端配置：`PairingCode`（默认）、`Password`、`Otp`、`None`。
+认证策略仅由 desktop 被控端配置：`SystemAccount`（默认）、`PairingCode`、`Password`、`Otp`、`None`。
 握手结构保持不变，能力位 `AUTH_METHODS = 1 << 6` 表明新版主控端支持认证方式协商。
-`peer_known` 表示当前连接无需新的凭据证明：配对模式仅在 RememberDevice 策略下沿用已知身份判断；EveryConnection 始终为 false；口令/OTP 始终为 false；
+`peer_known` 表示当前连接无需新的凭据证明：配对模式仅在 RememberDevice 策略下沿用已知身份判断；EveryConnection 始终为 false；系统账户/口令/OTP 始终为 false；
 无认证为 true。认证方式在独立 pairing stream 的 Challenge 中声明，收到后才弹出输入界面。
 
 配对码沿用 `Begin → Challenge → Verify → Confirm`。口令/OTP 使用
@@ -124,6 +124,14 @@ SPAKE2、证书指纹 transcript 和 Ed25519 确认签名。口令有一个候�
 可到达的主控端，保留 TLS 加密和证书握手。relay 身份认证仍独立执行。
 快速恢复绑定当前认证配置；修改策略/凭据会清除恢复记录并重启监听器。LoginWindow 的
 `preapproved_only` 限制保持有效。旧主控端可继续配对；口令/OTP 被控端拒绝未声明新能力的主控端。
+
+系统账户模式要求 `SYSTEM_ACCOUNT_AUTH = 1 << 8`，在已确认并固定主机证书的 TLS 连接内使用
+`Begin → SystemChallenge{nonce_h} → SystemVerify{nonce_c, nonce_h, credentials} → SystemConfirm{nonce_c, nonce_h, ok}`。
+双方核对本次随机数，被控端还核对 Begin 中的客户端指纹与 TLS 身份。未确认主机身份的客户端禁止发送系统凭据；旧客户端被拒绝，不自动退回配对码。
+
+macOS 使用 Open Directory 验证运行共享服务的账户，用户名必须对应服务进程的有效 UID，拒绝 root 和其他用户。
+用户名上限 256 字节，密码上限 1024 字节；不把系统密码写入设置、书签或日志。系统验证在工作线程执行，沿用主机级鉴权限流。
+新配置和缺失认证配置使用系统账户；显式保存的认证方式保持原值。原有 30 秒会话恢复窗口仍有效，恢复令牌必须有匹配的认证策略记录。
 
 ### 4.3.2 配对策略、主动连接码与 CLI（2026-10-01）
 

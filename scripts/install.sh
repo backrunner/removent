@@ -47,9 +47,27 @@ major=$(sw_vers -productVersion | awk -F. '{print $1}')
 [[ "$major" =~ ^[0-9]+$ ]] && [ "$major" -ge 26 ] || fail 'macOS 26 or newer is required'
 [ "$(id -u)" != 0 ] || fail 'Run as the target Mac user without sudo; file installation elevates separately'
 [ -n "${HOME:-}" ] || fail 'HOME is required'
-for cmd in curl hdiutil shasum ditto codesign spctl plutil ps launchctl mktemp; do
+for cmd in curl diskutil shasum ditto codesign spctl plutil ps launchctl mktemp; do
     command -v "$cmd" >/dev/null 2>&1 || fail "Missing macOS tool: $cmd"
 done
+# Older supported macOS versions may not provide the diskutil image subcommand.
+# Probe without attaching anything; never retry a failed attach with another tool.
+image_tool=diskutil
+if ! diskutil image attach --help >/dev/null 2>&1; then
+    command -v hdiutil >/dev/null 2>&1 || fail 'Missing macOS tool: hdiutil'
+    image_tool=hdiutil
+fi
+attach_image() {
+    if [ "$image_tool" = diskutil ]; then
+        diskutil image attach --mountOptions nobrowse --readOnly --mountPoint "$1" "$2"
+    else
+        hdiutil attach -nobrowse -readonly -mountpoint "$1" "$2"
+    fi
+}
+eject_image() {
+    if [ "$image_tool" = diskutil ]; then diskutil eject "$1"
+    else hdiutil detach "$1"; fi
+}
 release="https://github.com/$repo/releases"
 download() {
     curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
@@ -118,7 +136,7 @@ cleanup() {
     [ -z "$transaction" ] || as_admin rm -rf -- "$transaction" || result=1
     [ -z "$lock" ] || as_admin rmdir -- "$lock" || result=1
     if [ "$mounted" = yes ]; then
-        if ! hdiutil detach "$mount" >/dev/null; then
+        if ! eject_image "$mount" >/dev/null; then
             printf 'removent: Disk image remains mounted at %s; eject it manually.\n' "$mount" >&2
             exit 1
         fi
@@ -135,7 +153,7 @@ download --output "$work/SHA256SUMS" "$release/download/$version/SHA256SUMS"
 expected=$(awk -v name="$asset" '$2 == name {if (NF != 2 || length($1) != 64 || $1 ~ /[^a-f0-9]/) exit 1; value=$1; count++} END {if (count != 1) exit 1; print value}' "$work/SHA256SUMS") || fail 'Missing or invalid release SHA-256 checksum'
 actual=$(shasum -a 256 "$work/$asset" | awk '{print $1}')
 [ "$actual" = "$expected" ] || fail 'SHA-256 mismatch; existing installation was not changed'
-hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$work/$asset" >/dev/null
+attach_image "$mount" "$work/$asset" >/dev/null
 mounted=yes
 source_app="$mount/Removent.app"
 verify_app() {

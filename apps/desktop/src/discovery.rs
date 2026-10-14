@@ -58,7 +58,6 @@ async fn run_with_browser(
         let mut advertised = None;
         let mut retry_at = tokio::time::Instant::now();
         let mut previous = BTreeMap::new();
-        let mut local = LocalDiscoveryAddresses::load().ok();
         let mut interfaces = tokio::time::interval(Duration::from_secs(2));
         interfaces.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -91,6 +90,9 @@ async fn run_with_browser(
                 );
             }
             // An unknown interface snapshot must not expose our own service.
+            // Refresh for each announcement too: DHCP/VPN changes can precede
+            // the periodic tick, and no transient self row should be published.
+            let local = LocalDiscoveryAddresses::load().ok();
             let next = local
                 .as_ref()
                 .map(|local| visible_devices_with_addresses(protocol, &my_fp, &combined, local))
@@ -98,9 +100,7 @@ async fn run_with_browser(
             publish(protocol, &previous, &next, &events);
             previous = next;
             tokio::select! {
-                _ = interfaces.tick() => {
-                    local = LocalDiscoveryAddresses::load().ok();
-                }
+                _ = interfaces.tick() => {},
                 result = settings.changed() => {
                     if result.is_err() || !enabled(*settings.borrow_and_update(), protocol) {
                         break;

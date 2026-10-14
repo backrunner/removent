@@ -4,6 +4,111 @@ use gpui::{AnyView, TestAppContext};
 mod authentication;
 
 #[gpui::test]
+fn saved_context_menu_edits_and_removes_clicked_connection(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let directory = tempfile::tempdir().unwrap();
+    let paths = removent_core::DataPaths {
+        root: directory.path().into(),
+    };
+    let mut store = removent_client::saved::SavedConnections::load(&paths).unwrap();
+    let mut entries = Vec::new();
+    for name in ["First", "Second"] {
+        entries.push(
+            store
+                .upsert(SavedConnection {
+                    name: name.into(),
+                    host: format!("{name}.local"),
+                    port: 5900,
+                    protocol: ConnectionProtocol::Vnc,
+                    ..Default::default()
+                })
+                .unwrap(),
+        );
+    }
+    let (commands, _rx) = tokio::sync::mpsc::channel(1);
+    let engine = Engine::for_ui_test(paths.clone(), commands);
+    let slot = Rc::new(std::cell::RefCell::new(None));
+    let out = slot.clone();
+    let first_id = entries[0].id.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        let view = cx.new(|cx| HomeView::new(engine, window, cx));
+        view.update(cx, |view, _| {
+            view.selected = Some(Selection::Saved(first_id))
+        });
+        *out.borrow_mut() = Some(view.clone());
+        gpui_component::Root::new(AnyView::from(view), window, cx)
+    });
+    let home = slot.borrow_mut().take().unwrap();
+    cx.update(|window, cx| {
+        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, Some(window), cx);
+        crate::theme::apply(true, cx);
+    });
+    cx.simulate_resize(gpui::size(px(860.), px(600.)));
+    cx.run_until_parked();
+    let selector: &'static str = Box::leak(format!("bookmark-{}", entries[1].id).into_boxed_str());
+    let row = cx.debug_bounds(selector).unwrap();
+    cx.simulate_mouse_down(row.center(), gpui::MouseButton::Right, Default::default());
+    cx.simulate_mouse_up(row.center(), gpui::MouseButton::Right, Default::default());
+    cx.run_until_parked();
+    // Navigate backwards from the end: Remove, then Edit, skipping the separator.
+    cx.simulate_keystrokes("up up enter");
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        let dialog = home
+            .read(cx)
+            .connection_dialog
+            .clone()
+            .expect("edit opens the form");
+        let form = dialog.read(cx);
+        assert_eq!(form.saved_id(), Some(entries[1].id.as_str()));
+        assert_eq!(form.memo_name(cx), "Second");
+        assert_eq!(form.request(cx).unwrap().address.host, "second.local");
+        let mut renamed = entries[1].clone();
+        renamed.name = "Renamed".into();
+        dialog.update(cx, |form, cx| {
+            form.prefill(&renamed, None, window, cx);
+            cx.emit(ConnectionDialogEvent::Save);
+        });
+    });
+    cx.run_until_parked();
+    let persisted = removent_client::saved::SavedConnections::load(&paths).unwrap();
+    assert_eq!(persisted.all().len(), 2);
+    assert_eq!(
+        persisted
+            .all()
+            .iter()
+            .find(|e| e.id == entries[1].id)
+            .unwrap()
+            .name,
+        "Renamed"
+    );
+    // Restore the other selection to catch accidental deletion by selection.
+    cx.update(|window, cx| {
+        gpui_component::Theme::change(gpui_component::ThemeMode::Light, Some(window), cx);
+        crate::theme::apply(false, cx);
+        home.update(cx, |home, cx| {
+            home.selected = Some(Selection::Saved(entries[0].id.clone()));
+            cx.notify();
+        })
+    });
+    cx.run_until_parked();
+    let row = cx.debug_bounds(selector).unwrap();
+    cx.simulate_mouse_down(row.center(), gpui::MouseButton::Right, Default::default());
+    cx.simulate_mouse_up(row.center(), gpui::MouseButton::Right, Default::default());
+    cx.run_until_parked();
+    cx.simulate_keystrokes("up enter");
+    cx.run_until_parked();
+    let persisted = removent_client::saved::SavedConnections::load(&paths).unwrap();
+    assert_eq!(persisted.all().len(), 1);
+    assert_eq!(persisted.all()[0].id, entries[0].id);
+    assert!(cx.debug_bounds(selector).is_none());
+    cx.update(|_, cx| {
+        assert!(matches!(&home.read(cx).selected,
+        Some(Selection::Saved(id)) if id == &entries[0].id))
+    });
+}
+
+#[gpui::test]
 fn permissions_clear_during_restart_and_reappear_from_the_new_snapshot(cx: &mut TestAppContext) {
     cx.update(gpui_component::init);
     let directory = tempfile::tempdir().unwrap();

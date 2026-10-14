@@ -4,32 +4,109 @@ _version: 1
 cli.name: removent-cli
 
 usage: |
-  removent-cli pairing show|watch|generate|revoke
-  removent-cli — Removent 冒烟测试工具
+  removent-cli — Removent 服务管理与连接诊断
 
-  用法:
-    removent-cli ping --relay-profile /path/to/controller.toml [options]
-    removent-cli identity
-    removent-cli ping <addr|名称|短指纹> [选项]
-    removent-cli daemon <status|start|ensure|stop|restart|enable|disable|permissions|login-on|login-off|service-status>
+  用法：removent-cli [--verbose] <命令>
 
-  选项:
-    --pin <码>       配对 PIN（缺省时在需要配对时从标准输入读取）
-    --count <次>     Ping 次数（默认 4）
-    --timeout <秒>   mDNS 发现超时（默认 10）
-    --name <设备名>  本端展示名（默认 RemoventCLI）
+  命令：
+    daemon     查询状态、启动或停止后台服务
+    settings   查询、修改或重置各项设置
+    pairing    查看、生成或撤销配对码，监听配对事件
+    identity   查看本机身份（JSON）
+    ping       测试与目标设备的连接
 
-daemon.unknown_action: "未知 daemon 操作: %{action}（支持 status|start|ensure|stop|restart|enable|disable|permissions|login-on|login-off|service-status）"
-daemon.connect_failed: "连接 daemon 失败（removentd 未运行？）"
-daemon.send_failed: "发送请求失败"
-daemon.wait_timeout: "等待 daemon 响应超时"
-daemon.read_failed: "读取响应失败"
-daemon.disconnected: "daemon 未响应即断开"
-daemon.serialize_failed: "序列化响应失败"
+  通用选项：
+    -h, --help       查看帮助（也可用于子命令）
+    -V, --version    查看版本
+    -v, --verbose    在终端显示诊断日志和完整错误原因
+
+  示例：
+    removent-cli daemon status
+    removent-cli daemon start
+    removent-cli daemon --help
+
+help.daemon: |
+  用法：removent-cli daemon [操作] [--verbose]
+
+  操作（默认 status）：
+    status          查询共享状态、会话和权限（JSON）
+    enable          开启共享并保存设置
+    disable         关闭共享，保留后台服务
+    permissions     请求屏幕录制与辅助功能权限
+    reload          重新加载已保存的设置（可能中断当前会话）
+
+  macOS 服务管理：
+    start           启动后台服务
+    stop            停止后台服务，直到手动启动
+    restart         重启后台服务（会中断当前会话）
+    ensure          按需启动，尊重手动停止的设置
+    login-on        立即启动并开启登录时启动
+    login-off       关闭登录时启动，保留当前服务
+    service-status  查询登录启动、进程管理和连接状态（JSON）
+
+  status 只查询状态；后台服务不可用时会提示启动命令。
+  成功结果保持 JSON 格式。使用 --verbose 查看诊断日志和完整错误原因。
+
+help.pairing: |
+  用法：removent-cli pairing [操作] [--verbose]
+
+  操作（默认 show）：
+    show       查看当前配对码或 PIN（JSON）
+    generate   生成配对码
+    revoke     撤销配对码
+    watch      持续输出配对事件（每行一个 JSON），按 Ctrl+C 结束
+
+  需要先启动后台服务：removent-cli daemon start
+
+help.ping: |
+  用法：
+    removent-cli ping <地址|设备名|短指纹> [选项]
+    removent-cli ping --relay-profile /path/to/controller.toml [选项]
+
+  选项：
+    --pin <码>         配对 PIN（需要时从标准输入读取）
+    --count <次数>     Ping 次数，必须大于 0（默认 4）
+    --timeout <秒>     发现超时，必须大于 0（默认 10）
+    --name <设备名>    本端显示名称（默认 RemoventCLI）
+    -v, --verbose      显示诊断日志和完整错误原因
+
+  Ping 仅支持配对码或无认证的被控端。
+  系统账户、访问口令和 OTP 认证请使用桌面端或移动端连接验证。
+
+  示例：removent-cli ping removent://192.168.1.10:48688 --count 4
+
+help.identity: |
+  用法：removent-cli identity [--verbose]
+  输出本机证书指纹与公钥（JSON）；尚无身份时创建本机身份。
+
+daemon.unknown_action: "未知后台服务操作：%{action}"
+daemon.connect_failed: "无法连接到 Removent 后台服务。"
+daemon.unavailable: "Removent 后台服务当前不可用。"
+daemon.start_hint: "启动后台服务：%{command}"
+daemon.start_foreground_hint: "请先在另一终端启动 removentd，再重试此命令。"
+daemon.inspect_hint: "检查后台服务状态：%{command}"
+daemon.permission_denied: "没有权限连接到 Removent 后台服务。"
+daemon.permission_hint: "请使用运行 Removent 的用户重试，并检查数据目录权限：%{path}"
+daemon.send_failed: "无法向 Removent 后台服务发送请求。"
+daemon.wait_timeout: "Removent 后台服务在 5 秒内未响应。"
+daemon.read_failed: "无法读取 Removent 后台服务的响应。"
+daemon.disconnected: "Removent 后台服务已断开连接。"
+daemon.serialize_failed: "无法输出后台服务响应。"
+daemon.request_failed: "Removent 后台服务未能完成请求。"
+daemon.service_failed: "无法完成后台服务操作：%{action}。"
+daemon.service_hint: "请检查后台服务日志：%{path}，以及系统设置中的登录项与后台活动权限。"
+pairing.unknown_action: "未知配对操作：%{action}"
+
+error.message: "错误：%{message}"
+error.help_hint: "查看用法：%{command}"
+error.verbose_hint: "需要诊断详情时，在原命令末尾加上 --verbose。"
+error.cause: "  原因：%{message}"
+args.target_or_profile: "请提供目标地址、设备名或短指纹，或使用 --relay-profile <文件>，两者不能同时使用。"
+args.invalid_scheme: "目标地址请使用 removent://host:port 格式。"
 
 args.missing_value: "%{arg} 缺少参数"
 args.count_invalid: "--count 需要正整数"
-args.timeout_invalid: "--timeout 需要秒数"
+args.timeout_invalid: "--timeout 需要大于 0 的整数秒数"
 args.unrecognized: "无法识别的参数: %{arg}"
 args.missing_target: "缺少目标（地址、设备名或短指纹）"
 
@@ -80,3 +157,50 @@ error.expected_negotiate_offer: "预期 NegotiateOffer"
 error.send_negotiate_reply: "发送 NegotiateReply: %{err}"
 error.send_ping: "发送 Ping: %{err}"
 error.unknown_subcommand: "未知子命令: %{cmd}"
+
+help.settings: |
+  用法：removent-cli settings <操作> [--json] [--verbose]
+
+  操作：
+    list                 列出设置、当前值、可用值与生效方式
+    get [设置名]         查询一项或全部设置
+    set <设置名> <值>    修改并保存设置
+    set <设置名> --stdin 从标准输入读取值（密码与 OTP 密钥必须使用）
+    reset <设置名>       将一项设置恢复为默认值
+    path                 显示当前配置文件路径
+
+  示例：
+    removent-cli settings set device_name "Office Mac"
+    removent-cli settings set discovery.vnc true
+    removent-cli settings set video_quality high-quality
+    removent-cli settings get --json
+    removent-cli settings set authentication.password --stdin < password.txt
+
+  后台服务在线时会重新加载共享设置，可能中断当前会话。
+  外观、发现与更新等桌面偏好在重新打开桌面端后生效。
+  服务未启动时也能保存设置；查询始终隐藏密码与 OTP 密钥。
+
+settings.invalid_arguments: "设置命令参数不完整或包含多余参数。"
+settings.unknown: "未知设置项：%{key}"
+settings.invalid: "设置项 %{key} 的值无效，可用值：%{expected}"
+settings.secret_stdin: "请使用 settings set %{key} --stdin 从标准输入写入敏感值。"
+settings.stdin_pipe: "请将文件或管道传给 --stdin，例如 < password.txt。"
+settings.stdin_invalid: "标准输入必须是 UTF-8 文本，且不超过 4096 字节。"
+settings.save_failed: "无法保存设置，原配置未被此操作替换。"
+settings.load_failed: "无法读取设置。"
+settings.file_hint: "请检查配置文件内容与访问权限，查看路径：%{command}"
+settings.secret_set: "[已设置，内容隐藏]"
+settings.secret_empty: "[未设置]"
+settings.host_apply: "后台服务重新加载，可能中断当前会话"
+settings.desktop_apply: "重新打开桌面端后生效。"
+settings.saved: "已保存 %{key} = %{value}"
+settings.offline: "后台服务尚未运行，设置将在下次启动时生效。"
+settings.reload_requested: "后台服务已接受重新加载请求；共享监听器将按需重启。"
+settings.reload_failed: "设置已保存，但后台服务未确认重新加载。"
+settings.retry_reload: "检查服务状态后重试：%{command}"
+
+settings.text_limit: "文本，最多 %{max} 字节"
+settings.expected_name: "非空设备名称"
+settings.expected_endpoint: "不含凭据和片段的 HTTPS 地址，或空文本"
+settings.expected_otp: "有效的 Base32 OTP 密钥"
+settings.expected_auth: "口令模式需先配置有效口令，OTP 模式需先配置有效密钥"

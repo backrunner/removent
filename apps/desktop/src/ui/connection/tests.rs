@@ -42,6 +42,65 @@ fn setup(cx: &mut TestAppContext) -> (Entity<ConnectionDialog>, &mut gpui::Visua
     (dialog, cx)
 }
 
+#[gpui::test]
+fn protocol_rows_fill_the_card_and_keep_alignment_on_hover(cx: &mut TestAppContext) {
+    let (dialog, cx) = setup(cx);
+    for dark in [true, false] {
+        cx.update(|window, cx| {
+            gpui_component::Theme::change(
+                if dark {
+                    gpui_component::ThemeMode::Dark
+                } else {
+                    gpui_component::ThemeMode::Light
+                },
+                Some(window),
+                cx,
+            );
+            crate::theme::apply(dark, cx);
+        });
+        for size in [
+            gpui::size(px(860.), px(600.)),
+            gpui::size(px(1040.), px(700.)),
+        ] {
+            cx.simulate_resize(size);
+            for (i, protocol) in ConnectionProtocol::ALL.into_iter().enumerate() {
+                cx.update(|window, cx| dialog.update(cx, |form, cx| form.back(window, cx)));
+                cx.run_until_parked();
+                let row_selector = ["protocol-row-0", "protocol-row-1", "protocol-row-2"][i];
+                let icon_selector = ["protocol-icon-0", "protocol-icon-1", "protocol-icon-2"][i];
+                let arrow_selector = [
+                    "protocol-chevron-0",
+                    "protocol-chevron-1",
+                    "protocol-chevron-2",
+                ][i];
+                let row = cx.debug_bounds(row_selector).expect("protocol card");
+                let icon = cx.debug_bounds(icon_selector).expect("leading icon");
+                let arrow = cx.debug_bounds(arrow_selector).expect("trailing arrow");
+                assert!(
+                    (icon.left() - row.left() - px(17.)).abs() <= px(1.),
+                    "icon must stay at the card's leading inset"
+                );
+                assert!(
+                    (row.right() - arrow.right() - px(17.)).abs() <= px(1.),
+                    "arrow must reach the trailing inset"
+                );
+                assert!(
+                    row.bottom() <= size.height,
+                    "card must fit at minimum height"
+                );
+                cx.simulate_mouse_move(row.center(), None, Default::default());
+                cx.run_until_parked();
+                assert_eq!(cx.debug_bounds(row_selector), Some(row));
+                assert_eq!(cx.debug_bounds(icon_selector), Some(icon));
+                assert_eq!(cx.debug_bounds(arrow_selector), Some(arrow));
+                cx.simulate_click(row.center(), Default::default());
+                cx.run_until_parked();
+                cx.update(|_, cx| assert_eq!(dialog.read(cx).step, Step::Details(protocol)));
+            }
+        }
+    }
+}
+
 fn relay_bookmark() -> SavedConnection {
     SavedConnection {
         id: "relay-bookmark".into(),

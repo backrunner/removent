@@ -39,7 +39,10 @@ async fn quick_resume_reconnects_and_rotates_token() {
             is_main: true,
         };
         let mk_cfg = || HostConfig {
-            authentication: Default::default(),
+            authentication: removent_core::AuthenticationSettings {
+                mode: removent_core::AuthenticationMode::PairingCode,
+                ..Default::default()
+            },
             auth_paths: None,
             audio_available: true,
             preapproved_only: false,
@@ -123,6 +126,7 @@ async fn quick_resume_reconnects_and_rotates_token() {
     )
     .unwrap();
     let mk_cfg = || ClientConfig {
+        host_identity_verified: false,
         pairing_code: None,
         device_name: "ResumeClient".into(),
         caps: Caps::all(),

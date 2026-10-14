@@ -21,3 +21,6 @@ serde_json = { workspace = true }
 ed25519-dalek = { workspace = true }
 rust-i18n = { workspace = true }
 hex.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

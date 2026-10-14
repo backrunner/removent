@@ -22,7 +22,10 @@ async fn wrong_pin_fails_with_pairing_error() {
         let conn = RvpConnection::new(incoming.await.expect("conn"));
         let mut peers = PeersStore::in_memory();
         let cfg = HostConfig {
-            authentication: Default::default(),
+            authentication: removent_core::AuthenticationSettings {
+                mode: removent_core::AuthenticationMode::PairingCode,
+                ..Default::default()
+            },
             auth_paths: None,
             audio_available: true,
             preapproved_only: false,
@@ -86,6 +89,7 @@ async fn wrong_pin_fails_with_pairing_error() {
         server_addr,
         &client_id,
         ClientConfig {
+            host_identity_verified: false,
             pairing_code: None,
             device_name: "WrongPinClient".into(),
             caps: Caps::all(),

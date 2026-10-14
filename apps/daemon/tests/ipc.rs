@@ -190,7 +190,7 @@ async fn failed_switch_save_returns_error_and_preserves_running_state() {
 async fn repeated_enable_does_not_restart_host_and_preserves_other_settings() {
     let d = spawn_daemon_with(None).await;
     let settings = Settings {
-        device_name: "Updated by app".into(),
+        theme: removent_core::Theme::Dark,
         ..Settings::default()
     };
     settings.save(&d.paths).unwrap();
@@ -203,8 +203,8 @@ async fn repeated_enable_does_not_restart_host_and_preserves_other_settings() {
     ));
     assert!(!watch.has_changed().unwrap());
     assert_eq!(
-        Settings::load(&d.paths).unwrap().device_name,
-        "Updated by app"
+        Settings::load(&d.paths).unwrap().theme,
+        removent_core::Theme::Dark
     );
 }
 

@@ -36,7 +36,7 @@ pub enum IpcRequest {
     RequestPermission {
         permission: HostPermission,
     },
-    /// Reload settings from disk (sent after the app settings page saves; takes effect on the runner's next restart).
+    /// Reload settings from disk; changed host settings restart the hosting runner.
     ReloadSettings,
     /// Admission decision reply (corresponds to the AdmissionRequest event).
     AdmissionReply {

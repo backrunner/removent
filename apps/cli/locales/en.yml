@@ -4,32 +4,110 @@ _version: 1
 cli.name: removent-cli
 
 usage: |
-  removent-cli pairing show|watch|generate|revoke
-  removent-cli — Removent smoke-test tool
+  removent-cli — Removent service management and connection diagnostics
 
+  Usage: removent-cli [--verbose] <command>
+
+  Commands:
+    daemon     Inspect, start or stop the background service
+    settings   Read, update or reset settings
+    pairing    Show, generate or revoke codes, or watch pairing events
+    identity   Show this device's identity (JSON)
+    ping       Test a connection to a device
+
+  Global options:
+    -h, --help       Show help (also available on subcommands)
+    -V, --version    Show version
+    -v, --verbose    Show diagnostic logs and full error causes in the terminal
+
+  Examples:
+    removent-cli daemon status
+    removent-cli daemon start
+    removent-cli daemon --help
+
+help.daemon: |
+  Usage: removent-cli daemon [action] [--verbose]
+
+  Actions (default: status):
+    status          Inspect sharing, sessions and permissions (JSON)
+    enable          Enable sharing and save the setting
+    disable         Disable sharing, keeping the background service running
+    permissions     Request Screen Recording and Accessibility permissions
+    reload          Reload saved settings (may interrupt active sessions)
+
+  macOS service management:
+    start           Start the background service
+    stop            Stop until explicitly started again
+    restart         Restart the service (interrupts active sessions)
+    ensure          Start if needed, respecting an explicit stop
+    login-on        Start now and enable launch at login
+    login-off       Disable launch at login, keeping the current service running
+    service-status  Inspect login, process management and connectivity (JSON)
+
+  status only queries state; an unavailable service prints a startup command.
+  Successful results remain JSON. Use --verbose for logs and full error causes.
+
+help.pairing: |
+  Usage: removent-cli pairing [action] [--verbose]
+
+  Actions (default: show):
+    show       Show the current pairing code or PIN (JSON)
+    generate   Generate a pairing code
+    revoke     Revoke the pairing code
+    watch      Stream pairing events as JSON Lines; press Ctrl+C to stop
+
+  Start the background service first: removent-cli daemon start
+
+help.ping: |
   Usage:
+    removent-cli ping <address|device-name|short-fingerprint> [options]
     removent-cli ping --relay-profile /path/to/controller.toml [options]
-    removent-cli identity
-    removent-cli ping <removent://host:port|name|short-fingerprint> [options]
-    removent-cli daemon <status|start|ensure|stop|restart|enable|disable|permissions|login-on|login-off|service-status>
 
   Options:
-    --pin <code>       Pairing PIN (read from stdin when pairing is required and omitted)
-    --count <n>        Number of pings (default 4)
-    --timeout <secs>   mDNS discovery timeout (default 10)
+    --pin <code>       Pairing PIN (read from stdin when needed)
+    --count <n>        Number of pings, greater than 0 (default 4)
+    --timeout <secs>   Discovery timeout, greater than 0 (default 10)
     --name <device>    Local display name (default RemoventCLI)
+    -v, --verbose      Show diagnostic logs and full error causes
 
-daemon.unknown_action: "Unknown daemon action: %{action} (supported: status|start|ensure|stop|restart|enable|disable|permissions|login-on|login-off|service-status)"
-daemon.connect_failed: "Failed to connect to daemon (is removentd running?)"
-daemon.send_failed: "Failed to send request"
-daemon.wait_timeout: "Timed out waiting for daemon response"
-daemon.read_failed: "Failed to read response"
-daemon.disconnected: "Daemon disconnected without responding"
-daemon.serialize_failed: "Failed to serialize response"
+  Ping supports pairing-code and no-authentication hosts only.
+  Use the desktop or mobile controller for system-account, password or OTP hosts.
+
+  Example: removent-cli ping removent://192.168.1.10:48688 --count 4
+
+help.identity: |
+  Usage: removent-cli identity [--verbose]
+  Print this device's certificate fingerprint and public key as JSON.
+  Creates a local identity if one does not exist.
+
+daemon.unknown_action: "Unknown background service action: %{action}"
+daemon.connect_failed: "Cannot connect to the Removent background service."
+daemon.unavailable: "The Removent background service is currently unavailable."
+daemon.start_hint: "Start the background service: %{command}"
+daemon.start_foreground_hint: "Start removentd in another terminal, then retry this command."
+daemon.inspect_hint: "Check the background service status: %{command}"
+daemon.permission_denied: "Permission denied when connecting to the Removent background service."
+daemon.permission_hint: "Retry as the user running Removent and check data directory permissions: %{path}"
+daemon.send_failed: "Cannot send a request to the Removent background service."
+daemon.wait_timeout: "The Removent background service did not respond within 5 seconds."
+daemon.read_failed: "Cannot read the Removent background service response."
+daemon.disconnected: "The Removent background service disconnected."
+daemon.serialize_failed: "Cannot display the background service response."
+daemon.request_failed: "The Removent background service could not complete the request."
+daemon.service_failed: "Could not complete background service action: %{action}."
+daemon.service_hint: "Check the service log at %{path} and Login Items & Extensions in System Settings."
+pairing.unknown_action: "Unknown pairing action: %{action}"
+
+error.message: "Error: %{message}"
+error.help_hint: "See usage: %{command}"
+error.verbose_hint: "For diagnostic details, add --verbose to the original command."
+error.cause: "  Cause: %{message}"
+args.target_or_profile: "Provide a target address, device name or short fingerprint, or use --relay-profile <file>, but not both."
+args.invalid_scheme: "Use removent://host:port for the target address."
 
 args.missing_value: "%{arg} requires a value"
 args.count_invalid: "--count requires a positive integer"
-args.timeout_invalid: "--timeout requires a number of seconds"
+args.timeout_invalid: "--timeout requires a positive integer number of seconds"
 args.unrecognized: "Unrecognized argument: %{arg}"
 args.missing_target: "Missing target (address, device name, or short fingerprint)"
 
@@ -80,3 +158,50 @@ error.expected_negotiate_offer: "Expected NegotiateOffer"
 error.send_negotiate_reply: "Failed to send NegotiateReply: %{err}"
 error.send_ping: "Failed to send Ping: %{err}"
 error.unknown_subcommand: "Unknown subcommand: %{cmd}"
+
+help.settings: |
+  Usage: removent-cli settings <action> [--json] [--verbose]
+
+  Actions:
+    list                 List keys, current values, accepted values and effects
+    get [key]            Read one setting or all settings
+    set <key> <value>    Update and save a setting
+    set <key> --stdin    Read a value from stdin (required for passwords and OTP secrets)
+    reset <key>          Restore one setting to its default
+    path                 Show the current settings file path
+
+  Examples:
+    removent-cli settings set device_name "Office Mac"
+    removent-cli settings set discovery.vnc true
+    removent-cli settings set video_quality high-quality
+    removent-cli settings get --json
+    removent-cli settings set authentication.password --stdin < password.txt
+
+  An online daemon reloads host settings, which may interrupt active sessions.
+  Desktop preferences such as appearance, discovery and updates apply on reopening.
+  Settings can be saved while offline. Passwords and OTP secrets are always hidden.
+
+settings.invalid_arguments: "Settings arguments are incomplete or contain extra arguments."
+settings.unknown: "Unknown setting: %{key}"
+settings.invalid: "Invalid value for %{key}; accepted values: %{expected}"
+settings.secret_stdin: "Use settings set %{key} --stdin to provide this sensitive value."
+settings.stdin_pipe: "Pipe a value or redirect a file to --stdin, for example < password.txt."
+settings.stdin_invalid: "Standard input must be UTF-8 text no larger than 4096 bytes."
+settings.save_failed: "Could not save settings; this operation did not replace the original configuration."
+settings.load_failed: "Could not read settings."
+settings.file_hint: "Check the configuration and file permissions; show its path with: %{command}"
+settings.secret_set: "[configured, hidden]"
+settings.secret_empty: "[not configured]"
+settings.host_apply: "daemon reload, may interrupt active sessions"
+settings.desktop_apply: "Reopen the desktop app for this change to take effect."
+settings.saved: "Saved %{key} = %{value}"
+settings.offline: "The background service is offline; settings will apply on its next start."
+settings.reload_requested: "The daemon accepted the reload request; host listeners will restart if needed."
+settings.reload_failed: "Settings were saved, but the daemon did not confirm the reload."
+settings.retry_reload: "Check the service status, then retry: %{command}"
+
+settings.text_limit: "text, at most %{max} bytes"
+settings.expected_name: "a non-empty device name"
+settings.expected_endpoint: "an HTTPS URL without credentials or a fragment, or empty text"
+settings.expected_otp: "a valid Base32 OTP secret"
+settings.expected_auth: "a configured password for password mode, or a valid OTP secret for OTP mode"

@@ -17,7 +17,7 @@ use removent_client::saved::SavedConnection;
 use rust_i18n::t;
 use std::time::{Duration, Instant};
 
-use super::widgets::{Button, form_input, icon_16, section_header};
+use super::widgets::{Button, form_input, icon, icon_16};
 
 gpui::actions!(connection, [ConnectionTab, ConnectionTabPrev]);
 
@@ -29,7 +29,7 @@ pub enum ConnectionDialogEvent {
     Close,
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Step {
     #[default]
     Protocol,

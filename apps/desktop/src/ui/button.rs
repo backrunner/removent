@@ -248,6 +248,7 @@ impl RenderOnce for Button {
             content.push(
                 div()
                     .min_w_0()
+                    .when(align_start, |d| d.flex_1())
                     .text_color(foreground)
                     .when(!self.disabled, |d| d.hover(|s| s.text_color(hover_fg)))
                     .children(self.children)

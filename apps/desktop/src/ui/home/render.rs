@@ -109,24 +109,36 @@ impl Render for HomeView {
                             .items_center()
                             .gap_3()
                             .px_5()
-                            .py_3()
+                            .py_2()
                             .flex_shrink_0()
                             .bg(colors.accent.opacity(0.08))
                             .border_b_1()
                             .border_color(colors.border)
-                            .child(Spinner::new().icon(icon_16("loader-circle")).small())
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .child(Spinner::new().icon(icon_16("loader-circle")).small()),
+                            )
                             .child(
                                 div()
                                     .flex_1()
                                     .min_w_0()
                                     .flex()
-                                    .flex_col()
-                                    .gap_1()
-                                    .child(div().text_size(px(13.)).child(
-                                        crate::ui::connection::stage_label(self.connection_stage),
-                                    ))
+                                    .items_center()
+                                    .gap_2()
+                                    .overflow_hidden()
                                     .child(
                                         div()
+                                            .flex_shrink_0()
+                                            .text_size(px(13.))
+                                            .whitespace_nowrap()
+                                            .child(crate::ui::connection::stage_label(
+                                                self.connection_stage,
+                                            )),
+                                    )
+                                    .child(
+                                        div()
+                                            .min_w_0()
                                             .text_size(px(12.))
                                             .text_color(colors.muted_foreground)
                                             .truncate()
@@ -135,7 +147,9 @@ impl Render for HomeView {
                             )
                             .child(
                                 Button::new("cancel-pending-session")
+                                    .small()
                                     .outline()
+                                    .flex_shrink_0()
                                     .label(t!("connection.cancel_attempt").to_string())
                                     .on_click(
                                         cx.listener(|this, _, _, cx| this.cancel_connection(cx)),

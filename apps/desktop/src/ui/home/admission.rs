@@ -23,12 +23,27 @@ impl HomeView {
     /// Clear the PIN input: every path that closes the Entry dialog must leave the field
     /// empty so the next Entry dialog does not show the previous 6 digits.
     pub(super) fn clear_pin_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.auth_username_input
+            .update(cx, |s, cx| s.set_value("", window, cx));
         self.pin_input
             .update(cx, |s, cx| s.set_value("", window, cx));
     }
 
+    pub(super) fn authentication_input(&self, cx: &gpui::App) -> String {
+        let password = self.pin_input.read(cx).value().to_string();
+        if self.auth_mode == removent_core::AuthenticationMode::SystemAccount {
+            removent_proto::SystemCredentials {
+                username: self.auth_username_input.read(cx).value().trim().to_string(),
+                password,
+            }
+            .encode()
+        } else {
+            password
+        }
+    }
+
     pub(super) fn submit_pin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let pin = self.pin_input.read(cx).value().to_string();
+        let pin = self.authentication_input(cx);
         if !self.auth_mode.valid_input(&pin) {
             return;
         }

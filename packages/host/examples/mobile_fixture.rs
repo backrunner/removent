@@ -217,7 +217,11 @@ async fn main() -> anyhow::Result<()> {
                     mode: removent_core::AuthenticationMode::None,
                     ..Default::default()
                 },
-                _ => Default::default(),
+                Ok("system_account") => Default::default(),
+                _ => removent_core::AuthenticationSettings {
+                    mode: removent_core::AuthenticationMode::PairingCode,
+                    ..Default::default()
+                },
             },
             auth_paths: Some(paths.clone()),
             device_name: "Mobile Test Computer".into(),

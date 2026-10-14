@@ -64,6 +64,7 @@ pub(super) async fn run_client(
     let audio_enabled = audio_player.is_some();
 
     let mk_cfg = || removent_client::ClientConfig {
+        host_identity_verified: expected_host.is_some() || trust.needs_confirmation,
         pairing_code: pairing_code.clone(),
         device_name: settings.device_name.clone(),
         caps: Caps {

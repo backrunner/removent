@@ -34,6 +34,24 @@ release-verified, staged installer using macOS system tools.
 Verified DMG: `Removent-0.1.4-macos-arm64.dmg`, SHA-256
 `98587bb3f1ea9f43b0836eb07964fb922dcf9f2d9680f6170518bcf4053f0d7d`.
 
+## Disk image command migration
+
+The installer now probes `diskutil image attach --help` and uses
+`diskutil image attach --mountOptions nobrowse --readOnly --mountPoint` with
+`diskutil eject` when supported. Systems without the image subcommand keep the
+paired `hdiutil attach`/`detach` path. A failed attach does not trigger a retry
+with the legacy tool; a failed eject retains the mount directory and reports
+manual recovery rather than deleting files below the mount.
+
+- Shell syntax and ShellCheck passed.
+- All 24 macOS installer regression tests passed. Coverage includes modern
+  command arguments and cleanup, the legacy capability fallback, attach failure
+  and eject failure.
+- On macOS 27.0.1, `bash scripts/install.sh --version v0.1.5 --verify-only`
+  downloaded the published DMG, passed checksum, version, component signatures
+  and Gatekeeper checks, and ejected it successfully with no deprecation warnings.
+  This verification did not replace the installed application or start a service.
+
 ## Limits
 
 The live test used the existing Mac's graphical login and disabled hosting. It

@@ -34,11 +34,25 @@ elif name == 'curl':
         src = root / url.rsplit('/', 1)[1]
         if not src.exists(): sys.exit(22)
         shutil.copyfile(src, args[args.index('--output')+1])
-elif name == 'hdiutil':
-    record('mount ' + args[0])
-    if args[0] == 'attach':
-        dst = pathlib.Path(args[args.index('-mountpoint')+1]); dst.mkdir()
+elif name in ('diskutil', 'hdiutil'):
+    if name == 'diskutil' and args == ['image', 'attach', '--help']:
+        sys.exit(1 if flag('LEGACY_DISKUTIL') else 0)
+    record(name + ' ' + ' '.join(args))
+    attaching = args[0] == 'attach' or args[:2] == ['image', 'attach']
+    record('mount ' + ('attach' if attaching else 'detach'))
+    if attaching:
+        if flag('BAD_ATTACH'): sys.exit(1)
+        if name == 'diskutil':
+            assert args[:6] == ['image', 'attach', '--mountOptions', 'nobrowse', '--readOnly', '--mountPoint']
+            option = '--mountPoint'
+        else:
+            assert args[:4] == ['attach', '-nobrowse', '-readonly', '-mountpoint']
+            option = '-mountpoint'
+        dst = pathlib.Path(args[args.index(option)+1]); dst.mkdir()
         shutil.copytree(root / 'source.app', dst / 'Removent.app', symlinks=True)
+    else:
+        assert args[0] == ('eject' if name == 'diskutil' else 'detach')
+        if flag('BAD_EJECT'): sys.exit(1)
 elif name == 'plutil':
     try:
         raw = pathlib.Path(args[-1]).read_bytes()
@@ -108,7 +122,7 @@ class InstallerTests(unittest.TestCase):
         self.env = dict(os.environ, PATH=f"{self.mock}:{os.environ['PATH']}",
                         INSTALL_TEST_ROOT=str(self.root), TMPDIR=str(self.root))
         for key in ('REMOVENT_VERSION', 'REMOVENT_REPO', 'REMOVENT_DATA_DIR'): self.env.pop(key, None)
-        for name in ('uname', 'sw_vers', 'id', 'curl', 'hdiutil', 'plutil', 'codesign', 'spctl', 'ditto', 'ps', 'launchctl', 'mv'):
+        for name in ('uname', 'sw_vers', 'id', 'curl', 'diskutil', 'hdiutil', 'plutil', 'codesign', 'spctl', 'ditto', 'ps', 'launchctl', 'mv'):
             file = self.mock / name; file.write_text(MOCK); file.chmod(0o755)
         self.make_app(self.root / 'source.app', new=True)
         (self.root / ASSET).write_bytes(b'release disk image')
@@ -160,6 +174,42 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(self.destination.exists())
         self.assertEqual(self.calls().count('signature '), 6)
         self.assert_clean()
+
+    def test_diskutil_mount_and_eject_avoid_deprecated_commands(self):
+        result = self.run_install('--verify-only')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('diskutil image attach --mountOptions nobrowse --readOnly --mountPoint ', self.calls())
+        self.assertIn('diskutil eject ', self.calls())
+        self.assertNotIn('hdiutil ', self.calls())
+        self.assert_clean()
+
+    def test_legacy_diskutil_uses_hdiutil_for_mount_and_cleanup(self):
+        self.env['INSTALL_TEST_LEGACY_DISKUTIL'] = '1'
+        result = self.run_install('--verify-only')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('hdiutil attach -nobrowse -readonly -mountpoint ', self.calls())
+        self.assertIn('hdiutil detach ', self.calls())
+        self.assertNotIn('diskutil eject ', self.calls())
+        self.assert_clean()
+
+    def test_failed_attach_does_not_retry_or_replace_existing_app(self):
+        self.make_app(self.destination)
+        self.env['INSTALL_TEST_BAD_ATTACH'] = '1'
+        result = self.run_install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue((self.destination / 'Contents/MacOS/old').exists())
+        self.assertNotIn('hdiutil ', self.calls())
+        self.assertNotIn('mount detach', self.calls())
+        self.assertFalse(any(self.root.glob('removent-install.*')))
+
+    def test_failed_eject_retains_mount_directory_and_reports_failure(self):
+        self.env['INSTALL_TEST_BAD_EJECT'] = '1'
+        result = self.run_install('--verify-only')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Disk image remains mounted', result.stderr)
+        retained = list(self.root.glob('removent-install.*/mnt/Removent.app'))
+        self.assertEqual(len(retained), 1)
+        self.assertFalse(self.destination.exists())
 
     def test_upgrade_refreshes_running_service_and_preserves_login(self):
         self.make_app(self.destination)

@@ -13,6 +13,7 @@ pub mod saved;
 pub mod session;
 mod video_feedback;
 pub mod vnc;
+pub mod wake_on_lan;
 
 pub use jitter::{AudioPacketIn, JitterBuffer, PopOutcome};
 pub use session::{

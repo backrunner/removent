@@ -5,6 +5,8 @@ use crate::paths::DataPaths;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+pub mod control;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -146,6 +148,23 @@ fn default_device_name() -> String {
 }
 
 impl Settings {
+    /// Non-mutating read for management tools. Malformed files are never replaced,
+    /// and parse errors never include source lines that might contain credentials.
+    pub fn load_strict(paths: &DataPaths) -> Result<Self> {
+        let file = paths.settings_file();
+        let mut settings = match std::fs::read_to_string(&file) {
+            Ok(text) => toml::from_str::<Self>(&text).map_err(|_| {
+                crate::CoreError::Serialization(
+                    "Invalid settings.toml; repair the file before changing settings".into(),
+                )
+            })?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Self::default(),
+            Err(error) => return Err(error.into()),
+        };
+        settings.loaded_from = Some(file);
+        Ok(settings)
+    }
+
     /// Read-modify-write transaction shared by the daemon and settings UI.
     pub fn update(paths: &DataPaths, edit: impl FnOnce(&mut Self)) -> Result<Self> {
         let _lock = crate::DataDirLock::acquire_blocking(&paths.root.join(".settings.lock"))?;

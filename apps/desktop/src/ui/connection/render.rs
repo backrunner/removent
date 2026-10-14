@@ -13,39 +13,79 @@ impl Render for ConnectionDialog {
                         .text_color(colors.muted_foreground)
                         .child(t!("connection.subtitle").to_string()),
                 );
+                body = body.gap(px(12.));
                 for (i, protocol) in ConnectionProtocol::ALL.into_iter().enumerate() {
-                    let (name, description) = match protocol {
-                        ConnectionProtocol::Removent => ("wifi", "connection.removent_hint"),
-                        ConnectionProtocol::Vnc => ("monitor", "connection.vnc_hint"),
-                        ConnectionProtocol::Rdp => ("copy", "connection.rdp_hint"),
+                    let description = match protocol {
+                        ConnectionProtocol::Removent => "connection.removent_hint",
+                        ConnectionProtocol::Vnc => "connection.vnc_hint",
+                        ConnectionProtocol::Rdp => "connection.rdp_hint",
                     };
                     body = body.child(
                         Button::new(("connection-protocol", i))
-                            .outline()
+                            .debug_selector(move || format!("protocol-row-{i}"))
                             .w_full()
-                            .h(px(84.))
-                            .rounded(px(14.))
+                            .h_auto()
+                            .min_h(px(72.))
+                            .px(px(16.))
+                            .py(px(12.))
+                            .justify_start()
+                            .rounded(px(10.))
                             .surface()
                             .child(
                                 div()
                                     .flex()
                                     .items_center()
-                                    .gap_3()
-                                    .w(px(388.))
-                                    .max_w_full()
-                                    .px_2()
+                                    .gap(px(12.))
+                                    .w_full()
+                                    .min_w_0()
                                     .child(
-                                        section_header(
-                                            name,
-                                            protocol.label().into(),
-                                            t!(description).to_string(),
-                                            cx,
-                                        )
-                                        .flex_1(),
+                                        div()
+                                            .debug_selector(move || format!("protocol-icon-{i}"))
+                                            .size(px(24.))
+                                            .flex_shrink_0()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(
+                                                icon("monitor")
+                                                    .size(px(20.))
+                                                    .text_color(colors.muted_foreground),
+                                            ),
                                     )
                                     .child(
-                                        icon_16("chevron-right")
-                                            .text_color(colors.muted_foreground),
+                                        div()
+                                            .debug_selector(move || format!("protocol-labels-{i}"))
+                                            .flex_1()
+                                            .min_w_0()
+                                            .flex()
+                                            .flex_col()
+                                            .whitespace_normal()
+                                            .gap(px(4.))
+                                            .child(
+                                                div()
+                                                    .text_size(px(14.))
+                                                    .line_height(px(20.))
+                                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                                    .child(protocol.label().to_string()),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_size(px(12.))
+                                                    .line_height(px(18.))
+                                                    .text_color(colors.muted_foreground)
+                                                    .child(t!(description).to_string()),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .debug_selector(move || format!("protocol-chevron-{i}"))
+                                            .size(px(16.))
+                                            .flex_shrink_0()
+                                            .child(
+                                                icon("chevron-right")
+                                                    .size(px(16.))
+                                                    .text_color(colors.muted_foreground),
+                                            ),
                                     ),
                             )
                             .on_click(cx.listener(move |this, _, window, cx| {

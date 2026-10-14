@@ -16,7 +16,10 @@ async fn cancelling_connect_aborts_pairing_while_pin_dialog_is_still_open() {
         let conn = RvpConnection::new(server.accept().await.unwrap().await.unwrap());
         let mut peers = PeersStore::in_memory();
         let cfg = HostConfig {
-            authentication: Default::default(),
+            authentication: removent_core::AuthenticationSettings {
+                mode: removent_core::AuthenticationMode::PairingCode,
+                ..Default::default()
+            },
             auth_paths: None,
             audio_available: true,
             preapproved_only: false,
@@ -58,6 +61,7 @@ async fn cancelling_connect_aborts_pairing_while_pin_dialog_is_still_open() {
             addr,
             &client_id,
             ClientConfig {
+                host_identity_verified: false,
                 pairing_code: None,
                 device_name: "CancelClient".into(),
                 caps: Caps::all(),

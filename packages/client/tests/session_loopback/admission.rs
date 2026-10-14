@@ -34,7 +34,10 @@ async fn login_window_admission_uses_available_caps_and_never_prompts() {
                 })
                 .unwrap();
             let cfg = HostConfig {
-                authentication: Default::default(),
+                authentication: removent_core::AuthenticationSettings {
+                    mode: removent_core::AuthenticationMode::PairingCode,
+                    ..Default::default()
+                },
                 auth_paths: None,
                 audio_available: false,
                 preapproved_only: true,
@@ -123,6 +126,7 @@ async fn login_window_admission_uses_available_caps_and_never_prompts() {
                 addr,
                 &client_id,
                 ClientConfig {
+                    host_identity_verified: false,
                     pairing_code: None,
                     device_name: "LoginController".into(),
                     caps: Caps {
@@ -151,6 +155,7 @@ async fn login_window_admission_uses_available_caps_and_never_prompts() {
                     addr,
                     &client_id,
                     ClientConfig {
+                        host_identity_verified: false,
                         pairing_code: None,
                         device_name: "LoginController".into(),
                         caps: Caps::all(),

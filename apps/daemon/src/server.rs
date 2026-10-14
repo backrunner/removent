@@ -1,6 +1,7 @@
 //! UDS IPC service: binds daemon_socket(), per-connection request/response plus
 //! event-stream push.
 
+#[cfg(test)]
 use removent_core::Settings;
 use removent_core::ipc::{IpcRequest, IpcResponse, read_msg, write_msg};
 use rust_i18n::t;
@@ -177,24 +178,8 @@ fn handle_request(state: &Arc<DaemonState>, req: IpcRequest) -> IpcResponse {
                 message: e.to_string(),
             },
         },
-        IpcRequest::ReloadSettings => match Settings::load(&state.paths) {
-            Ok(mut s) => {
-                if state.login_window {
-                    crate::login_window::restrict(&mut s);
-                }
-                let mut current = state.settings.lock().unwrap();
-                let restart = current.authentication != s.authentication
-                    || current.admission != s.admission
-                    || current.paired_only != s.paired_only;
-                *current = s;
-                if restart {
-                    let _ = removent_core::pairing_invitation::Invitation::revoke(&state.paths);
-                    state.clear_pin();
-                    removent_host::session::clear_resume_registry();
-                    state.enabled_watch.send_modify(|_| {});
-                }
-                IpcResponse::Ok
-            }
+        IpcRequest::ReloadSettings => match state.reload_settings() {
+            Ok(()) => IpcResponse::Ok,
             Err(e) => IpcResponse::Error {
                 message: t!("error.reload_settings", err = format!("{e:#}")).to_string(),
             },
@@ -226,6 +211,7 @@ fn handle_request(state: &Arc<DaemonState>, req: IpcRequest) -> IpcResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use removent_core::ipc::IpcEvent;
     #[test]
     fn authentication_reload_notifies_runner_without_changing_host_switch() {
         let dir = tempfile::tempdir().unwrap();
@@ -254,7 +240,79 @@ mod tests {
             state.settings.lock().unwrap().authentication.mode,
             removent_core::AuthenticationMode::None
         );
-        Settings::update(&paths, |s| s.device_name = "New name".into()).unwrap();
+        Settings::update(&paths, |s| s.theme = removent_core::Theme::Dark).unwrap();
+        assert!(matches!(
+            handle_request(&state, IpcRequest::ReloadSettings),
+            IpcResponse::Ok
+        ));
+        assert!(!changes.has_changed().unwrap());
+    }
+
+    #[test]
+    fn cli_reload_reconciles_switch_ports_and_names_but_rejects_corrupt_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = removent_core::DataPaths {
+            root: dir.path().into(),
+        };
+        let settings = Settings {
+            host_enabled: false,
+            ..Default::default()
+        };
+        settings.save(&paths).unwrap();
+        let state = Arc::new(DaemonState::new(paths.clone(), settings, "test".into()));
+        let mut changes = state.enabled_watch.subscribe();
+        let mut events = state.events.subscribe();
+        for (key, value) in [
+            ("host_enabled", "true"),
+            ("host_port", "49888"),
+            ("vnc_port", "5988"),
+            ("device_name", "Office Mac"),
+        ] {
+            removent_core::settings::control::edit(&paths, key, Some(value)).unwrap();
+            assert!(matches!(
+                handle_request(&state, IpcRequest::ReloadSettings),
+                IpcResponse::Ok
+            ));
+            assert!(changes.has_changed().unwrap(), "{key}");
+            assert!(*changes.borrow_and_update());
+        }
+        assert!(state.enabled.load(Ordering::SeqCst));
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            IpcEvent::StateChanged { running: true }
+        ));
+        let current = state.settings.lock().unwrap().clone();
+        assert_eq!(current.host_port, 49888);
+        assert_eq!(current.vnc_port, 5988);
+        assert_eq!(current.device_name, "Office Mac");
+        std::fs::write(paths.settings_file(), "vnc_password = \"private-unclosed").unwrap();
+        let IpcResponse::Error { message } = handle_request(&state, IpcRequest::ReloadSettings)
+        else {
+            panic!("expected read error")
+        };
+        assert!(!message.contains("private-unclosed"));
+        assert_eq!(*state.settings.lock().unwrap(), current);
+        assert!(!changes.has_changed().unwrap());
+    }
+
+    #[test]
+    fn service_toggle_does_not_hide_a_concurrent_cli_host_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = removent_core::DataPaths {
+            root: dir.path().into(),
+        };
+        let settings = Settings {
+            host_enabled: false,
+            ..Default::default()
+        };
+        settings.save(&paths).unwrap();
+        let state = Arc::new(DaemonState::new(paths.clone(), settings, "test".into()));
+        let mut changes = state.enabled_watch.subscribe();
+        removent_core::settings::control::edit(&paths, "host_port", Some("49777")).unwrap();
+        state.set_enabled(false).unwrap();
+        assert!(changes.has_changed().unwrap());
+        assert!(!*changes.borrow_and_update());
+        assert_eq!(state.settings.lock().unwrap().host_port, 49777);
         assert!(matches!(
             handle_request(&state, IpcRequest::ReloadSettings),
             IpcResponse::Ok
@@ -273,6 +331,10 @@ mod invitation_tests {
             root: dir.path().into(),
         };
         let settings = Settings {
+            authentication: removent_core::AuthenticationSettings {
+                mode: removent_core::AuthenticationMode::PairingCode,
+                ..Default::default()
+            },
             host_enabled: true,
             admission: removent_core::AdmissionMode::TrustedAuto,
             ..Default::default()

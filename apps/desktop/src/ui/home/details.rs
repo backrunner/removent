@@ -578,16 +578,5 @@ impl HomeView {
                             }),
                     ),
             )
-            .when(entry.password_hint, |el| {
-                el.child(
-                    div()
-                        .p_4()
-                        .rounded(px(12.))
-                        .bg(colors.accent.opacity(0.08))
-                        .text_size(px(12.))
-                        .text_color(colors.muted_foreground)
-                        .child(t!("saved.credentials_hint").to_string()),
-                )
-            })
     }
 }

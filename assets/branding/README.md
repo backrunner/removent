@@ -13,11 +13,16 @@ Sources and deliverables:
 - `AppIcon.icns`: 16, 32, 128, 256 and 512 point slots at 1× and 2×.
 - `AppIcon.appiconset/`: the same ten macOS slots with Xcode Contents.json.
 - `AppIcon-AppStore-1024.png`: opaque square RGB master without a baked outer mask.
+- `apps/mobile/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png`: opaque iOS
+  icon using the same vector mark, enlarged 18% around the canvas center for less inset.
 - `AppIcon-preview.png`: appearance on light/dark surfaces and at smaller sizes.
 
 `python3 scripts/release/branding.py` reproducibly renders SVG layers at 2048px, adds soft
 shadows, then downsamples to delivery sizes. CairoSVG, Pillow and Apple's iconutil
 are required. No image generation API was used.
+
+Run `python3 scripts/release/branding.py --ios-only` to regenerate just the iOS
+icon without changing the macOS or generic App Store assets.
 
 Checked against Apple's Xcode guidance: macOS requires assets for each size.
 The asset catalog is validated with `actool --platform macosx`; ICNS is decoded

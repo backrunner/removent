@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Export the editable brand sources to Retina PNG, App Store PNG and ICNS."""
+import argparse
 import copy
 import io
 import json
@@ -15,6 +16,36 @@ BRAND = ROOT / 'assets/branding'
 # Render the editable vectors at 2x, then composite soft material shadows.
 # Separate layers keep shadows reproducible without SVG filter support in Cairo.
 source = ET.fromstring((BRAND / 'AppIcon.svg').read_text())
+
+def store_icon(symbol_scale=1):
+    """Render a full-bleed square, scaling only the mark around its center."""
+    root = copy.deepcopy(source)
+    for child in list(root):
+        if child.get('id') == 'tile':
+            root.remove(child)
+        elif child.get('id') == 'symbol' and symbol_scale != 1:
+            child.set('transform',
+                f'translate(512 512) scale({symbol_scale}) translate(-512 -512) '
+                + child.get('transform', ''))
+    ns = '{http://www.w3.org/2000/svg}'
+    root.insert(1, ET.Element(ns + 'rect', {
+        'width': '1024', 'height': '1024', 'fill': 'url(#shell)'}))
+    rendered = Image.open(io.BytesIO(cairosvg.svg2png(bytestring=ET.tostring(root),
+        output_width=2048, output_height=2048))).convert('RGB')
+    return rendered.resize((1024, 1024), Image.Resampling.LANCZOS)
+
+def export_ios_icon():
+    # iOS fills the entire icon canvas, so the mark needs less inset than macOS.
+    destination = ROOT / 'apps/mobile/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png'
+    store_icon(symbol_scale=1.18).save(destination)
+    print('iOS app icon exported to', destination)
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--ios-only', action='store_true',
+    help='Export only the iOS app icon, leaving desktop and store assets untouched.')
+if parser.parse_args().ios_only:
+    export_ios_icon()
+    raise SystemExit(0)
 
 def layer(identifier):
     root = copy.deepcopy(source)
@@ -40,15 +71,8 @@ master = master.resize((1024, 1024), Image.Resampling.LANCZOS)
 master.save(BRAND / 'AppIcon.png')
 # A separate opaque, square store master has no baked-in outer rounded mask.
 # The macOS ICNS / asset catalog retain the standard optical inset and alpha.
-store_root = copy.deepcopy(source)
-for child in list(store_root):
-    if child.get('id') == 'tile':
-        store_root.remove(child)
-ns = '{http://www.w3.org/2000/svg}'
-store_root.insert(1, ET.Element(ns + 'rect', {'width': '1024', 'height': '1024', 'fill': 'url(#shell)'}))
-store = Image.open(io.BytesIO(cairosvg.svg2png(bytestring=ET.tostring(store_root),
-    output_width=2048, output_height=2048))).convert('RGB')
-store.resize((1024, 1024), Image.Resampling.LANCZOS).save(BRAND / 'AppIcon-AppStore-1024.png')
+store_icon().save(BRAND / 'AppIcon-AppStore-1024.png')
+export_ios_icon()
 assetset = BRAND / 'AppIcon.appiconset'
 assetset.mkdir(exist_ok=True)
 images = []

@@ -183,15 +183,6 @@ pub(super) fn peer_verifying_key(conn: &RvpConnection) -> Option<ed25519_dalek::
     ed25519_dalek::VerifyingKey::from_bytes(&key).ok()
 }
 
-pub(super) fn read_pin_stdin() -> String {
-    use std::io::Write;
-    eprint!("{}", t!("pin.prompt"));
-    let _ = std::io::stderr().flush();
-    let mut line = String::new();
-    let _ = std::io::stdin().read_line(&mut line);
-    line.trim().to_string()
-}
-
 /// Concurrent pairing task: for unknown peers the host waits inline on this stream
 /// after the handshake (protocol.md §4.3). If the host already trusts us it never
 /// accepts the stream, so the task simply times out and exits quietly.
@@ -200,6 +191,7 @@ pub(super) fn spawn_pairing(
     identity: DeviceIdentity,
     fp_peer_full: String,
     pin: Option<String>,
+    allow_prompt: bool,
 ) -> tokio::task::JoinHandle<()> {
     let fp_self = identity.fingerprint_hex();
     tokio::spawn(async move {
@@ -227,9 +219,8 @@ pub(super) fn spawn_pairing(
 
             let pin = match pin {
                 Some(p) => p,
-                None => tokio::task::spawn_blocking(read_pin_stdin)
-                    .await
-                    .unwrap_or_default(),
+                None if allow_prompt => crate::prompt::pin().await?,
+                None => bail!(t!("terminal.pin_required")),
             };
             if pin.is_empty() {
                 bail!(t!("pairing.no_pin"));
@@ -306,7 +297,27 @@ pub(super) async fn expect_control(
     }
 }
 
-pub(super) async fn cmd_ping(args: PingArgs) -> anyhow::Result<()> {
+pub(super) async fn cmd_ping(
+    args: PingArgs,
+    format: crate::terminal::Format,
+) -> anyhow::Result<()> {
+    tokio::select! {
+        result = ping_inner(args, format) => result,
+        result = tokio::signal::ctrl_c() => {
+            result?;
+            Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "cancelled").into())
+        }
+    }
+}
+
+struct PairingTask(tokio::task::JoinHandle<()>);
+impl Drop for PairingTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+async fn ping_inner(args: PingArgs, format: crate::terminal::Format) -> anyhow::Result<()> {
     let paths = DataPaths::resolve();
     let id = identity::load_or_create(&paths, &args.name).context(t!("error.load_identity"))?;
 
@@ -341,7 +352,9 @@ pub(super) async fn cmd_ping(args: PingArgs) -> anyhow::Result<()> {
     )
     .map_err(|e| anyhow::anyhow!(t!("error.create_endpoint", err = e.to_string())))?;
 
-    println!("{}", t!("session.connecting", addr = addr));
+    if !format.json(false) {
+        crate::terminal::note(&t!("session.connecting", addr = addr));
+    }
     // Brief retries while the server is not ready yet (same as the client engine).
     let conn = {
         let mut attempt = 0u32;
@@ -386,7 +399,13 @@ pub(super) async fn cmd_ping(args: PingArgs) -> anyhow::Result<()> {
 
     // Same as the client engine: start pairing concurrently after the handshake,
     // then send SessionRequest.
-    let pairing_task = spawn_pairing(conn.clone(), id.clone(), peer_fp, args.pin.clone());
+    let pairing_task = PairingTask(spawn_pairing(
+        conn.clone(),
+        id.clone(),
+        peer_fp,
+        args.pin.clone(),
+        !format.json(false),
+    ));
 
     sink.send(ControlMsg::SessionRequest { caps: Caps::all() })
         .await
@@ -418,19 +437,18 @@ pub(super) async fn cmd_ping(args: PingArgs) -> anyhow::Result<()> {
     .map_err(|e| anyhow::anyhow!(t!("error.send_negotiate_reply", err = e.to_string())))?;
     let _final = *expect_control(&mut source, &t!("control.what.final_negotiate_reply")).await?;
 
-    pairing_task.abort();
+    drop(pairing_task);
     spawn_media_drain(conn.clone());
 
-    println!(
-        "{}",
-        t!(
+    if !format.json(false) {
+        crate::terminal::note(&t!(
             "session.ready",
             codec = format!("{:?}", n.video.codec),
             fps = n.video.max_fps,
             rate = n.audio.sample_rate,
             count = args.count
-        )
-    );
+        ));
+    }
 
     let mut rtts = Vec::with_capacity(args.count as usize);
     for i in 0..args.count {
@@ -449,31 +467,55 @@ pub(super) async fn cmd_ping(args: PingArgs) -> anyhow::Result<()> {
         }
         let rtt = sent.elapsed();
         rtts.push(rtt);
-        println!(
-            "{}",
-            t!(
+        if !format.json(false) {
+            crate::terminal::note(&t!(
                 "ping.line",
                 n = i + 1,
                 ms = format!("{:.2}", rtt.as_secs_f64() * 1_000.0)
-            )
-        );
+            ));
+        }
     }
 
     rtts.sort();
     let min = rtts.first().copied().unwrap_or_default();
     let max = rtts.last().copied().unwrap_or_default();
     let avg = rtts.iter().sum::<Duration>() / rtts.len().max(1) as u32;
-    println!(
-        "{}",
-        t!(
+    if format.json(false) {
+        println!(
+            "{}",
+            serde_json::json!({"samples": rtts.len(), "min_ms": min.as_secs_f64() * 1000.0, "avg_ms": avg.as_secs_f64() * 1000.0, "max_ms": max.as_secs_f64() * 1000.0, "transport_rtt_ms": conn.rtt_estimate()})
+        );
+    } else if crate::components::enabled() {
+        use crate::components::{Card, Tone};
+        let mut card = Card::new(
+            &t!("terminal.ping_stats"),
+            crate::components::dimensions().0,
+            Tone::Accent,
+        );
+        card.field(&t!("tui.samples"), &rtts.len().to_string(), Tone::Plain);
+        for (key, value) in [
+            ("tui.latency_min", min),
+            ("tui.latency_avg", avg),
+            ("tui.latency_max", max),
+        ] {
+            card.field(
+                &t!(key),
+                &format!("{:.2} ms", value.as_secs_f64() * 1000.0),
+                Tone::Accent,
+            );
+        }
+        crate::components::print_card(card);
+    } else {
+        crate::terminal::heading(&t!("terminal.ping_stats"));
+        crate::terminal::note(&t!(
             "ping.stats",
             samples = rtts.len(),
             min = format!("{:.2}", min.as_secs_f64() * 1_000.0),
             avg = format!("{:.2}", avg.as_secs_f64() * 1_000.0),
             max = format!("{:.2}", max.as_secs_f64() * 1_000.0),
             est = format!("{:.2}", conn.rtt_estimate())
-        )
-    );
+        ));
+    }
 
     let _ = sink
         .send(ControlMsg::SessionEnd {

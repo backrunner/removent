@@ -15,6 +15,44 @@ REMOVENT_CLI="/Applications/Removent.app/Contents/MacOS/removent-cli"
 源码构建使用 `target/debug/removent-cli`，默认数据目录为 `userdata`；`scripts/dev.sh` 则使用
 `userdata/dev`。管理自定义或开发实例时，应明确设置 `REMOVENT_DATA_DIR`。
 
+
+## 非全屏终端交互
+
+在终端直接运行 `removent-cli`，或执行 `removent-cli interactive`，即可打开键盘菜单。
+菜单保留终端历史，不进入全屏备用缓冲区。使用 ↑/↓ 选择、Enter 打开、Esc 或 `q` 返回。
+菜单涵盖服务管理、配对、设置、设备身份和连接测试。布尔和枚举设置提供选项，密码与密钥隐藏输入并要求重复确认。
+保存或重置设置需要确认；可能中断会话的服务操作会先说明影响。直接输入完整命令仍可用于自动化。
+
+服务、配对和身份命令在终端默认展示易读结果，重定向时保留现有 JSON 结构，兼容托盘和脚本。
+全局 `--json` 强制机器可读输出，`--human` 在管道中也输出易读文本，两者不能同时使用。
+设置与 ping 命令在管道中保留原有文本默认值；显式 `--json` 分别输出设置记录或单个 ping 统计对象。
+配对监听在 JSON 模式下逐行输出 JSON，文本模式下显示等待、配对完成和配对码撤销等事件。
+
+菜单要求标准输入、输出与错误输出均连接终端，`TERM=dumb` 禁用自动菜单。
+脚本无参数调用仍显示帮助。`NO_COLOR` 禁用结果样式，重定向输出不含光标控制序列。
+窄终端会换行显示完整值，中英文界面跟随已保存的语言设置。
+
+```sh
+"$REMOVENT_CLI" interactive
+"$REMOVENT_CLI" pairing show
+"$REMOVENT_CLI" daemon status --json
+"$REMOVENT_CLI" daemon status --human > status.txt
+"$REMOVENT_CLI" ping 192.168.1.10:48688 --pin 123456 --json
+```
+
+交互 ping 隐藏 PIN 输入，取消时恢复终端状态。脚本连接配对码模式的被控端时须传入 `--pin`。
+诊断日志仍写入本地轮转文件，显式 `--verbose` 才将其同时显示到标准错误输出。
+
+
+界面采用统一的终端组件：细线圆角结果卡片、独立状态标签、带搜索与当前值的选择器、
+输入表单、双选项确认框与延迟出现的进度指示器。输入文字可搜索操作、设置名称或 CLI 设置名；
+Esc 先清空搜索，再返回。枚举选择器默认聚焦当前值，并标明已保存的选项。
+输入框支持方向键、Home/End、退格、Delete 和 Ctrl+U；括号粘贴不会自动提交表单。
+无效输入保留草稿并显示校验信息，保存前用确认卡片展示新旧值。密码使用固定长度的隐藏输入标记。
+配色跟随终端调色板，`NO_COLOR` 保留布局和键盘选中标记。窗口过小时会提示扩大窗口，
+不会执行无法完整展示的操作；缩放时保留上一尺寸的快照，避免误清除终端历史。
+
+
 ## 查询与修改
 
 ```sh
@@ -118,7 +156,7 @@ CLI 会拒绝不完整的认证配置。`system_account` 使用被控 Mac 的系
 | `1` | 运行失败；设置可能已保存，但重新加载失败 |
 | `2` | 命令、设置名、值无效，或认证配置不完整 |
 
-服务、配对和身份命令保留现有 JSON 输出。诊断日志默认写入本地轮转文件，错误写到 stderr。
+服务、配对和身份命令在管道或显式 `--json` 时保留现有 JSON 输出，终端默认显示易读结果。诊断日志默认写入本地轮转文件，错误写到 stderr。
 加上 `--verbose` 可在终端同时查看日志和底层错误原因，`RUST_LOG` 控制日志级别。
 
 ## 服务与配对
@@ -137,7 +175,7 @@ CLI 会拒绝不完整的认证配置。`system_account` 使用被控 Mac 的系
 "$REMOVENT_CLI" daemon permissions     # 发起系统隐私权限请求
 "$REMOVENT_CLI" pairing generate  # 需使用配对码认证，并已开启共享
 "$REMOVENT_CLI" pairing show
-"$REMOVENT_CLI" pairing watch          # 每行一个 JSON，Ctrl+C 结束
+"$REMOVENT_CLI" pairing watch          # 实时事件，--json 输出 JSON Lines，Ctrl+C 结束
 "$REMOVENT_CLI" pairing revoke
 ```
 

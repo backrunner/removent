@@ -379,3 +379,72 @@ fn cloud_sync_retains_its_json_protocol_without_creating_logs() {
     assert!(!cli.root.path().join("logs").exists());
     assert!(!cli.root.path().join("identity").exists());
 }
+
+#[test]
+fn human_pairing_and_status_present_results_without_protocol_noise() {
+    for (language, title, ready) in [
+        ("En", "Pairing code", "Listener ready"),
+        ("ZhCn", "配对码", "监听已就绪"),
+    ] {
+        let cli = Cli::new(language);
+        let server = cli.serve(
+            "{\"type\":\"pairing_code\",\"code\":\"123456\",\"expires_at_unix\":null}\n",
+            Duration::ZERO,
+        );
+        let output = cli.run(&["pairing", "show", "--human"]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert!(output.stderr.is_empty());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains(title) && text.contains("123456"), "{text}");
+        assert!(!text.contains("expires_at_unix") && !text.contains("\x1b"));
+        server.join().unwrap();
+        std::fs::remove_file(cli.root.path().join("run/removentd.sock")).unwrap();
+        let server = cli.serve("{\"type\":\"status\",\"running\":true,\"host_ready\":false,\"device_name\":\"Untrusted\\u001b[2J\\nname\",\"sessions\":[],\"screen_recording_granted\":false}\n", Duration::ZERO);
+        let output = cli.run(&["--human", "daemon", "status"]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains(ready), "{text}");
+        assert!(text.contains("daemon permissions"));
+        assert!(!text.contains("\x1b") && !text.contains("\"type\""));
+        server.join().unwrap();
+    }
+}
+
+#[test]
+fn explicit_json_and_flag_looking_setting_values_are_unambiguous() {
+    let cli = Cli::new("En");
+    for value in ["--json", "--human", "--verbose"] {
+        let output = cli.run(&["--json", "settings", "set", "device_name", value]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["setting"]["value"], value);
+        assert!(output.stderr.is_empty());
+    }
+    let output = cli.run(&["daemon", "status", "--json", "--human"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let output = cli.run(&["interactive"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("requires a terminal"));
+}
+
+#[test]
+fn human_watch_presents_lifecycle_and_flushes_events() {
+    let cli = Cli::new("En");
+    let server = cli.serve("{\"type\":\"error\",\"message\":\"No active code\"}\n{\"type\":\"pairing_pin\",\"pin\":\"123456\"}\n{\"type\":\"pairing_done\",\"peer_name\":\"Phone\"}\n{\"type\":\"pairing_cleared\"}\n", Duration::ZERO);
+    let output = cli.run(&["pairing", "watch", "--human"]);
+    assert_eq!(output.status.code(), Some(1)); // server EOF remains an error
+    let text = String::from_utf8(output.stdout).unwrap();
+    for expected in [
+        "Ctrl+C",
+        "Waiting for a pairing code",
+        "123456",
+        "Pairing complete",
+        "Phone",
+        "Pairing code cleared",
+    ] {
+        assert!(text.contains(expected), "{text}");
+    }
+    assert!(!text.contains("\x1b"));
+    server.join().unwrap();
+}

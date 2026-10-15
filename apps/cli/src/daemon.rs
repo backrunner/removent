@@ -1,5 +1,6 @@
 use super::*;
 use crate::output::{Failure, command};
+use crate::terminal::{self, Format};
 
 type Reader = tokio::io::BufReader<tokio::net::unix::OwnedReadHalf>;
 type Writer = tokio::net::unix::OwnedWriteHalf;
@@ -77,8 +78,8 @@ fn check_response(value: &serde_json::Value) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// daemon management subcommand: send a request over UDS and print the response JSON.
-pub(super) async fn cmd_daemon(action: &str) -> anyhow::Result<()> {
+/// Send a request over UDS and present its result.
+pub(super) async fn cmd_daemon(action: &str, format: Format) -> anyhow::Result<()> {
     use removent_core::ipc::IpcRequest;
 
     let paths = DataPaths::resolve();
@@ -89,7 +90,7 @@ pub(super) async fn cmd_daemon(action: &str) -> anyhow::Result<()> {
     ) {
         let service_action = action.to_owned();
         // launchctl and the startup readiness wait are blocking operations.
-        let status = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+        let task = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
             // Global command aliases point into the bundle. Resolve them before
             // locating the sibling host, including platforms that retain argv[0].
             let exe = std::env::current_exe()?
@@ -106,22 +107,24 @@ pub(super) async fn cmd_daemon(action: &str) -> anyhow::Result<()> {
                 _ => {}
             }
             service.status()
-        })
-        .await
-        .context("Service task failed")?
-        .with_context(|| {
-            Failure::runtime(
-                t!("daemon.service_failed", action = action),
-                t!(
-                    "daemon.service_hint",
-                    path = DataPaths::resolve()
-                        .logs_dir()
-                        .join("removentd.log")
-                        .display()
-                ),
-            )
-        })?;
-        println!("{}", serde_json::to_string_pretty(&status)?);
+        });
+        let status =
+            crate::components::progress::run(&t!("terminal.working"), !format.json(true), task)
+                .await
+                .context("Service task failed")?
+                .with_context(|| {
+                    Failure::runtime(
+                        t!("daemon.service_failed", action = action),
+                        t!(
+                            "daemon.service_hint",
+                            path = DataPaths::resolve()
+                                .logs_dir()
+                                .join("removentd.log")
+                                .display()
+                        ),
+                    )
+                })?;
+        terminal::render(action, &serde_json::to_value(&status)?, format)?;
         return Ok(());
     }
 
@@ -137,11 +140,13 @@ pub(super) async fn cmd_daemon(action: &str) -> anyhow::Result<()> {
         other => bail!(t!("daemon.unknown_action", action = other)),
     };
 
-    let resp = request(&paths, &req).await?;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&resp).context(t!("daemon.serialize_failed"))?
-    );
+    let resp = crate::components::progress::run(
+        &t!("terminal.working"),
+        !format.json(true),
+        request(&paths, &req),
+    )
+    .await?;
+    terminal::render(action, &resp, format)?;
     Ok(())
 }
 
@@ -169,14 +174,14 @@ pub(super) async fn request(
 }
 
 /// Stream pairing codes from the local private IPC socket for headless hosts.
-pub(super) async fn watch_pairing() -> anyhow::Result<()> {
+pub(super) async fn watch_pairing(format: Format) -> anyhow::Result<()> {
     tokio::select! {
-        result = watch_pairing_inner() => result,
+        result = watch_pairing_inner(format) => result,
         result = tokio::signal::ctrl_c() => result.map_err(Into::into),
     }
 }
 
-async fn watch_pairing_inner() -> anyhow::Result<()> {
+async fn watch_pairing_inner(format: Format) -> anyhow::Result<()> {
     use removent_core::ipc::IpcRequest;
     let (mut r, _w) = tokio::time::timeout(
         Duration::from_secs(5),
@@ -184,6 +189,9 @@ async fn watch_pairing_inner() -> anyhow::Result<()> {
     )
     .await
     .with_context(|| failure("daemon.wait_timeout"))??;
+    if !format.json(true) {
+        terminal::note(&t!("terminal.watching"));
+    }
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     let mut received_initial = false;
     loop {
@@ -198,13 +206,16 @@ async fn watch_pairing_inner() -> anyhow::Result<()> {
         // must keep listening for future codes in that normal idle state.
         if value.get("type").and_then(serde_json::Value::as_str) == Some("error") {
             received_initial = true;
+            if !format.json(true) {
+                terminal::note(&t!("terminal.waiting_code"));
+            }
             continue;
         }
         if let Some("pairing_code" | "pairing_pin" | "pairing_done" | "pairing_cleared") =
             value.get("type").and_then(serde_json::Value::as_str)
         {
             received_initial = true;
-            println!("{}", serde_json::to_string(&value)?);
+            terminal::event("pairing", &value, format)?;
         }
     }
 }

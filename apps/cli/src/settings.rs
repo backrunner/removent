@@ -72,7 +72,7 @@ pub(super) fn parse(raw: &[String]) -> anyhow::Result<Options> {
     Ok(Options { action, json })
 }
 
-fn edit_error(error: EditError) -> anyhow::Error {
+pub(super) fn edit_error(error: EditError) -> anyhow::Error {
     match error {
         EditError::Unknown(key) => {
             Failure::usage(t!("settings.unknown", key = key), "settings").into()
@@ -102,6 +102,15 @@ fn edit_error(error: EditError) -> anyhow::Error {
     }
 }
 
+impl Options {
+    pub fn with_format(mut self, format: crate::terminal::Format) -> Self {
+        if format != crate::terminal::Format::Auto {
+            self.json = format == crate::terminal::Format::Json;
+        }
+        self
+    }
+}
+
 pub(super) async fn run(options: Options, paths: &DataPaths) -> anyhow::Result<()> {
     match options.action {
         Action::Path => {
@@ -123,23 +132,42 @@ pub(super) async fn run(options: Options, paths: &DataPaths) -> anyhow::Result<(
                             .collect::<Vec<_>>()
                     )?
                 );
+            } else if crate::components::enabled() {
+                use crate::components::{Card, Tone};
+                let mut groups: Vec<(String, Vec<&Setting>)> = Vec::new();
+                for setting in SETTINGS {
+                    let name = crate::components::results::setting_group(setting.key);
+                    if let Some((_, items)) = groups.iter_mut().find(|(group, _)| *group == name) {
+                        items.push(setting);
+                    } else {
+                        groups.push((name, vec![setting]));
+                    }
+                }
+                for (group, items) in groups {
+                    let mut card =
+                        Card::new(&group, crate::components::dimensions().0, Tone::Accent);
+                    for setting in items {
+                        card.field(
+                            &crate::components::results::setting_label(setting.key),
+                            &display_value(&setting.view(&current)),
+                            Tone::Plain,
+                        );
+                        if matches!(options.action, Action::List) {
+                            card.text(setting.key, Tone::Muted);
+                        }
+                    }
+                    crate::components::print_card(card);
+                }
             } else {
                 for setting in SETTINGS {
-                    println!(
-                        "{:<34} {}",
-                        setting.key,
-                        display_value(&setting.view(&current))
-                    );
+                    crate::terminal::field(setting.key, &display_value(&setting.view(&current)));
                     if matches!(options.action, Action::List) {
-                        println!(
-                            "  {}  [{}]",
-                            accepted_text(setting),
-                            if setting.host {
-                                t!("settings.host_apply")
-                            } else {
-                                t!("settings.desktop_apply")
-                            }
-                        );
+                        crate::terminal::note(&accepted_text(setting));
+                        crate::terminal::note(&if setting.host {
+                            t!("settings.host_apply")
+                        } else {
+                            t!("settings.desktop_apply")
+                        });
                     }
                 }
             }
@@ -149,8 +177,17 @@ pub(super) async fn run(options: Options, paths: &DataPaths) -> anyhow::Result<(
             let view = control::find(&key).map_err(edit_error)?.view(&current);
             if options.json {
                 println!("{}", serde_json::to_string_pretty(&view)?);
+            } else if crate::components::enabled() {
+                use crate::components::{Card, Tone};
+                let mut card = Card::new(
+                    &crate::components::results::setting_label(&key),
+                    crate::components::dimensions().0,
+                    Tone::Accent,
+                );
+                card.field(&key, &display_value(&view), Tone::Plain);
+                crate::components::print_card(card);
             } else {
-                println!("{}", display_value(&view));
+                println!("{}", crate::terminal::clean(&display_value(&view)));
             }
         }
         Action::Set { key, value, stdin } => {
@@ -178,7 +215,7 @@ pub(super) async fn run(options: Options, paths: &DataPaths) -> anyhow::Result<(
     Ok(())
 }
 
-fn load(paths: &DataPaths) -> anyhow::Result<Settings> {
+pub(super) fn load(paths: &DataPaths) -> anyhow::Result<Settings> {
     Settings::load_strict(paths).with_context(|| {
         Failure::runtime(
             t!("settings.load_failed"),
@@ -209,7 +246,7 @@ fn read_stdin() -> anyhow::Result<String> {
     Ok(input)
 }
 
-fn display_value(view: &Value) -> String {
+pub(super) fn display_value(view: &Value) -> String {
     if view["secret"] == true {
         return if view["value"]["configured"] == true {
             t!("settings.secret_set")
@@ -224,23 +261,27 @@ fn display_value(view: &Value) -> String {
     }
 }
 
-fn accepted_text(setting: &Setting) -> String {
+pub(super) fn accepted_text(setting: &Setting) -> String {
     match setting.kind {
         control::Kind::Text(max) => t!("settings.text_limit", max = max).into(),
         _ => setting.accepted(),
     }
 }
 
-async fn after_save(
+pub(super) async fn after_save(
     paths: &DataPaths,
     setting: &Setting,
     settings: &Settings,
     json_output: bool,
 ) -> anyhow::Result<()> {
     let reload = if setting.host {
-        crate::daemon::request(paths, &removent_core::ipc::IpcRequest::ReloadSettings)
-            .await
-            .map(|_| ())
+        crate::components::progress::run(
+            &t!("terminal.working"),
+            !json_output,
+            crate::daemon::request(paths, &removent_core::ipc::IpcRequest::ReloadSettings),
+        )
+        .await
+        .map(|_| ())
     } else {
         Ok(())
     };
@@ -270,13 +311,44 @@ async fn after_save(
                 &json!({"saved":true, "setting":setting.view(settings), "application":application})
             )?
         );
+    } else if crate::components::enabled() {
+        use crate::components::{Card, Tone};
+        let mut card = Card::new(
+            &t!("tui.saved"),
+            crate::components::dimensions().0,
+            Tone::Success,
+        );
+        card.field(
+            &crate::components::results::setting_label(setting.key),
+            &display_value(&setting.view(settings)),
+            Tone::Plain,
+        );
+        card.divider();
+        let message = match application {
+            "desktop_restart" => t!("settings.desktop_apply"),
+            "daemon_offline" => t!("settings.offline"),
+            "reload_requested" => t!("settings.reload_requested"),
+            _ => t!("settings.reload_failed"),
+        };
+        card.text(
+            &message,
+            if application == "reload_failed" {
+                Tone::Warning
+            } else {
+                Tone::Muted
+            },
+        );
+        if setting.key == "device_name" {
+            card.text(&t!("settings.desktop_apply"), Tone::Muted);
+        }
+        crate::components::print_card(card);
     } else {
         println!(
             "{}",
             t!(
                 "settings.saved",
                 key = setting.key,
-                value = display_value(&setting.view(settings))
+                value = crate::terminal::clean(&display_value(&setting.view(settings)))
             )
         );
         match application {

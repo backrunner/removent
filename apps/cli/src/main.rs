@@ -57,7 +57,15 @@ async fn main() -> std::process::ExitCode {
     }
     removent_core::logging::init_component_logging(&paths, "removent-cli", options.verbose);
     removent_core::logging::install_panic_hook(&paths);
-    match run(options.command, &paths, &settings).await {
+    match run(
+        options.command,
+        &paths,
+        &settings,
+        options.format,
+        options.verbose,
+    )
+    .await
+    {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => output::report(error, options.verbose),
     }
@@ -85,23 +93,27 @@ async fn run(
     command: args::Command,
     paths: &DataPaths,
     settings: &removent_core::Settings,
+    format: terminal::Format,
+    verbose: bool,
 ) -> anyhow::Result<()> {
     match command {
         args::Command::Identity => {
             let identity = identity::load_or_create(paths, &settings.device_name)?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
+            terminal::render(
+                "identity",
+                &serde_json::json!({
                     "certificate_fingerprint": identity.fingerprint_hex(),
                     "public_key": hex::encode(identity.verifying_key().as_bytes()),
-                }))?
-            );
+                }),
+                format,
+            )?;
             Ok(())
         }
-        args::Command::Ping(args) => cmd_ping(args).await,
-        args::Command::PairingWatch => daemon::watch_pairing().await,
-        args::Command::Daemon(action) => cmd_daemon(&action).await,
+        args::Command::Ping(args) => cmd_ping(args, format).await,
+        args::Command::PairingWatch => daemon::watch_pairing(format).await,
+        args::Command::Daemon(action) => cmd_daemon(&action, format).await,
         args::Command::Settings(options) => settings::run(options, paths).await,
+        args::Command::Interactive => interactive::run(paths, verbose).await,
         args::Command::Help(_) | args::Command::Version => unreachable!("handled before logging"),
     }
 }
@@ -146,10 +158,14 @@ mod tests {
 }
 
 mod args;
+mod components;
 mod daemon;
+mod interactive;
 mod output;
 mod ping;
+mod prompt;
 mod settings;
+mod terminal;
 use daemon::cmd_daemon;
 use ping::cmd_ping;
 #[cfg(test)]

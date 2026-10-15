@@ -9,16 +9,21 @@ usage: |
   用法：removent-cli [--verbose] <命令>
 
   命令：
+    interactive 打开非全屏键盘菜单
     daemon     查询状态、启动或停止后台服务
     settings   查询、修改或重置各项设置
     pairing    查看、生成或撤销配对码，监听配对事件
-    identity   查看本机身份（JSON）
+    identity   查看本机身份（--json 可输出 JSON）
     ping       测试与目标设备的连接
 
   通用选项：
+    --json          机器可读输出（ping 输出统计，watch 输出 JSON Lines）
+    --human         重定向时也显示易读文本
     -h, --help       查看帮助（也可用于子命令）
     -V, --version    查看版本
     -v, --verbose    在终端显示诊断日志和完整错误原因
+
+  无参数且连接交互终端时，打开非全屏菜单。
 
   示例：
     removent-cli daemon status
@@ -29,7 +34,7 @@ help.daemon: |
   用法：removent-cli daemon [操作] [--verbose]
 
   操作（默认 status）：
-    status          查询共享状态、会话和权限（JSON）
+    status          查询共享状态、会话和权限（--json 可输出 JSON）
     enable          开启共享并保存设置
     disable         关闭共享，保留后台服务
     permissions     请求屏幕录制与辅助功能权限
@@ -42,19 +47,20 @@ help.daemon: |
     ensure          按需启动，尊重手动停止的设置
     login-on        立即启动并开启登录时启动
     login-off       关闭登录时启动，保留当前服务
-    service-status  查询登录启动、进程管理和连接状态（JSON）
+    service-status  查询登录启动、进程管理和连接状态（--json 可输出 JSON）
 
   status 只查询状态；后台服务不可用时会提示启动命令。
-  成功结果保持 JSON 格式。使用 --verbose 查看诊断日志和完整错误原因。
+  终端默认显示易读结果，管道保持 JSON，--json 强制输出 JSON。
+  使用 --verbose 查看诊断日志和完整错误原因。
 
 help.pairing: |
   用法：removent-cli pairing [操作] [--verbose]
 
   操作（默认 show）：
-    show       查看当前配对码或 PIN（JSON）
+    show       查看当前配对码或 PIN（--json 可输出 JSON）
     generate   生成配对码
     revoke     撤销配对码
-    watch      持续输出配对事件（每行一个 JSON），按 Ctrl+C 结束
+    watch      持续显示配对事件（--json 输出 JSON Lines），按 Ctrl+C 结束
 
   需要先启动后台服务：removent-cli daemon start
 
@@ -77,7 +83,7 @@ help.ping: |
 
 help.identity: |
   用法：removent-cli identity [--verbose]
-  输出本机证书指纹与公钥（JSON）；尚无身份时创建本机身份。
+  输出本机证书指纹与公钥（--json 可输出 JSON）；尚无身份时创建本机身份。
 
 daemon.unknown_action: "未知后台服务操作：%{action}"
 daemon.connect_failed: "无法连接到 Removent 后台服务。"
@@ -204,3 +210,199 @@ settings.expected_name: "非空设备名称"
 settings.expected_endpoint: "不含凭据和片段的 HTTPS 地址，或空文本"
 settings.expected_otp: "有效的 Base32 OTP 密钥"
 settings.expected_auth: "口令模式需先配置有效口令，OTP 模式需先配置有效密钥"
+
+# Inline terminal interaction
+terminal.format_conflict: "--json 与 --human 不能同时使用。"
+terminal.yes: "是"
+terminal.no: "否"
+terminal.none: "暂无"
+terminal.pairing: "配对码"
+terminal.expires: "将在 %{seconds} 秒后过期。"
+terminal.expiry_unknown: "请在连接设备上输入此码，有效期由被控端管理。"
+terminal.cleared: "配对码已清除"
+terminal.done: "请求已接受"
+terminal.identity: "设备身份"
+terminal.status: "后台服务"
+terminal.not_ready: "共享已开启，但监听尚未就绪。请检查权限与服务日志。"
+terminal.permissions_hint: "请求缺失的权限：%{command}"
+terminal.watching: "正在监听配对事件，按 Ctrl+C 停止监听。"
+terminal.waiting_code: "等待新的配对码。"
+terminal.tty_required: "交互模式需要标准输入、输出和错误输出均连接终端。脚本中请使用具体命令和 --human 或 --json。"
+terminal.navigation: "↑/↓ 选择，Enter 打开，Esc 或 q 返回，Ctrl+C 取消。"
+terminal.choose: "选择操作"
+terminal.interrupt_confirm: "此操作可能中断当前会话，是否继续？"
+terminal.pairing_confirm: "此操作将更改当前配对邀请，是否继续？"
+terminal.working: "正在处理请求…"
+terminal.edit: "修改值"
+terminal.reset: "恢复默认值"
+terminal.secret: "输入新密钥或密码（隐藏输入）"
+terminal.repeat: "再次输入"
+terminal.mismatch: "两次输入不一致"
+terminal.value: "输入新值"
+terminal.save_confirm: "是否保存此更改？"
+terminal.ping_support: "连接测试支持配对码和无认证模式，留空取消。"
+terminal.target: "地址或设备名称"
+terminal.ping_stats: "连接统计"
+terminal.menu.status: "查看共享状态与会话"
+terminal.menu.service: "管理后台服务"
+terminal.menu.pairing: "配对码"
+terminal.menu.settings: "查看与修改设置"
+terminal.menu.identity: "设备身份"
+terminal.menu.ping: "测试连接"
+terminal.menu.exit: "退出"
+terminal.pairing.show: "显示当前配对码"
+terminal.pairing.generate: "生成配对邀请"
+terminal.pairing.watch: "监听配对事件"
+terminal.pairing.revoke: "撤销配对邀请"
+terminal.action.enable: "共享已开启"
+terminal.action.disable: "共享已关闭"
+terminal.action.reload: "已请求重新加载设置"
+terminal.action.permissions: "权限请求已发送"
+terminal.action.pairing-revoke: "配对邀请已撤销"
+terminal.field.running: "共享已开启"
+terminal.field.host_ready: "监听已就绪"
+terminal.field.host_error: "监听错误"
+terminal.field.relay_connected: "中继已连接"
+terminal.field.relay_error: "中继错误"
+terminal.field.port: "端口"
+terminal.field.device_name: "设备名称"
+terminal.field.fp_short: "指纹"
+terminal.field.sessions: "当前会话数"
+terminal.field.pending_pin: "待确认配对码"
+terminal.field.tray_connected: "管理客户端已连接"
+terminal.field.screen_recording_granted: "屏幕录制已授权"
+terminal.field.accessibility_granted: "辅助功能已授权"
+terminal.field.launch_at_login: "登录时启动"
+terminal.field.managed: "服务已注册"
+terminal.field.reachable: "服务可连接"
+terminal.field.stopped_by_user: "已手动停止"
+terminal.field.certificate_fingerprint: "证书指纹"
+terminal.field.public_key: "公钥"
+terminal.field.id: "会话编号"
+terminal.field.peer_name: "对端设备"
+terminal.field.peer_fp16: "对端指纹"
+terminal.field.since_unix: "开始时间（Unix 秒）"
+terminal.field.video_codec: "视频编码"
+terminal.service.status: "查看状态"
+terminal.service.enable: "开启共享"
+terminal.service.disable: "关闭共享"
+terminal.service.permissions: "请求系统权限"
+terminal.service.reload: "重新加载设置"
+terminal.service.start: "启动服务"
+terminal.service.stop: "停止服务"
+terminal.service.restart: "重启服务"
+terminal.service.ensure: "按需启动"
+terminal.service.login-on: "开启登录自启"
+terminal.service.login-off: "关闭登录自启"
+terminal.service.service-status: "查看服务注册状态"
+
+terminal.pin_required: "配对需要 PIN，请传入 --pin <码>，或在交互终端运行。"
+terminal.cancelled: "已取消。"
+
+terminal.permissions: "系统权限"
+terminal.sessions: "会话（%{count}）"
+terminal.no_sessions: "当前没有会话。"
+
+help.interactive: |
+  用法：removent-cli interactive
+  打开非全屏键盘菜单，需要标准输入、输出和错误输出均连接终端。
+  方向键选择，Enter 打开，Esc 或 q 返回菜单，Ctrl+C 退出。
+  结果保留在终端历史中，无参数运行也可打开此菜单。
+
+terminal.pin: "被控端显示的 PIN"
+
+# Shared inline TUI components
+tui.search: "输入文字搜索操作或设置"
+tui.no_matches: "没有匹配项，请修改搜索内容。"
+tui.keys: "↑↓ 选择  Enter 打开  Esc 返回  %{current}/%{total}"
+tui.keys_compact: "↑↓ 选择  Enter 打开  Esc 返回"
+tui.input_keys: "Enter 继续  Esc 取消  Ctrl+U 清空"
+tui.confirm_keys: "←→ 选择  Enter 确认  Esc 取消"
+tui.confirm_title: "确认操作"
+tui.secret_empty: "隐藏输入"
+tui.secret_entered: "[ 已输入，内容隐藏 ]"
+tui.ready: "可以连接"
+tui.not_ready: "尚未就绪"
+tui.granted: "已授权"
+tui.required: "需要授权"
+tui.permissions_action: "下一步：removent-cli daemon permissions"
+tui.completed: "操作已完成。"
+tui.check_input: "请检查输入"
+tui.error_title: "操作未完成"
+tui.next_step: "下一步"
+tui.saved: "设置已保存"
+tui.group.general: "通用"
+tui.group.sharing: "共享"
+tui.group.security: "安全"
+tui.group.discovery: "设备发现"
+tui.group.updates: "更新"
+tui.setting.device_name: "设备名称"
+tui.setting.language: "语言"
+tui.setting.theme: "外观"
+tui.setting.discovery.removent: "发现 Removent 设备"
+tui.setting.discovery.vnc: "发现 VNC 设备"
+tui.setting.discovery.rdp: "发现 RDP 设备"
+tui.setting.admission: "连接准入"
+tui.setting.authentication.mode: "认证方式"
+tui.setting.authentication.pairing_policy: "配对策略"
+tui.setting.authentication.password: "访问口令"
+tui.setting.authentication.otp_secret: "验证器密钥"
+tui.setting.host_enabled: "共享本机"
+tui.setting.host_port: "共享端口"
+tui.setting.window_server_capture: "旧版屏幕捕获"
+tui.setting.paired_only: "仅允许已配对设备"
+tui.setting.vnc_enabled: "VNC 共享"
+tui.setting.vnc_port: "VNC 端口"
+tui.setting.vnc_password: "VNC 密码"
+tui.setting.audio_enabled_default: "默认开启音频"
+tui.setting.clipboard_clear_after_secs: "剪贴板清除时间"
+tui.setting.video_quality: "视频质量"
+tui.setting.update_check_enabled: "检查更新"
+tui.setting.update_channel: "更新渠道"
+tui.setting.update_endpoint: "更新地址"
+terminal.menu.status_detail: "共享状态、系统权限与当前会话"
+terminal.menu.service_detail: "启动、停止、重启与登录自启"
+terminal.menu.pairing_detail: "显示配对码、生成邀请与监听事件"
+terminal.menu.settings_detail: "搜索偏好设置并修改当前值"
+terminal.menu.identity_detail: "证书指纹与公钥"
+terminal.menu.ping_detail: "测试直连或局域网发现的设备"
+terminal.menu.exit_detail: "返回命令行"
+
+tui.review: "确认更改内容"
+tui.previous: "当前值"
+tui.new_value: "新值"
+
+tui.samples: "样本数"
+tui.latency_min: "最低延迟"
+tui.latency_avg: "平均延迟"
+tui.latency_max: "最高延迟"
+
+tui.resize: "请扩大终端后继续，Esc 取消。"
+
+tui.keys_short: "↑↓  Enter  Esc   %{current}/%{total}"
+
+tui.on: "开启"
+tui.off: "关闭"
+tui.current: "[ 当前 ]"
+tui.value.system: "跟随系统"
+tui.value.en: "English"
+tui.value.zhcn: "简体中文"
+tui.value.light: "浅色"
+tui.value.dark: "深色"
+tui.value.alwaysask: "每次询问"
+tui.value.trustedauto: "自动允许可信设备"
+tui.value.denyall: "拒绝所有连接"
+tui.value.system_account: "系统账户"
+tui.value.pairing_code: "配对码"
+tui.value.password: "访问口令"
+tui.value.otp: "验证器代码"
+tui.value.none: "无需认证"
+tui.value.remember_device: "记住设备"
+tui.value.every_connection: "每次连接"
+tui.value.auto: "自动"
+tui.value.smooth: "流畅"
+tui.value.balanced: "均衡"
+tui.value.highquality: "高质量"
+tui.value.extreme: "极致"
+tui.value.stable: "Stable"
+tui.value.beta: "Beta"

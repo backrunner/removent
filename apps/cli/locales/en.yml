@@ -9,16 +9,21 @@ usage: |
   Usage: removent-cli [--verbose] <command>
 
   Commands:
+    interactive Open the inline keyboard menu
     daemon     Inspect, start or stop the background service
     settings   Read, update or reset settings
     pairing    Show, generate or revoke codes, or watch pairing events
-    identity   Show this device's identity (JSON)
+    identity   Show this device's identity
     ping       Test a connection to a device
 
   Global options:
+    --json          Machine-readable output (ping: summary; watch: JSON Lines)
+    --human         Readable output even when redirected
     -h, --help       Show help (also available on subcommands)
     -V, --version    Show version
     -v, --verbose    Show diagnostic logs and full error causes in the terminal
+
+  With no command, an interactive terminal opens the inline menu.
 
   Examples:
     removent-cli daemon status
@@ -29,7 +34,7 @@ help.daemon: |
   Usage: removent-cli daemon [action] [--verbose]
 
   Actions (default: status):
-    status          Inspect sharing, sessions and permissions (JSON)
+    status          Inspect sharing, sessions and permissions (use --json for scripts)
     enable          Enable sharing and save the setting
     disable         Disable sharing, keeping the background service running
     permissions     Request Screen Recording and Accessibility permissions
@@ -42,19 +47,20 @@ help.daemon: |
     ensure          Start if needed, respecting an explicit stop
     login-on        Start now and enable launch at login
     login-off       Disable launch at login, keeping the current service running
-    service-status  Inspect login, process management and connectivity (JSON)
+    service-status  Inspect login, process management and connectivity (use --json for scripts)
 
   status only queries state; an unavailable service prints a startup command.
-  Successful results remain JSON. Use --verbose for logs and full error causes.
+  Terminal results are readable; pipes retain JSON. --json forces JSON.
+  Use --verbose for logs and full error causes.
 
 help.pairing: |
   Usage: removent-cli pairing [action] [--verbose]
 
   Actions (default: show):
-    show       Show the current pairing code or PIN (JSON)
+    show       Show the current pairing code or PIN (use --json for scripts)
     generate   Generate a pairing code
     revoke     Revoke the pairing code
-    watch      Stream pairing events as JSON Lines; press Ctrl+C to stop
+    watch      Watch pairing events (--json for JSON Lines); press Ctrl+C to stop
 
   Start the background service first: removent-cli daemon start
 
@@ -77,7 +83,7 @@ help.ping: |
 
 help.identity: |
   Usage: removent-cli identity [--verbose]
-  Print this device's certificate fingerprint and public key as JSON.
+  Show the certificate fingerprint and public key; --json forces JSON.
   Creates a local identity if one does not exist.
 
 daemon.unknown_action: "Unknown background service action: %{action}"
@@ -205,3 +211,199 @@ settings.expected_name: "a non-empty device name"
 settings.expected_endpoint: "an HTTPS URL without credentials or a fragment, or empty text"
 settings.expected_otp: "a valid Base32 OTP secret"
 settings.expected_auth: "a configured password for password mode, or a valid OTP secret for OTP mode"
+
+# Inline terminal interaction
+terminal.format_conflict: "Use either --json or --human, not both."
+terminal.yes: "Yes"
+terminal.no: "No"
+terminal.none: "Not available"
+terminal.pairing: "Pairing code"
+terminal.expires: "Expires in %{seconds} seconds."
+terminal.expiry_unknown: "Use this code on the connecting device. Validity is controlled by the host."
+terminal.cleared: "Pairing code cleared"
+terminal.done: "Request accepted"
+terminal.identity: "Device identity"
+terminal.status: "Background service"
+terminal.not_ready: "Sharing is enabled, but the listener is not ready. Check permissions and the service log."
+terminal.permissions_hint: "Request missing permissions: %{command}"
+terminal.watching: "Watching pairing events. Ctrl+C stops watching."
+terminal.waiting_code: "Waiting for a pairing code."
+terminal.tty_required: "Interactive mode requires a terminal for stdin, stdout and stderr. Use a command with --human or --json in scripts."
+terminal.navigation: "↑/↓ select, Enter opens, Esc or q goes back. Ctrl+C cancels."
+terminal.choose: "Choose an action"
+terminal.interrupt_confirm: "This may interrupt active sessions. Continue?"
+terminal.pairing_confirm: "This changes the active pairing invitation. Continue?"
+terminal.working: "Processing request…"
+terminal.edit: "Edit value"
+terminal.reset: "Reset to default"
+terminal.secret: "New secret (hidden)"
+terminal.repeat: "Repeat secret"
+terminal.mismatch: "Values do not match"
+terminal.value: "New value"
+terminal.save_confirm: "Save this change?"
+terminal.ping_support: "Connection probe supports pairing-code and no-authentication hosts. Empty input cancels."
+terminal.target: "Address or device name"
+terminal.ping_stats: "Connection statistics"
+terminal.menu.status: "View sharing and sessions"
+terminal.menu.service: "Manage background service"
+terminal.menu.pairing: "Pairing codes"
+terminal.menu.settings: "Browse and edit settings"
+terminal.menu.identity: "Device identity"
+terminal.menu.ping: "Test a connection"
+terminal.menu.exit: "Exit"
+terminal.pairing.show: "Show current code"
+terminal.pairing.generate: "Generate invitation"
+terminal.pairing.watch: "Watch pairing events"
+terminal.pairing.revoke: "Revoke invitation"
+terminal.action.enable: "Sharing enabled"
+terminal.action.disable: "Sharing disabled"
+terminal.action.reload: "Reload requested"
+terminal.action.permissions: "Permission request sent"
+terminal.action.pairing-revoke: "Pairing invitation revoked"
+terminal.field.running: "Sharing enabled"
+terminal.field.host_ready: "Listener ready"
+terminal.field.host_error: "Listener error"
+terminal.field.relay_connected: "Relay connected"
+terminal.field.relay_error: "Relay error"
+terminal.field.port: "Port"
+terminal.field.device_name: "Device"
+terminal.field.fp_short: "Fingerprint"
+terminal.field.sessions: "Active sessions"
+terminal.field.pending_pin: "Pending PIN"
+terminal.field.tray_connected: "Management client connected"
+terminal.field.screen_recording_granted: "Screen Recording allowed"
+terminal.field.accessibility_granted: "Accessibility allowed"
+terminal.field.launch_at_login: "Launch at login"
+terminal.field.managed: "Managed service"
+terminal.field.reachable: "Service reachable"
+terminal.field.stopped_by_user: "Explicitly stopped"
+terminal.field.certificate_fingerprint: "Certificate fingerprint"
+terminal.field.public_key: "Public key"
+terminal.field.id: "Session ID"
+terminal.field.peer_name: "Peer device"
+terminal.field.peer_fp16: "Peer fingerprint"
+terminal.field.since_unix: "Started (Unix seconds)"
+terminal.field.video_codec: "Video codec"
+terminal.service.status: "View status"
+terminal.service.enable: "Enable sharing"
+terminal.service.disable: "Disable sharing"
+terminal.service.permissions: "Request permissions"
+terminal.service.reload: "Reload settings"
+terminal.service.start: "Start service"
+terminal.service.stop: "Stop service"
+terminal.service.restart: "Restart service"
+terminal.service.ensure: "Start if needed"
+terminal.service.login-on: "Enable launch at login"
+terminal.service.login-off: "Disable launch at login"
+terminal.service.service-status: "View service registration"
+
+terminal.pin_required: "Pairing needs a PIN. Pass --pin <code>, or run in an interactive terminal."
+terminal.cancelled: "Cancelled."
+
+terminal.permissions: "System permissions"
+terminal.sessions: "Sessions (%{count})"
+terminal.no_sessions: "No active sessions."
+
+help.interactive: |
+  Usage: removent-cli interactive
+  Open the inline keyboard menu. Requires stdin, stdout and stderr on a terminal.
+  Use arrow keys and Enter; Esc or q returns from a menu. Ctrl+C exits.
+  Results stay in shell scrollback. Run without arguments for the same menu.
+
+terminal.pin: "PIN shown on the host"
+
+# Shared inline TUI components
+tui.search: "Type to filter actions or settings"
+tui.no_matches: "No matches. Backspace edits the filter."
+tui.keys: "↑↓ select  Enter open  Esc back  %{current}/%{total}"
+tui.keys_compact: "↑↓ select  Enter open  Esc back"
+tui.input_keys: "Enter continue  Esc cancel  Ctrl+U clear"
+tui.confirm_keys: "←→ choose  Enter confirm  Esc cancel"
+tui.confirm_title: "Confirm action"
+tui.secret_empty: "Hidden input"
+tui.secret_entered: "[ entered, hidden ]"
+tui.ready: "Ready to connect"
+tui.not_ready: "Not ready"
+tui.granted: "Granted"
+tui.required: "Required"
+tui.permissions_action: "Next: removent-cli daemon permissions"
+tui.completed: "Completed successfully."
+tui.check_input: "Check the value"
+tui.error_title: "Action could not be completed"
+tui.next_step: "Next step"
+tui.saved: "Settings saved"
+tui.group.general: "General"
+tui.group.sharing: "Sharing"
+tui.group.security: "Security"
+tui.group.discovery: "Discovery"
+tui.group.updates: "Updates"
+tui.setting.device_name: "Device name"
+tui.setting.language: "Language"
+tui.setting.theme: "Appearance"
+tui.setting.discovery.removent: "Removent discovery"
+tui.setting.discovery.vnc: "VNC discovery"
+tui.setting.discovery.rdp: "RDP discovery"
+tui.setting.admission: "Connection approval"
+tui.setting.authentication.mode: "Authentication"
+tui.setting.authentication.pairing_policy: "Pairing policy"
+tui.setting.authentication.password: "Access password"
+tui.setting.authentication.otp_secret: "Authenticator secret"
+tui.setting.host_enabled: "Share this device"
+tui.setting.host_port: "Sharing port"
+tui.setting.window_server_capture: "Legacy screen capture"
+tui.setting.paired_only: "Paired devices only"
+tui.setting.vnc_enabled: "VNC sharing"
+tui.setting.vnc_port: "VNC port"
+tui.setting.vnc_password: "VNC password"
+tui.setting.audio_enabled_default: "Audio by default"
+tui.setting.clipboard_clear_after_secs: "Clipboard expiry"
+tui.setting.video_quality: "Video quality"
+tui.setting.update_check_enabled: "Check for updates"
+tui.setting.update_channel: "Update channel"
+tui.setting.update_endpoint: "Update source"
+terminal.menu.status_detail: "Sharing, permissions and active sessions"
+terminal.menu.service_detail: "Start, stop, restart and launch at login"
+terminal.menu.pairing_detail: "Show a code, create an invitation or watch events"
+terminal.menu.settings_detail: "Search preferences and edit values safely"
+terminal.menu.identity_detail: "Certificate fingerprint and public key"
+terminal.menu.ping_detail: "Measure a direct or discovered connection"
+terminal.menu.exit_detail: "Return to your shell"
+
+tui.review: "Review changes"
+tui.previous: "Current"
+tui.new_value: "New value"
+
+tui.samples: "Samples"
+tui.latency_min: "Minimum latency"
+tui.latency_avg: "Average latency"
+tui.latency_max: "Maximum latency"
+
+tui.resize: "Enlarge the terminal to continue (Esc cancels)."
+
+tui.keys_short: "↑↓  Enter  Esc   %{current}/%{total}"
+
+tui.on: "On"
+tui.off: "Off"
+tui.current: "[ Current ]"
+tui.value.system: "System default"
+tui.value.en: "English"
+tui.value.zhcn: "简体中文"
+tui.value.light: "Light"
+tui.value.dark: "Dark"
+tui.value.alwaysask: "Always ask"
+tui.value.trustedauto: "Allow trusted devices"
+tui.value.denyall: "Deny all"
+tui.value.system_account: "System account"
+tui.value.pairing_code: "Pairing code"
+tui.value.password: "Access password"
+tui.value.otp: "Authenticator code"
+tui.value.none: "No authentication"
+tui.value.remember_device: "Remember device"
+tui.value.every_connection: "Every connection"
+tui.value.auto: "Automatic"
+tui.value.smooth: "Smooth"
+tui.value.balanced: "Balanced"
+tui.value.highquality: "High quality"
+tui.value.extreme: "Extreme"
+tui.value.stable: "Stable"
+tui.value.beta: "Beta"

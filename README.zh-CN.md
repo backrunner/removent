@@ -93,6 +93,9 @@ REMOVENT_CLI="/Applications/Removent.app/Contents/MacOS/removent-cli"
 ```
 
 ```sh
+# 非全屏键盘菜单
+"$REMOVENT_CLI"
+
 # 服务与配对
 "$REMOVENT_CLI" daemon status
 "$REMOVENT_CLI" daemon start
@@ -110,6 +113,9 @@ REMOVENT_CLI="/Applications/Removent.app/Contents/MacOS/removent-cli"
 "$REMOVENT_CLI" settings get --json
 "$REMOVENT_CLI" daemon status --verbose
 ```
+
+终端默认显示易读状态，管道保留原有输出格式。使用 `--json` 获取机器可读结果，
+或用 `--human` 在重定向时保留易读文本。无参数运行可通过键盘管理服务、配对和设置。
 
 设置命令覆盖外观、设备发现、共享、认证、VNC、媒体偏好和更新，保存前会校验输入，
 并说明生效方式。后台服务在线时会重新加载共享设置，可能中断正在进行的远程会话；

@@ -17,6 +17,56 @@ Source builds use `target/debug/removent-cli`; their default data directory is
 `userdata`, while `scripts/dev.sh` uses `userdata/dev`. Set `REMOVENT_DATA_DIR`
 explicitly when working with a custom or development instance.
 
+
+## Inline terminal interface
+
+Run `removent-cli` without arguments in a terminal, or use `removent-cli interactive`,
+to open the inline keyboard menu. It keeps shell scrollback and never enters a
+full-screen alternate buffer. Use ↑/↓ to select, Enter to open, and Esc or `q` to
+return. The menu covers service management, pairing, settings, identity and ping.
+Settings offer boolean/enum choices and hidden, confirmed secret entry. Saving or
+resetting settings requires confirmation; service operations that can interrupt
+sessions explain the impact before proceeding. Direct commands remain noninteractive.
+
+Service, pairing and identity commands display readable results in a terminal.
+Their redirected output retains the existing JSON schema, including tray integration.
+`--json` explicitly requests machine output; `--human` requests readable output even
+in a pipe. These global flags can appear before or after the command. They are
+mutually exclusive. Settings and ping preserve their existing text defaults in pipes;
+use `--json` for JSON settings records or a single ping statistics object. Pairing
+watch uses JSON Lines in JSON mode and readable lifecycle events otherwise.
+
+Menus require stdin, stdout and stderr attached to a terminal; `TERM=dumb` disables
+automatic menus. No-argument calls in scripts still show help. `NO_COLOR` disables
+result styling, and redirected output contains no cursor controls. Narrow-terminal
+results wrap without dropping values. UI language follows the saved language setting.
+
+```sh
+"$REMOVENT_CLI" interactive
+"$REMOVENT_CLI" pairing show
+"$REMOVENT_CLI" daemon status --json
+"$REMOVENT_CLI" daemon status --human > status.txt
+"$REMOVENT_CLI" ping 192.168.1.10:48688 --pin 123456 --json
+```
+
+The ping prompt hides the PIN and restores terminal input on cancellation. Scripts
+must supply `--pin` for pairing-code hosts. Diagnostics remain in local rotating logs;
+`--verbose` explicitly mirrors them to stderr.
+
+
+The interface uses a shared set of terminal components: bordered result cards,
+separate status badges, a searchable selector with current values and category
+context, editable inputs, a two-choice confirmation, and a delayed progress
+indicator. Type to filter actions or settings (including their CLI keys). Esc first
+clears an active filter, then returns. Enum pickers start on the current choice.
+Text inputs support arrow keys, Home/End, Backspace/Delete and Ctrl+U; bracketed
+paste cannot submit the form. Invalid values keep the draft in place, and a review
+card shows old and new values before saving. Secrets use a fixed hidden-input
+indicator. Terminal colors follow the active palette; `NO_COLOR` retains layout
+and keyboard focus without ANSI colors. A small window requests more room before
+accepting an action it cannot show. Resizing preserves prior snapshots in scrollback.
+
+
 ## Read and change settings
 
 ```sh
@@ -135,7 +185,8 @@ edit returns `saved`, `setting`, and `application`. `application` is one of
 | `1` | Runtime failure; a settings reload failure may follow a successful save |
 | `2` | Invalid command, setting, value or incomplete authentication configuration |
 
-Service, pairing and identity commands retain their existing JSON outputs.
+Service, pairing and identity commands retain their existing JSON outputs when
+redirected or when `--json` is specified. Terminal output is readable by default.
 Diagnostics normally go to rotating local log files, with errors on stderr.
 Use `--verbose` to also show logs and source error causes in the terminal;
 `RUST_LOG` controls the diagnostic level.
@@ -156,7 +207,7 @@ Use `--verbose` to also show logs and source error causes in the terminal;
 "$REMOVENT_CLI" daemon permissions     # Request system privacy grants interactively
 "$REMOVENT_CLI" pairing generate  # Requires pairing-code authentication and sharing enabled
 "$REMOVENT_CLI" pairing show
-"$REMOVENT_CLI" pairing watch          # JSON Lines; Ctrl+C stops watching
+"$REMOVENT_CLI" pairing watch          # Live events; --json for JSON Lines; Ctrl+C stops watching
 "$REMOVENT_CLI" pairing revoke
 ```
 

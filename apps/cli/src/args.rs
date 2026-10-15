@@ -9,15 +9,18 @@ pub(super) enum Command {
     Daemon(String),
     PairingWatch,
     Settings(crate::settings::Options),
+    Interactive,
 }
 
 pub(super) struct Options {
     pub verbose: bool,
     pub command: Command,
+    pub format: crate::terminal::Format,
 }
 
 pub(super) fn parse(raw: &[String]) -> anyhow::Result<Options> {
     let mut verbose = false;
+    let mut format = crate::terminal::Format::Auto;
     let mut args = Vec::new();
     let mut it = raw.iter();
     while let Some(arg) = it.next() {
@@ -27,6 +30,16 @@ pub(super) fn parse(raw: &[String]) -> anyhow::Result<Options> {
         }
         if matches!(arg.as_str(), "--verbose" | "-v") {
             verbose = true;
+        } else if matches!(arg.as_str(), "--json" | "--human") {
+            let next = if arg == "--json" {
+                crate::terminal::Format::Json
+            } else {
+                crate::terminal::Format::Human
+            };
+            if format != crate::terminal::Format::Auto && format != next {
+                return Err(Failure::usage(t!("terminal.format_conflict"), "").into());
+            }
+            format = next;
         } else {
             args.push(arg.clone());
             // Flag-looking option values are still values, not global flags.
@@ -45,13 +58,20 @@ pub(super) fn parse(raw: &[String]) -> anyhow::Result<Options> {
         Some("ping") => "ping",
         Some("identity") => "identity",
         Some("settings") => "settings",
+        Some("interactive") => "interactive",
         _ => "",
     };
     let command = match args.first().map(String::as_str) {
+        None if format != crate::terminal::Format::Json && crate::interactive::available() => {
+            Command::Interactive
+        }
         None => Command::Help("usage"),
+        Some("interactive") if args.len() == 1 && format != crate::terminal::Format::Json => {
+            Command::Interactive
+        }
         Some("--help" | "-h") if args.len() == 1 => Command::Help("usage"),
         Some("--version" | "-V") if args.len() == 1 => Command::Version,
-        Some("daemon" | "pairing" | "ping" | "identity" | "settings")
+        Some("daemon" | "pairing" | "ping" | "identity" | "settings" | "interactive")
             if args.len() == 2 && matches!(args[1].as_str(), "--help" | "-h") =>
         {
             Command::Help(match topic {
@@ -59,11 +79,14 @@ pub(super) fn parse(raw: &[String]) -> anyhow::Result<Options> {
                 "pairing" => "help.pairing",
                 "ping" => "help.ping",
                 "settings" => "help.settings",
+                "interactive" => "help.interactive",
                 _ => "help.identity",
             })
         }
         Some("identity") if args.len() == 1 => Command::Identity,
-        Some("settings") => Command::Settings(crate::settings::parse(&args[1..])?),
+        Some("settings") => {
+            Command::Settings(crate::settings::parse(&args[1..])?.with_format(format))
+        }
         Some("ping") => Command::Ping(
             crate::ping::parse_args(&args[1..])
                 .map_err(|error| Failure::usage(error.to_string(), topic))?,
@@ -120,7 +143,11 @@ pub(super) fn parse(raw: &[String]) -> anyhow::Result<Options> {
             return Err(Failure::usage(t!("error.unknown_subcommand", cmd = other), topic).into());
         }
     };
-    Ok(Options { verbose, command })
+    Ok(Options {
+        verbose,
+        command,
+        format,
+    })
 }
 
 fn settings_value_is_next(args: &[String]) -> bool {

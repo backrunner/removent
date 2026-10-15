@@ -101,6 +101,9 @@ REMOVENT_CLI="/Applications/Removent.app/Contents/MacOS/removent-cli"
 ```
 
 ```sh
+# Inline keyboard menu
+"$REMOVENT_CLI"
+
 # Service and pairing
 "$REMOVENT_CLI" daemon status
 "$REMOVENT_CLI" daemon start
@@ -118,6 +121,10 @@ REMOVENT_CLI="/Applications/Removent.app/Contents/MacOS/removent-cli"
 "$REMOVENT_CLI" settings get --json
 "$REMOVENT_CLI" daemon status --verbose
 ```
+
+Terminal commands display readable results; pipes preserve existing output formats.
+Use `--json` for machine output or `--human` for readable redirected output.
+Run without arguments to manage services, pairing and settings with the keyboard.
 
 Settings commands cover appearance, discovery, hosting, authentication, VNC,
 media preferences and updates. They validate values before saving and report

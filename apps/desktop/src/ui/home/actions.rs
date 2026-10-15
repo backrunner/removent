@@ -51,7 +51,8 @@ impl HomeView {
 
     pub(super) fn start_connect(&mut self, name: String, addr: SocketAddr, cx: &mut Context<Self>) {
         match self.engine.connect_to(addr) {
-            Ok(()) => {
+            Ok(engine) => {
+                self.engine = engine;
                 self.connecting = Some(name.clone());
                 self.connection_stage = ConnectionStage::Connecting;
                 self.set_status(t!("status.connecting", name = name), StatusTone::Info);
@@ -90,7 +91,8 @@ impl HomeView {
         let name = entry.display_name();
         self.engine.touch_saved_connection(&entry.id);
         match self.engine.connect_request(request) {
-            Ok(()) => {
+            Ok(engine) => {
+                self.engine = engine;
                 self.connecting = Some(name.clone());
                 self.connection_stage = ConnectionStage::Connecting;
                 self.set_status(t!("status.connecting", name = name), StatusTone::Info);

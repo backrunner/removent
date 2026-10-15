@@ -2,6 +2,20 @@
 
 For installation and a first connection, start with the [README](../../README.md).
 
+## Concurrent desktop sessions
+
+The desktop app supports multiple viewer windows. Each machine can have one active
+session per protocol: Removent, VNC (including Apple Remote Desktop), or RDP.
+Connecting and reconnecting sessions reserve that slot too. Other protocols and
+other machines remain available; closing a viewer affects only its own session.
+Changing a port or username does not create another slot for the same machine.
+Relay rooms are separate destinations, with native host fingerprints used to
+recognize the same machine across known routes.
+
+The Removent host also allows its native and optional VNC sessions concurrently,
+with one slot per protocol. Both appear in the host session list, and updates
+wait until all sessions end.
+
 ## Unattended connection authentication
 
 Choose **Settings → Security → Connection authentication** on the desktop host.

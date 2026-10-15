@@ -79,6 +79,7 @@ fn vnc_transport_drop_reconnects_in_the_same_viewer_and_cancel_stops_retries() {
                 recovery: recovery.clone(),
                 channels: channels.clone(),
                 events,
+                sessions: Default::default(),
             };
             let mut request = ConnectionRequest::native(address);
             request.protocol = ConnectionProtocol::Vnc;

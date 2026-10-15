@@ -42,11 +42,13 @@ pub enum HostEvent {
         error: Option<String>,
     },
     SessionStarted {
+        session_id: u64,
         peer_name: String,
         peer_fp16: String,
         codec: String,
     },
     SessionEnded {
+        session_id: u64,
         reason: String,
     },
     /// A displayed reactive PIN is no longer usable.
@@ -175,23 +177,24 @@ pub async fn serve_forever(
                 .map(|v| v.advertisement()),
         )?;
     }
-    // At most one active session across both RVP and legacy VNC. Both paths
-    // share the same screen capture and input injection resources.
-    let session_slot = Arc::new(tokio::sync::Semaphore::new(1));
+    // Each protocol has one slot; RVP and VNC may capture concurrently.
+    let slots = ProtocolSlots::default();
 
     let _shutdown_on_drop = shutdown.clone().drop_guard();
     let mut connections = tokio::task::JoinSet::new();
+    let cbs = Arc::new(cbs);
 
-    // Optional legacy RFB listener. It shares the host's input sink but has an
-    // independent TCP lifecycle and framebuffer capture per VNC client.
+    // Optional legacy RFB listener with independent input geometry, TCP
+    // lifecycle and framebuffer capture.
     let vnc_shutdown = shutdown.child_token();
     if settings.vnc_enabled {
         let vnc_cfg = VncConfig {
             bind_addr: SocketAddr::from(([0, 0, 0, 0], settings.vnc_port)),
             password: settings.vnc_password.clone(),
-            input_sink: cfg.input_sink.clone(),
+            input_sink: session_input(&cfg.input_sink),
             shutdown: vnc_shutdown.clone(),
-            session_slot: session_slot.clone(),
+            session_slot: slots.vnc.clone(),
+            callbacks: Some(cbs.clone()),
         };
         connections.spawn(async move {
             if let Err(e) = serve_vnc(vnc_cfg).await {
@@ -200,9 +203,8 @@ pub async fn serve_forever(
         });
     }
 
-    let cbs = Arc::new(cbs);
-    // Further RVP connections get SessionReject{Busy}; VNC connections are
-    // rejected at accept time while the same semaphore is held.
+    // Further RVP connections get SessionReject{Busy}; additional VNC clients
+    // are rejected by their own listener's slot.
     let active_session: Arc<std::sync::Mutex<Option<CancellationToken>>> =
         Arc::new(std::sync::Mutex::new(None));
 
@@ -277,14 +279,14 @@ pub async fn serve_forever(
             paths: cfg.paths.clone(),
             settings: settings.clone(),
             identity: identity.clone(),
-            input_sink: cfg.input_sink.clone(),
+            input_sink: session_input(&cfg.input_sink),
             local_clip: cfg.local_clip.clone(),
             cbs: cbs.clone(),
             advertiser: advertiser.clone(),
             active_session: active_session.clone(),
         };
         let stop = shutdown.clone();
-        let slot = session_slot.clone();
+        let slot = slots.native.clone();
         connections.spawn(async move {
             let work = async move {
                 let quinn_conn = match incoming.await {
@@ -324,6 +326,59 @@ pub async fn serve_forever(
     }
     drop(advertiser);
     Ok(())
+}
+
+pub(crate) struct SessionEventGuard {
+    id: u64,
+    callbacks: Arc<HostCallbacks>,
+}
+
+impl SessionEventGuard {
+    pub(crate) fn new(
+        callbacks: Arc<HostCallbacks>,
+        peer_name: String,
+        peer_fp16: String,
+        codec: String,
+    ) -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        (callbacks.on_event)(HostEvent::SessionStarted {
+            session_id: id,
+            peer_name,
+            peer_fp16,
+            codec,
+        });
+        Self { id, callbacks }
+    }
+}
+
+impl Drop for SessionEventGuard {
+    fn drop(&mut self) {
+        (self.callbacks.on_event)(HostEvent::SessionEnded {
+            session_id: self.id,
+            reason: "peer disconnected".into(),
+        });
+    }
+}
+
+struct ProtocolSlots {
+    native: Arc<tokio::sync::Semaphore>,
+    vnc: Arc<tokio::sync::Semaphore>,
+}
+
+impl Default for ProtocolSlots {
+    fn default() -> Self {
+        Self {
+            native: Arc::new(tokio::sync::Semaphore::new(1)),
+            vnc: Arc::new(tokio::sync::Semaphore::new(1)),
+        }
+    }
+}
+
+fn session_input(input: &Option<Arc<dyn InputSink>>) -> Option<Arc<dyn InputSink>> {
+    input
+        .as_ref()
+        .map(|sink| sink.for_session().unwrap_or_else(|| sink.clone()))
 }
 
 #[cfg(test)]

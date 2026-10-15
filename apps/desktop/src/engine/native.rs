@@ -44,6 +44,9 @@ pub(super) async fn run_client(
         pairing_code.is_some(),
     )?;
     let expected_host = trust.expected;
+    if let Some(pin) = expected_host {
+        attempt.claim_fingerprint(pin)?;
+    }
     let known = known_fingerprints(&paths);
     let (ep_client, _pin) = make_client_endpoint(
         client_bind_addr(addr),
@@ -118,6 +121,7 @@ pub(super) async fn run_client(
         .conn
         .peer_fingerprint()
         .ok_or_else(|| anyhow::anyhow!("Host certificate missing"))?;
+    attempt.claim_fingerprint(peer_pin)?;
     *attempt.recovery.native.lock().unwrap() = Some(removent_client::recovery::NativeResume {
         token: session.resume_token.clone(),
         negotiated: session.negotiated.clone(),

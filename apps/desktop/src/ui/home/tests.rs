@@ -2,6 +2,7 @@ use super::*;
 use gpui::{AnyView, TestAppContext};
 
 mod authentication;
+mod sessions;
 
 #[gpui::test]
 fn saved_context_menu_edits_and_removes_clicked_connection(cx: &mut TestAppContext) {

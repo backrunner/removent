@@ -158,6 +158,7 @@ fn attempt(
         recovery,
         channels: channels.clone(),
         events: events.clone(),
+        sessions: Default::default(),
     }
 }
 

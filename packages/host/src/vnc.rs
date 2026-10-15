@@ -26,6 +26,7 @@ pub struct VncConfig {
     pub input_sink: Option<Arc<dyn InputSink>>,
     pub shutdown: CancellationToken,
     pub session_slot: Arc<tokio::sync::Semaphore>,
+    pub callbacks: Option<Arc<crate::HostCallbacks>>,
 }
 
 #[derive(Clone)]
@@ -176,6 +177,17 @@ async fn serve_client(
             .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "VNC handshake timed out"))??,
     };
 
+    let _session_events = cfg.callbacks.as_ref().map(|callbacks| {
+        crate::runner::SessionEventGuard::new(
+            callbacks.clone(),
+            stream
+                .peer_addr()
+                .map(|peer| peer.ip().to_string())
+                .unwrap_or_else(|_| "VNC".into()),
+            String::new(),
+            "VNC".into(),
+        )
+    });
     let (raw_tx, mut raw_rx) = removent_core::latest::channel::<(Vec<u8>, i64)>();
     let (frame_tx, frame_rx) = removent_core::latest::channel::<Frame>();
     let capture = removent_media_capture::start_display_capture(

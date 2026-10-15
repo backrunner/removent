@@ -34,12 +34,14 @@ pub(super) async fn run_vnc_client(
     let progress = attempt.progress_sink();
     attempt.progress(ConnectionStage::Resolving);
     let mut session = tokio::time::timeout(std::time::Duration::from_secs(90), async {
-        let addresses = tokio::time::timeout(
+        let addresses: Vec<_> = tokio::time::timeout(
             std::time::Duration::from_secs(5),
             tokio::net::lookup_host((request.address.host.as_str(), request.address.port)),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("VNC host lookup timed out for {target}"))??;
+        .map_err(|_| anyhow::anyhow!("VNC host lookup timed out for {target}"))??
+        .collect();
+        attempt.claim_addresses(&addresses)?;
         let mut last_error = anyhow::anyhow!("No addresses found for {target}");
         for addr in addresses {
             match removent_client::vnc::connect_vnc_with_progress(
@@ -71,7 +73,7 @@ pub(super) async fn run_vnc_client(
     })??;
     let ftx = attempt.publish(
         ClientCommands::Vnc(session.cmd_tx.clone(), session.stats.clone()),
-        "RFB/VNC · BGRA".into(),
+        "RFB/VNC (BGRA)".into(),
     )?;
     while let Some(frame) = session.decoded_bgra_rx.recv().await {
         if ftx.send(frame).is_err() {
@@ -156,6 +158,7 @@ pub(super) async fn run_requested_client(
                         .ok_or_else(|| anyhow::anyhow!("Relay did not resolve invitation"))?;
                 }
                 let pin_key = format!("relay:{}:{}", route.endpoint, request.address.host);
+                attempt.claim_relay_room(&route.endpoint, &request.address.host)?;
                 let invitation = request.pairing_code.is_some().then_some(request);
                 return run_client(
                     identity,
@@ -185,6 +188,7 @@ pub(super) async fn run_requested_client(
             if request.pairing_code.is_some() {
                 request.address = removent_client::connection::ConnectionAddress::from_socket(addr);
             }
+            attempt.claim_addresses(&[addr])?;
             let invitation = request.pairing_code.is_some().then_some(request);
             run_client(
                 identity.ok_or_else(|| anyhow::anyhow!("Device identity missing"))?,
@@ -202,6 +206,13 @@ pub(super) async fn run_requested_client(
         }
         ConnectionProtocol::Vnc => run_vnc_client(request, attempt).await,
         ConnectionProtocol::Rdp => {
+            let addresses: Vec<_> = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                tokio::net::lookup_host((request.address.host.as_str(), request.address.port)),
+            )
+            .await??
+            .collect();
+            attempt.claim_addresses(&addresses)?;
             let mut session = removent_client::rdp::connect_rdp_with_progress(
                 request,
                 Some(attempt.progress_sink()),

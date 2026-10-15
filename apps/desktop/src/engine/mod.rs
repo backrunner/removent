@@ -195,7 +195,9 @@ pub struct ClientDiagnostics {
 
 impl ClientChannels {
     fn invalidate(&mut self) -> usize {
-        self.generation += 1;
+        // IDs are unique across all windows, including cancellation events.
+        static NEXT: AtomicUsize = AtomicUsize::new(1);
+        self.generation = NEXT.fetch_add(1, Ordering::Relaxed);
         self.frames = None;
         self.frames_tx = None;
         self.recovery = Default::default();
@@ -213,6 +215,7 @@ struct ClientAttempt {
     recovery: removent_client::recovery::Recovery,
     channels: Arc<Mutex<ClientChannels>>,
     events: std::sync::mpsc::Sender<UiEvent>,
+    sessions: std::sync::Weak<Mutex<Vec<sessions::ClientSlot>>>,
 }
 
 impl ClientAttempt {
@@ -337,6 +340,8 @@ pub struct Engine {
     /// Live client-session control-message egress (Some while a session runs);
     /// viewer input and clipboard-clear sends go through here.
     client_channels: Arc<Mutex<ClientChannels>>,
+    /// Shared across session-scoped Engine handles; contains no credentials.
+    client_sessions: Arc<Mutex<Vec<sessions::ClientSlot>>>,
     /// daemon IPC request outlet (Some while online).
     daemon_req: Arc<Mutex<Option<ReqTx>>>,
     daemon_online: Arc<AtomicBool>,
@@ -363,6 +368,7 @@ impl Clone for Engine {
             events_rx: self.events_rx.clone(),
             client_task: self.client_task.clone(),
             client_channels: self.client_channels.clone(),
+            client_sessions: self.client_sessions.clone(),
             daemon_req: self.daemon_req.clone(),
             daemon_online: self.daemon_online.clone(),
             host_running: self.host_running.clone(),
@@ -427,6 +433,7 @@ impl Engine {
             events_rx: Arc::new(Mutex::new(Some(rx))),
             client_task: Arc::new(Mutex::new(None)),
             client_channels: Arc::new(Mutex::new(ClientChannels::default())),
+            client_sessions: Arc::new(Mutex::new(Vec::new())),
             daemon_req: Arc::new(Mutex::new(None)),
             daemon_online: Arc::new(AtomicBool::new(false)),
             host_running: Arc::new(AtomicBool::new(false)),
@@ -502,6 +509,7 @@ mod preferences;
 #[cfg(test)]
 mod recovery_tests;
 mod saved;
+mod sessions;
 #[cfg(test)]
 mod tests;
 

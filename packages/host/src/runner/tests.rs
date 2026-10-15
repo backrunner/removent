@@ -1,8 +1,37 @@
 use super::*;
 use removent_proto::{HandshakeClient, Hello};
 
+#[test]
+fn native_and_vnc_slots_are_independent_and_exclusive_per_protocol() {
+    let slots = ProtocolSlots::default();
+    let native = slots.native.clone().try_acquire_owned().unwrap();
+    let vnc = slots.vnc.clone().try_acquire_owned().unwrap();
+    assert!(slots.native.clone().try_acquire_owned().is_err());
+    assert!(slots.vnc.clone().try_acquire_owned().is_err());
+    drop(native);
+    assert!(slots.native.clone().try_acquire_owned().is_ok());
+    assert!(slots.vnc.clone().try_acquire_owned().is_err());
+    drop(vnc);
+    assert!(slots.vnc.clone().try_acquire_owned().is_ok());
+}
+
+#[test]
+fn session_input_isolates_stateful_sinks_and_preserves_recorders() {
+    let real: Option<Arc<dyn InputSink>> = Some(Arc::new(crate::RealInputSink::new()));
+    let native = session_input(&real).unwrap();
+    let vnc = session_input(&real).unwrap();
+    assert!(!Arc::ptr_eq(&native, &vnc));
+    assert!(!Arc::ptr_eq(&native, real.as_ref().unwrap()));
+    let recorder: Option<Arc<dyn InputSink>> = Some(Arc::new(crate::RecorderInputSink::default()));
+    assert!(Arc::ptr_eq(
+        &session_input(&recorder).unwrap(),
+        recorder.as_ref().unwrap()
+    ));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shutdown_reaps_connection_waiting_for_pairing() {
+    use tokio::io::AsyncReadExt;
     let dir = tempfile::tempdir().unwrap();
     let paths = DataPaths {
         root: dir.path().to_owned(),
@@ -11,6 +40,9 @@ async fn shutdown_reaps_connection_waiting_for_pairing() {
     let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     let addr = socket.local_addr().unwrap();
     drop(socket);
+    let vnc_socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let vnc_addr = vnc_socket.local_addr().unwrap();
+    drop(vnc_socket);
     let stop = CancellationToken::new();
     // Callbacks are retained by ConnectionCtx: a leaked negotiation task
     // would keep this sentinel alive after serve_forever returns.
@@ -20,7 +52,8 @@ async fn shutdown_reaps_connection_waiting_for_pairing() {
         paths,
         settings: Settings {
             host_port: addr.port(),
-            vnc_enabled: false,
+            vnc_enabled: true,
+            vnc_port: vnc_addr.port(),
             authentication: removent_core::AuthenticationSettings {
                 mode: removent_proto::AuthenticationMode::PairingCode,
                 ..Default::default()
@@ -71,6 +104,23 @@ async fn shutdown_reaps_connection_waiting_for_pairing() {
         })
         .await
         .unwrap();
+    // A native negotiation holds its protocol slot. VNC must still reach its
+    // real RFB handshake, while a second VNC connection is rejected promptly.
+    let mut vnc = tokio::net::TcpStream::connect(vnc_addr).await.unwrap();
+    let mut greeting = [0; 12];
+    tokio::time::timeout(Duration::from_secs(2), vnc.read_exact(&mut greeting))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&greeting, b"RFB 003.008\n");
+    let mut duplicate_vnc = tokio::net::TcpStream::connect(vnc_addr).await.unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(2), duplicate_vnc.read_u8())
+        .await
+        .unwrap();
+    assert!(
+        result.is_err(),
+        "second VNC session must not get a greeting"
+    );
     // No pairing stream arrives. Previously this task survived host stop
     // for the full pairing deadline and retained the advertiser/resources.
     stop.cancel();
@@ -86,4 +136,10 @@ async fn shutdown_reaps_connection_waiting_for_pairing() {
     tokio::time::timeout(Duration::from_secs(1), conn.inner().closed())
         .await
         .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), vnc.read_u8())
+            .await
+            .unwrap()
+            .is_err()
+    );
 }

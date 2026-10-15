@@ -42,7 +42,7 @@ status.vnc_updated: VNC 设置已更新（重启被控服务后生效）
 status.connection_save_failed: "连接保存失败：%{err}"
 status.connection_removed: 已移除保存的连接
 
-err.session_in_progress: 已有进行中的会话
+err.session_in_progress: 此设备的该协议已有会话正在连接或运行，请先断开该会话
 err.frame_channel_missing: 帧通道缺失
 
 session.input_overloaded: 输入传输阻塞，连接已关闭。请重新连接。

@@ -32,16 +32,12 @@ impl Drop for SessionTasks {
 struct SessionExit {
     cancel: CancellationToken,
     active: Arc<std::sync::Mutex<Option<CancellationToken>>>,
-    cbs: Arc<HostCallbacks>,
 }
 
 impl Drop for SessionExit {
     fn drop(&mut self) {
         self.cancel.cancel();
         self.active.lock().unwrap().take();
-        (self.cbs.on_event)(HostEvent::SessionEnded {
-            reason: "peer disconnected".into(),
-        });
     }
 }
 
@@ -155,11 +151,12 @@ pub(super) async fn run_connection(
             peer_name: peer_name.clone(),
         });
     }
-    (ctx.cbs.on_event)(HostEvent::SessionStarted {
+    let _session_events = SessionEventGuard::new(
+        ctx.cbs.clone(),
         peer_name,
-        peer_fp16: established.peer_fp_hex.chars().take(16).collect(),
-        codec: format!("{:?}", established.ack.video.codec),
-    });
+        established.peer_fp_hex.chars().take(16).collect(),
+        format!("{:?}", established.ack.video.codec),
+    );
 
     // Advertise the busy bit while the session lives (reset on any exit path).
     if let Err(e) = ctx.advertiser.set_busy(true) {
@@ -171,7 +168,6 @@ pub(super) async fn run_connection(
     let _exit = SessionExit {
         cancel: established.cancel.clone(),
         active: ctx.active_session.clone(),
-        cbs: ctx.cbs.clone(),
     };
     let mut tasks = SessionTasks::default();
 

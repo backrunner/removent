@@ -56,7 +56,8 @@ impl HomeView {
                                 });
                             } else {
                                 match this.engine.connect_request(request) {
-                                    Ok(()) => {
+                                    Ok(engine) => {
+                                        this.engine = engine;
                                         this.connecting =
                                             Some(t!("pairing.invitation").to_string());
                                         this.connection_stage = ConnectionStage::Resolving;
@@ -142,7 +143,8 @@ impl HomeView {
                                         memo
                                     };
                                     match this.engine.connect_request(request) {
-                                        Ok(()) => {
+                                        Ok(engine) => {
+                                            this.engine = engine;
                                             this.connecting = Some(name.clone());
                                             this.connection_stage = ConnectionStage::Resolving;
                                             this.set_status(

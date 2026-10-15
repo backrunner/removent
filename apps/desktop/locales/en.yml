@@ -42,7 +42,7 @@ status.vnc_updated: VNC settings updated (restart the host service to apply)
 status.connection_save_failed: "Failed to save the connection: %{err}"
 status.connection_removed: Saved connection removed
 
-err.session_in_progress: A session is already in progress
+err.session_in_progress: This device already has a connecting or active session for this protocol. Disconnect it first.
 err.frame_channel_missing: Frame channel missing
 
 session.input_overloaded: Connection closed because input delivery stalled. Please reconnect.

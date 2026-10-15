@@ -2,14 +2,17 @@ use super::*;
 
 impl Engine {
     /// Connect to the peer at the given address and enter a viewing session.
-    pub fn connect_to(&self, addr: SocketAddr) -> Result<()> {
+    pub fn connect_to(&self, addr: SocketAddr) -> Result<Self> {
         self.connect_request(ConnectionRequest::native(addr))
     }
 
-    pub fn connect_request(&self, request: ConnectionRequest) -> Result<()> {
-        // Serialize the check, generation change and task installation with disconnect.
-        let mut task = self.client_task.lock().unwrap();
-        if task.as_ref().is_some_and(|t| !t.is_finished()) {
+    /// Returns a handle scoped to the new session. Existing viewers retain
+    /// their own handles, so input, frames, recovery and cancellation stay local.
+    pub fn connect_request(&self, request: ConnectionRequest) -> Result<Self> {
+        let mut sessions = self.client_sessions.lock().unwrap();
+        sessions.retain(sessions::ClientSlot::is_live);
+        let target = sessions::ClientTarget::new(&request);
+        if sessions.iter().any(|slot| slot.target.overlaps(&target)) {
             anyhow::bail!(t!("err.session_in_progress").to_string());
         }
         let identity = if request.protocol == ConnectionProtocol::Removent {
@@ -19,8 +22,11 @@ impl Engine {
         };
         let paths = self.paths.clone();
         let settings = self.settings.lock().unwrap().clone();
+        let mut client = self.clone();
+        client.client_task = Arc::new(Mutex::new(None));
+        client.client_channels = Arc::new(Mutex::new(ClientChannels::default()));
         let (generation, recovery) = {
-            let mut channels = self.client_channels.lock().unwrap();
+            let mut channels = client.client_channels.lock().unwrap();
             let generation = channels.invalidate();
             (generation, channels.recovery.clone())
         };
@@ -28,8 +34,9 @@ impl Engine {
             generation,
             recovery: recovery.clone(),
             started: std::time::Instant::now(),
-            channels: self.client_channels.clone(),
+            channels: client.client_channels.clone(),
             events: self.events_tx.clone(),
+            sessions: Arc::downgrade(&self.client_sessions),
         };
         // Record only the destination and protocol, never the request/credentials.
         let span = tracing::info_span!("client_connection", pid = std::process::id(), attempt = attempt.generation,
@@ -80,8 +87,13 @@ impl Engine {
             }
             .instrument(span),
         );
-        *task = Some(handle);
-        Ok(())
+        *client.client_task.lock().unwrap() = Some(handle);
+        sessions.push(sessions::ClientSlot {
+            generation,
+            target,
+            task: client.client_task.clone(),
+        });
+        Ok(client)
     }
 
     pub fn client_recovery(&self) -> removent_client::recovery::Recovery {

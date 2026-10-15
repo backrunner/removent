@@ -28,10 +28,6 @@ pub struct DaemonState {
     /// Notification of `enabled` changes (subscribed by the host manager).
     pub enabled_watch: watch::Sender<bool>,
     pub sessions: Mutex<Vec<SessionInfo>>,
-    next_session_id: AtomicU64,
-    /// ID of the current active session (the runner handles connections serially, at
-    /// most one; 0 = none).
-    current_session: AtomicU64,
     pub pending_pin: Mutex<Option<String>>,
     pending_pin_expiry: AtomicU64,
     /// Number of connected management ends (tray/app/cli).
@@ -86,8 +82,6 @@ impl DaemonState {
             relay_state: Mutex::new((relay_configured.then_some(false), None)),
             enabled_watch,
             sessions: Mutex::new(Vec::new()),
-            next_session_id: AtomicU64::new(1),
-            current_session: AtomicU64::new(0),
             pending_pin: Mutex::new(None),
             pending_pin_expiry: AtomicU64::new(0),
             tray_connections: AtomicUsize::new(0),
@@ -227,9 +221,8 @@ impl DaemonState {
         self.broadcast(IpcEvent::PairingDone { peer_name });
     }
 
-    /// Session start: register and broadcast, returning the session id.
-    pub fn session_started(&self, peer_name: String, peer_fp16: String, codec: String) -> u64 {
-        let id = self.next_session_id.fetch_add(1, Ordering::SeqCst);
+    /// Session start: register the runner's unique id and broadcast.
+    pub fn session_started(&self, id: u64, peer_name: String, peer_fp16: String, codec: String) {
         let since_unix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -242,18 +235,18 @@ impl DaemonState {
             video_codec: codec,
         };
         self.sessions.lock().unwrap().push(session.clone());
-        self.current_session.store(id, Ordering::SeqCst);
         self.broadcast(IpcEvent::SessionStarted { session });
-        id
     }
 
-    /// Session end: remove the current session and broadcast.
-    pub fn session_ended(&self, reason: String) {
-        let id = self.current_session.swap(0, Ordering::SeqCst);
-        if id == 0 {
+    /// Session end: remove only the matching protocol session and broadcast.
+    pub fn session_ended(&self, id: u64, reason: String) {
+        let mut sessions = self.sessions.lock().unwrap();
+        let count = sessions.len();
+        sessions.retain(|s| s.id != id);
+        if sessions.len() == count {
             return;
         }
-        self.sessions.lock().unwrap().retain(|s| s.id != id);
+        drop(sessions);
         self.broadcast(IpcEvent::SessionEnded {
             session_id: id,
             reason,

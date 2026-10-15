@@ -10,6 +10,11 @@ pub const BUTTON_MIDDLE: u8 = 1 << 2;
 
 /// Host-side input injection surface.
 pub trait InputSink: Send + Sync {
+    /// Stateful sinks return a fresh coordinate mapper for each session.
+    /// Stateless recorders may keep sharing the original sink.
+    fn for_session(&self) -> Option<std::sync::Arc<dyn InputSink>> {
+        None
+    }
     fn mouse(
         &self,
         display_id: u64,
@@ -86,6 +91,9 @@ impl Default for RealInputSink {
 }
 
 impl InputSink for RealInputSink {
+    fn for_session(&self) -> Option<std::sync::Arc<dyn InputSink>> {
+        Some(std::sync::Arc::new(Self::new()))
+    }
     fn mouse(
         &self,
         display_id: u64,

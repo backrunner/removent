@@ -197,6 +197,11 @@ impl HomeView {
                 window.focus(&focus, cx);
             }
             UiEvent::SessionReady { codec, .. } => {
+                // Recovery of an existing viewer must not dismiss the form
+                // the user is filling for another connection.
+                if self.connecting.is_none() {
+                    return;
+                }
                 self.connection_dialog = None;
                 self.connection_subscription = None;
                 // Close only the controlling side's Entry dialog: dropping the oneshot here
@@ -238,7 +243,9 @@ impl HomeView {
                 }
             }
             UiEvent::ConnectFailed { error: e, .. } => {
-                if let Some(dialog) = &self.connection_dialog {
+                if self.connecting.is_some()
+                    && let Some(dialog) = &self.connection_dialog
+                {
                     dialog.update(cx, |form, cx| {
                         form.set_connecting(
                             false,
@@ -268,7 +275,9 @@ impl HomeView {
                     self.cancelled_generation = None;
                     return;
                 }
-                if let Some(dialog) = &self.connection_dialog {
+                if self.connecting.is_some()
+                    && let Some(dialog) = &self.connection_dialog
+                {
                     dialog.update(cx, |form, cx| form.set_connecting(false, None, cx));
                 }
                 self.connecting = None;

@@ -130,12 +130,9 @@ impl Engine {
     /// True while a controlling-side session (viewer open) or a controlled-side
     /// peer session is running — installs are deferred until it ends.
     pub fn session_active(&self) -> bool {
-        let client_live = self
-            .client_task
-            .lock()
-            .unwrap()
-            .as_ref()
-            .is_some_and(|t| !t.is_finished());
+        let mut sessions = self.client_sessions.lock().unwrap();
+        sessions.retain(sessions::ClientSlot::is_live);
+        let client_live = !sessions.is_empty();
         client_live || self.host_sessions.load(Ordering::SeqCst) > 0
     }
 

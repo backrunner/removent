@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "handshake_tests.rs"]
+mod tests;
+
 mod authentication;
 mod system_account;
 
@@ -31,6 +35,15 @@ pub(super) async fn expect_msg(
 
 /// Serve one inbound connection through negotiation and return the session handle;
 /// the caller then spawns [`spawn_video_loop`] / [`spawn_audio_loop`] / the control-pump task.
+type ServedConnection = (
+    EstablishedSession,
+    mpsc::Receiver<()>,
+    tokio::sync::watch::Receiver<QualityState>,
+    mpsc::Receiver<ControlMsg>,
+    ControlSink,
+    ControlSource,
+);
+
 pub async fn serve_connection(
     conn: RvpConnection,
     identity: &DeviceIdentity,
@@ -38,17 +51,27 @@ pub async fn serve_connection(
     cfg: &HostConfig,
     interactions: HostInteractions,
     main_display: removent_proto::DisplayInfo,
-) -> Result<
-    (
-        EstablishedSession,
-        mpsc::Receiver<()>,
-        tokio::sync::watch::Receiver<QualityState>,
-        mpsc::Receiver<ControlMsg>,
-        ControlSink,
-        ControlSource,
-    ),
-    HostError,
-> {
+) -> Result<ServedConnection, HostError> {
+    serve_connection_with_display(conn, identity, peers, cfg, interactions, || async {
+        Ok(main_display)
+    })
+    .await
+}
+
+/// Real capture resolves its display only after authentication and admission.
+/// The provider may wake the display and wait for WindowServer to expose it.
+pub(crate) async fn serve_connection_with_display<F, Fut>(
+    conn: RvpConnection,
+    identity: &DeviceIdentity,
+    peers: &mut PeersStore,
+    cfg: &HostConfig,
+    interactions: HostInteractions,
+    prepare_display: F,
+) -> Result<ServedConnection, HostError>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<removent_proto::DisplayInfo, HostError>>,
+{
     cfg.authentication.validate().map_err(HostError::Rejected)?;
     let peer_fp = conn
         .peer_fingerprint()
@@ -140,6 +163,7 @@ pub async fn serve_connection(
     if let Some(token) = hello.hello.resume_token
         && let Some((prev_ack, peer_caps, matched_prev)) = resume_verdict.into_inner().unwrap()
     {
+        let main_display = prepare_session_display(&mut sink, prepare_display).await?;
         invalidate_resume(&peer_fp);
         let new_token = new_token();
         let peer_caps = cfg.available_caps(peer_caps);
@@ -330,6 +354,8 @@ pub async fn serve_connection(
         }
     }
 
+    // Never advertise a fabricated display while the physical display sleeps.
+    let main_display = prepare_session_display(&mut sink, prepare_display).await?;
     // Accept and negotiate.
     sink.send(ControlMsg::SessionAccept).await?;
     let display_w = main_display.w_px;
@@ -411,6 +437,26 @@ pub async fn serve_connection(
         sink,
         source,
     ))
+}
+
+async fn prepare_session_display<F, Fut>(
+    sink: &mut ControlSink,
+    prepare: F,
+) -> Result<removent_proto::DisplayInfo, HostError>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<removent_proto::DisplayInfo, HostError>>,
+{
+    match prepare().await {
+        Ok(display) => Ok(display),
+        Err(error) => {
+            sink.send(ControlMsg::Error {
+                code: removent_proto::ErrorCode::DisplayGone,
+            })
+            .await?;
+            Err(error)
+        }
+    }
 }
 
 /// AV1 is intentionally opt-in for remote desktop sessions. Software AV1 has

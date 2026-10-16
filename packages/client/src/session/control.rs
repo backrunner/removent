@@ -133,7 +133,8 @@ pub(super) fn build_session(
                                     *pump_resume_token.lock().unwrap() = Some(t);
                                 }
                             }
-                            ControlMsg::SessionEnd { .. } => {
+                            ControlMsg::SessionEnd { reason } => {
+                                tracing::warn!(?reason, "host ended the session");
                                 pump_clean_end.store(true, std::sync::atomic::Ordering::SeqCst);
                                 break;
                             },

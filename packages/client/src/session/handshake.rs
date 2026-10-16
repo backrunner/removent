@@ -21,10 +21,13 @@ pub(super) async fn expect_msg(
             .transpose()
             .map_err(ConnectError::Net)?
             .ok_or(ConnectError::Timeout(what))?;
-        if let ControlItem::Msg(m) = item
-            && pred(&m)
-        {
-            return Ok(*m);
+        if let ControlItem::Msg(m) = item {
+            if let ControlMsg::Error { code, .. } = *m {
+                return Err(ConnectError::Rejected(code.message().into()));
+            }
+            if pred(&m) {
+                return Ok(*m);
+            }
         }
     }
 }

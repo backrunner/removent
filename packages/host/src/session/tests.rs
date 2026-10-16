@@ -608,35 +608,6 @@ async fn blocked_control_write_releases_inputs_on_cancel_abort_and_timeout() {
     }
 }
 
-#[tokio::test]
-async fn blocked_audio_write_exits_on_cancel() {
-    let (_endpoints, _client, host) = quic_pair().await;
-    host.inner().set_send_window(0);
-    let stream = host.open_media_stream().await.unwrap();
-    let (tx, rx) = mpsc::channel(1);
-    let cancel = CancellationToken::new();
-    let mut task = spawn_audio_loop(stream, rx, 96, cancel.clone());
-    tx.send(removent_media_capture::AudioFrame {
-        samples: vec![0; 960],
-        pts_micros: 1,
-    })
-    .await
-    .unwrap();
-    tokio::time::timeout(Duration::from_secs(2), async {
-        while tx.capacity() == 0 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    assert!(!task.is_finished());
-    cancel.cancel();
-    tokio::time::timeout(Duration::from_secs(1), &mut task)
-        .await
-        .unwrap()
-        .unwrap();
-}
-
 #[test]
 fn token_bucket_allows_burst_up_to_capacity() {
     let t0 = std::time::Instant::now();

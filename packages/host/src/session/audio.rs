@@ -7,9 +7,10 @@ pub fn spawn_audio_loop(
     bitrate_kbps: u32,
     cancel: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
-    let cancel_on_exit = cancel.clone().drop_guard();
     tokio::spawn(async move {
-        let _cancel_on_exit = cancel_on_exit;
+        // Audio is optional. Losing its capture source or receiver must not
+        // cancel the shared session token and tear down healthy video/control.
+        // Session cancellation still stops this task, including blocked writes.
         let work = async {
             let mut encoder = match removent_media_codec::AudioEncoder::new(
                 bitrate_kbps,
@@ -60,3 +61,6 @@ pub fn spawn_audio_loop(
         }
     })
 }
+
+#[cfg(test)]
+mod tests;

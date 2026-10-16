@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::session::{
-    ControlPumpDeps, HostConfig, HostInteractions, fit_capture_dims, serve_connection,
+    ControlPumpDeps, HostConfig, HostInteractions, fit_capture_dims, serve_connection_with_display,
     spawn_audio_loop, spawn_control_pump, spawn_video_loop,
 };
 
@@ -93,19 +93,6 @@ pub(super) async fn run_connection(
         }),
     };
 
-    let display =
-        removent_input::display_list()
-            .into_iter()
-            .next()
-            .unwrap_or(removent_proto::DisplayInfo {
-                id: 1,
-                w_px: 1280,
-                h_px: 720,
-                scale: 1.0,
-                dpi: 96,
-                is_main: true,
-            });
-
     let host_cfg = HostConfig {
         authentication: ctx.settings.authentication.clone(),
         auth_paths: Some(ctx.paths.clone()),
@@ -123,13 +110,22 @@ pub(super) async fn run_connection(
         },
     };
 
-    let served = serve_connection(
+    let mut display_awake = None;
+    let mut capture_display = None;
+    let served = serve_connection_with_display(
         conn.clone(),
         &ctx.identity,
         &mut peers,
         &host_cfg,
         interactions,
-        display.clone(),
+        || async {
+            // Authentication and admission precede this callback, including
+            // quick resume. Unapproved peers cannot wake the physical screen.
+            display_awake = Some(super::display::DisplayAwake::new());
+            let display = super::display::wait_for_display().await?;
+            capture_display = Some(display.clone());
+            Ok(display)
+        },
     )
     .await;
 
@@ -137,9 +133,13 @@ pub(super) async fn run_connection(
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(err=%e, "connection closed before session established");
+            // Give a terminal protocol error time to reach the client before
+            // the owning task closes QUIC (which otherwise races the error).
+            let _ = tokio::time::timeout(Duration::from_secs(1), conn.inner().closed()).await;
             return;
         }
     };
+    let display = capture_display.expect("established session has a prepared display");
 
     pairing_shown.store(false, Ordering::SeqCst);
     let peer_name = peers
@@ -296,8 +296,10 @@ pub(super) async fn run_connection(
             display.id as u32,
             cap_w,
             cap_h,
-            video_tx,
-            audio_enabled.then_some(audio_tx),
+            // Keep the producers alive until the explicit capture failure has
+            // been sent. Otherwise video EOF cancels the control pump first.
+            video_tx.clone(),
+            audio_enabled.then_some(audio_tx.clone()),
         );
         match &mut cap {
             Ok(cap) => {

@@ -403,6 +403,30 @@ async fn irrelevant_messages_do_not_extend_negotiation_deadline() {
 }
 
 #[tokio::test]
+async fn display_failure_during_admission_is_reported_without_waiting_for_media() {
+    let (session, mut peer) = fixture(Caps::all(), None).await;
+    // Feed a host-side protocol error through the negotiation reader directly.
+    // The client fixture owns the opposite control stream.
+    session
+        .cmd_tx
+        .send(ControlMsg::Error {
+            code: removent_proto::ErrorCode::DisplayGone,
+        })
+        .await
+        .unwrap();
+    let result = expect_msg(
+        &mut peer.source,
+        "SessionAccept",
+        Duration::from_secs(1),
+        |m| matches!(m, ControlMsg::SessionAccept),
+    )
+    .await;
+    assert!(
+        matches!(result, Err(ConnectError::Rejected(message)) if message == removent_proto::ErrorCode::DisplayGone.message())
+    );
+}
+
+#[tokio::test]
 async fn peer_end_or_control_eof_closes_pending_media_receivers() {
     for eof in [false, true] {
         let (mut session, mut peer) = fixture(Caps::all(), None).await;

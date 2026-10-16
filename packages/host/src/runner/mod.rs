@@ -16,6 +16,7 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 mod connection;
+mod display;
 
 use crate::input_sink::InputSink;
 use crate::session::PromptFuture;

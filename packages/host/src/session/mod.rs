@@ -185,6 +185,7 @@ mod video;
 pub use audio::spawn_audio_loop;
 pub use control::{ControlPumpDeps, TokenBucket, spawn_control_pump};
 pub use handshake::serve_connection;
+pub(crate) use handshake::serve_connection_with_display;
 #[cfg(test)]
 use resume::{PAIRING_BEGIN_MIN_INTERVAL, PairingBeginLimiter, resume_store};
 pub use resume::{clear_resume_registry, refresh_resume, validate_resume};

@@ -13,9 +13,9 @@ The button above pulls the latest stable `Removent-<version>-macos-arm64.dmg` st
 
 ## Stable release
 
-[Download v0.1.5 and read the release notes](https://github.com/backrunner/removent/releases/tag/v0.1.5). This patch excludes this computer from Removent, VNC and RDP nearby discovery, including loopback and assigned network addresses. See [the relay guide](/docs/relay) to install the standalone relay.
+[Download v0.1.6 and read the release notes](https://github.com/backrunner/removent/releases/tag/v0.1.6). This release improves remote video startup and recovery, adds per-connection quality ceilings, and supports independent sessions across devices and protocols. See [the relay guide](/docs/relay) to install the standalone relay.
 
-The Stable and Beta update channels can both upgrade earlier `0.1.4-beta.N` installations to this release. The desktop app requires Apple Silicon and macOS 26 or later. CloudKit Production record exchange has been verified between isolated stores on one Mac; physical Mac/iPhone convergence remains unverified.
+The Stable and Beta update channels can both upgrade earlier installations to this release. The desktop app requires Apple Silicon and macOS 26 or later. CloudKit Production record exchange has been verified between isolated stores on one Mac; physical Mac/iPhone convergence remains unverified.
 
 ## Install and connect
 

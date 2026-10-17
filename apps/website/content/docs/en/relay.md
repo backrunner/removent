@@ -22,19 +22,19 @@ To review the script or install a specific version first:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install_relay.sh -o install_relay.sh
-sh install_relay.sh --version v0.1.5 --no-setup
+sh install_relay.sh --version v0.1.6 --no-setup
 sudo removent-relay setup --address removent://relay.example.com:48700
 ```
 
 ## Stable updates
 
-Automatic updates, `check-update`, and rotating local relay logs are included in **v0.1.5**. The installer defaults to the latest stable release. To install this version explicitly:
+Automatic updates, `check-update`, and rotating local relay logs were introduced in **v0.1.5**. The installer defaults to the latest stable release. To install the current stable version explicitly:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/backrunner/removent/v0.1.5/scripts/install_relay.sh | sh -s -- --version v0.1.5
+curl -fsSL https://raw.githubusercontent.com/backrunner/removent/v0.1.6/scripts/install_relay.sh | sh -s -- --version v0.1.6
 ```
 
-[Read the stable release notes and download](https://github.com/backrunner/removent/releases/tag/v0.1.5). Restart an existing service after installation. Automatic updates are disabled by default and follow stable releases when enabled, including upgrading an earlier beta to this stable version.
+[Read the stable release notes and download](https://github.com/backrunner/removent/releases/tag/v0.1.6). Restart an existing service after installation. Automatic updates are disabled by default and follow stable releases when enabled, including upgrading an earlier beta to this stable version.
 
 ## Host a relay on a Mac
 

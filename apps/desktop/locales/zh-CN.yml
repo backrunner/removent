@@ -121,7 +121,7 @@ update.auto_check: 自动检查更新
 update.channel: 更新渠道
 update.channel_stable: Stable
 update.channel_beta: Beta
-update.channel_hint: Stable 接收正式版，Beta 也接收测试版。切换渠道只会升级，不会降级。
+update.channel_hint: Stable 仅正式版，Beta 包含测试版；切换不会降级。
 update.checking: 正在检查更新…
 update.up_to_date: 当前渠道没有更高版本
 update.last_checked: 上次检查于 %{time}

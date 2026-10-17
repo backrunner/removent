@@ -303,48 +303,59 @@ impl HomeView {
                     .child(Divider::horizontal())
                     .child(
                         div()
+                            .debug_selector(|| "update-channel-row".into())
                             .flex()
-                            .flex_col()
-                            .gap_2()
+                            .items_center()
+                            .justify_between()
+                            .gap_3()
                             .px_4()
                             .py_3()
-                            .child(setting_label(
-                                t!("update.channel").to_string(),
-                                t!("update.channel_hint").to_string(),
-                                cx,
-                            ))
+                            .child(
+                                div()
+                                    .debug_selector(|| "update-channel-label".into())
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(setting_label(
+                                        t!("update.channel").to_string(),
+                                        t!("update.channel_hint").to_string(),
+                                        cx,
+                                    )),
+                            )
                             .child({
                                 let view = cx.entity();
-                                crate::ui::widgets::segmented_with_disabled(
-                                    "update-channel",
-                                    &[
-                                        t!("update.channel_stable").to_string(),
-                                        t!("update.channel_beta").to_string(),
-                                    ],
-                                    usize::from(settings.update_channel == UpdateChannel::Beta),
-                                    busy,
-                                    Rc::new(move |i, _, _, app| {
-                                        view.update(app, |this, cx| {
-                                            let channel = if i == 1 {
-                                                UpdateChannel::Beta
-                                            } else {
-                                                UpdateChannel::Stable
-                                            };
-                                            match this.engine.set_update_channel(channel) {
-                                                Ok(()) => {
-                                                    this.update_status =
-                                                        this.engine.update_status();
-                                                    this.engine.check_for_updates_silently();
+                                div()
+                                    .debug_selector(|| "update-channel-control".into())
+                                    .flex_shrink_0()
+                                    .child(crate::ui::widgets::segmented_with_disabled(
+                                        "update-channel",
+                                        &[
+                                            t!("update.channel_stable").to_string(),
+                                            t!("update.channel_beta").to_string(),
+                                        ],
+                                        usize::from(settings.update_channel == UpdateChannel::Beta),
+                                        busy,
+                                        Rc::new(move |i, _, _, app| {
+                                            view.update(app, |this, cx| {
+                                                let channel = if i == 1 {
+                                                    UpdateChannel::Beta
+                                                } else {
+                                                    UpdateChannel::Stable
+                                                };
+                                                match this.engine.set_update_channel(channel) {
+                                                    Ok(()) => {
+                                                        this.update_status =
+                                                            this.engine.update_status();
+                                                        this.engine.check_for_updates_silently();
+                                                    }
+                                                    Err(reason) => {
+                                                        this.set_status(reason, StatusTone::Err)
+                                                    }
                                                 }
-                                                Err(reason) => {
-                                                    this.set_status(reason, StatusTone::Err)
-                                                }
-                                            }
-                                            cx.notify();
-                                        });
-                                    }),
-                                    cx,
-                                )
+                                                cx.notify();
+                                            });
+                                        }),
+                                        cx,
+                                    ))
                             }),
                     )
                     .child(Divider::horizontal())

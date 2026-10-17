@@ -121,7 +121,7 @@ update.auto_check: Automatically check for updates
 update.channel: Update Channel
 update.channel_stable: Stable
 update.channel_beta: Beta
-update.channel_hint: Stable receives final releases; Beta also receives beta builds. Switching channels never downgrades your app.
+update.channel_hint: Stable gets final releases; Beta includes test builds. Switching never downgrades.
 update.checking: Checking for updates…
 update.up_to_date: No newer version in this channel
 update.last_checked: Last checked at %{time}

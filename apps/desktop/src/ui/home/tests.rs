@@ -350,6 +350,11 @@ fn cloud_sync_switch_persists_without_requiring_cloud_access(cx: &mut TestAppCon
         assert_eq!(status["enabled"], expected);
         if expected {
             assert_eq!(status["code"], "configuration");
+            let retry = cx
+                .debug_bounds("cloud-sync-retry")
+                .expect("manual sync action renders when enabled");
+            assert!(retry.right() - retry.left() <= px(92.));
+            assert!(retry.right() <= px(860.) && retry.bottom() <= px(650.));
         }
     }
 }
@@ -388,15 +393,48 @@ fn update_channel_controls_persist_and_ignore_obsolete_ready_events(cx: &mut Tes
     });
     let view = slot.borrow_mut().take().unwrap();
     cx.simulate_resize(gpui::size(px(860.), px(1100.)));
-    cx.run_until_parked();
-    let stable = cx
-        .debug_bounds("update-channel-0")
-        .expect("stable choice renders");
-    let beta = cx
-        .debug_bounds("update-channel-1")
-        .expect("beta choice renders");
-    assert!(stable.left() >= px(0.) && beta.right() <= px(860.));
-    assert!(beta.bottom() <= px(1100.));
+    for dark in [false, true] {
+        cx.update(|window, cx| {
+            gpui_component::Theme::change(
+                if dark {
+                    gpui_component::ThemeMode::Dark
+                } else {
+                    gpui_component::ThemeMode::Light
+                },
+                Some(window),
+                cx,
+            );
+            crate::theme::apply(dark, cx);
+        });
+        cx.run_until_parked();
+        let stable = cx
+            .debug_bounds("update-channel-0")
+            .expect("stable choice renders");
+        let beta = cx
+            .debug_bounds("update-channel-1")
+            .expect("beta choice renders");
+        let row = cx
+            .debug_bounds("update-channel-row")
+            .expect("update channel row renders");
+        let label = cx
+            .debug_bounds("update-channel-label")
+            .expect("update channel label renders");
+        let control = cx
+            .debug_bounds("update-channel-control")
+            .expect("update channel control renders");
+        assert!(
+            label.right() < control.left(),
+            "channel choices stay beside the description"
+        );
+        assert!(
+            row.right() - control.right() <= px(20.),
+            "channel choices align to the right"
+        );
+        assert!(control.top() >= row.top() && control.bottom() <= row.bottom());
+        assert!(stable.left() >= px(0.) && beta.right() <= px(860.));
+        assert!(beta.bottom() <= px(1100.));
+    }
+    let beta = cx.debug_bounds("update-channel-1").unwrap();
     cx.simulate_mouse_move(beta.center(), None, Default::default());
     cx.simulate_click(beta.center(), Default::default());
     cx.run_until_parked();

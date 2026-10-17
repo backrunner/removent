@@ -143,16 +143,21 @@ impl HomeView {
                 )
                 .when(enabled, |view| {
                     view.child(
-                        Button::new("cloud-sync-retry")
-                            .label(t!("sync.retry").to_string())
-                            .outline()
-                            .h(px(32.))
-                            .w(px(112.))
+                        div()
+                            .debug_selector(|| "cloud-sync-retry".into())
                             .flex_shrink_0()
-                            .disabled(code == "syncing")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.update_cloud_sync(Command::Retry, cx)
-                            })),
+                            .child(
+                                Button::new("cloud-sync-retry")
+                                    .label(t!("sync.retry").to_string())
+                                    .primary()
+                                    .compact()
+                                    .h(px(30.))
+                                    .w(px(88.))
+                                    .disabled(code == "syncing")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.update_cloud_sync(Command::Retry, cx)
+                                    })),
+                            ),
                     )
                 }),
         );

@@ -104,6 +104,7 @@ fn discovery_wake_configuration_is_atomic_and_does_not_clear_existing_credential
 
 fn request(protocol: ConnectionProtocol, host: &str, port: u16) -> ConnectionRequest {
     ConnectionRequest {
+        video_quality: Default::default(),
         pairing_code: None,
         protocol,
         address: ConnectionAddress {
@@ -442,4 +443,23 @@ fn discovery_matches_only_direct_protocol_and_port_using_broadcast_aliases() {
         .unwrap(),
     );
     assert!(!saved.matches_discovered(ConnectionProtocol::Vnc, &address, &[]));
+}
+
+#[test]
+fn video_quality_is_per_connection_and_old_bookmarks_default_to_standard() {
+    use removent_proto::VideoQuality;
+    let old: SavedConnection = serde_json::from_str(r#"{"host":"legacy","port":48688}"#).unwrap();
+    assert_eq!(old.video_quality, VideoQuality::Standard);
+    let mut store = SavedConnections::in_memory();
+    for (index, quality) in VideoQuality::ALL.into_iter().enumerate() {
+        let mut request = ConnectionRequest::native(([127, 0, 0, 1], 48688 + index as u16).into());
+        request.video_quality = quality;
+        let entry = store
+            .upsert(SavedConnection::from_request(&request, "test"))
+            .unwrap();
+        let restored: SavedConnection =
+            serde_json::from_str(&serde_json::to_string(&entry).unwrap()).unwrap();
+        assert_eq!(restored.to_request().video_quality, quality);
+    }
+    assert_eq!(store.all().len(), 4);
 }

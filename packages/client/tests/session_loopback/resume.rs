@@ -126,6 +126,7 @@ async fn quick_resume_reconnects_and_rotates_token() {
     )
     .unwrap();
     let mk_cfg = || ClientConfig {
+        video_quality: Default::default(),
         host_identity_verified: false,
         pairing_code: None,
         device_name: "ResumeClient".into(),

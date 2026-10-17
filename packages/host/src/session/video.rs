@@ -1,8 +1,9 @@
 use super::*;
+use removent_media_capture::{CapturedPixels, CapturedVideoFrame};
 
 pub(super) fn mark_submitted_frame_sent(
     dedup: &mut FrameDeduplicator,
-    submitted_frames: &mut HashMap<i64, Arc<[u8]>>,
+    submitted_frames: &mut HashMap<i64, Arc<Vec<u8>>>,
     pts_us: i64,
 ) {
     if let Some(sent_bgra) = submitted_frames.remove(&pts_us) {
@@ -24,7 +25,7 @@ pub(super) fn mark_submitted_frame_sent(
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_video_loop(
     mut stream: removent_net::quinn::SendStream,
-    mut video_rx: removent_core::latest::Receiver<(Vec<u8>, i64)>,
+    mut video_rx: removent_core::latest::Receiver<removent_media_capture::CapturedVideoFrame>,
     mut keyframe_req_rx: mpsc::Receiver<()>,
     mut quality_rx: tokio::sync::watch::Receiver<QualityState>,
     codec: CodecId,
@@ -34,7 +35,7 @@ pub fn spawn_video_loop(
     fps: u8,
     cancel: CancellationToken,
     fatal_tx: Option<mpsc::Sender<ControlMsg>>,
-    capture_display_id: u64,
+    _capture_display_id: u64,
     delivery: Option<Arc<crate::delivery::DeliveryHealth>>,
     _input: Option<Arc<dyn InputSink>>,
 ) -> tokio::task::JoinHandle<()> {
@@ -42,14 +43,13 @@ pub fn spawn_video_loop(
     tokio::spawn(async move {
         let _cancel_on_exit = cancel_on_exit;
         let work = async {
-            let mut ceiling = AdaptationController::with_dimensions(
+            // The controller owns the pixel/frame budget. Reapplying a full-size
+            // readability floor here would cap FPS even after it reduced pixels.
+            let ceiling = QualityState {
                 bitrate_kbps,
                 fps,
-                removent_core::QualityPreset::Auto,
-                width as u32,
-                height as u32,
-            )
-            .state();
+                scale: 1.,
+            };
             let mut quality = bounded_quality(*quality_rx.borrow_and_update(), ceiling);
             let mut source_dims = (width, height);
             if let Some(health) = &delivery {
@@ -62,7 +62,9 @@ pub fn spawn_video_loop(
             let mut quality_open = true;
             let mut capture_open = true;
             let mut next_frame = tokio::time::Instant::now();
-            let mut last_raw: Option<(Arc<[u8]>, i64)> = None;
+            let mut last_raw: Option<Arc<CapturedVideoFrame>> = None;
+            let mut native_available = codec != CodecId::Av1;
+            let mut last_native_sent = None;
             let mut pending = false;
             let mut last_sent = tokio::time::Instant::now();
             let mut force = false;
@@ -73,6 +75,7 @@ pub fn spawn_video_loop(
             let mut last_pts: Option<i64> = None;
             let mut dedup = FrameDeduplicator::new();
             let mut submitted = HashMap::new();
+            let mut capture_generation = None;
             loop {
                 if !capture_open && !pending {
                     break;
@@ -114,18 +117,22 @@ pub fn spawn_video_loop(
                         pending = last_raw.is_some();
                     }
                     item = video_rx.recv(), if capture_open => {
-                        let Some((bgra, pts)) = item else { capture_open = false; continue };
-                        if bgra.len() != source_dims.0 * source_dims.1 * 4 {
-                            let Some(new_dims) = current_capture_dims(capture_display_id)
-                                .filter(|(w, h)| w * h * 4 == bgra.len()) else {
-                                tracing::warn!("capture dimensions unavailable; skipping mismatched frame");
-                                continue;
-                            };
+                        let Some(frame) = item else { capture_open = false; continue };
+                        let new_dims = (frame.width, frame.height);
+                        if frame.width == 0 || frame.height == 0 || frame.width.max(frame.height) > MAX_CAPTURE_W as usize || frame.width.min(frame.height) > MAX_CAPTURE_H as usize
+                            || !frame.pixels.valid_for(frame.width, frame.height) {
+                            tracing::warn!("invalid capture dimensions; skipping frame");
+                            continue;
+                        }
+                        if capture_generation.replace(frame.generation) != Some(frame.generation) {
+                            force = true;
+                            config_changed = true;
+                            dedup.reset();
+                            submitted.clear();
+                        }
+                        if new_dims != source_dims {
                             source_dims = new_dims;
                             if let Some(health) = &delivery { health.set_capture_dims(new_dims.0 as u32, new_dims.1 as u32); }
-                            ceiling = AdaptationController::with_dimensions(
-                                bitrate_kbps, fps, removent_core::QualityPreset::Auto, new_dims.0 as u32, new_dims.1 as u32,
-                            ).state();
                             dims = scaled_dims(source_dims, quality.scale);
                             encoder = VideoEncoder::new(codec, dims.0, dims.1, quality.bitrate_kbps, quality.fps)
                                 .map_err(|e| e.to_string())?;
@@ -134,27 +141,53 @@ pub fn spawn_video_loop(
                             dedup.reset();
                             submitted.clear();
                         }
-                        last_raw = Some((bgra.into(), pts));
+                        last_raw = Some(Arc::new(frame));
                         pending = true;
                     }
                     _ = tokio::time::sleep_until(next_frame), if pending => {
                         pending = false;
-                        let (raw, pts) = last_raw.as_ref().expect("pending capture");
-                        let bgra: Arc<[u8]> = if dims == source_dims { raw.clone() } else {
-                            removent_media_codec::scale::scale_bgra(raw, source_dims, dims)?.into()
+                        let encode_started = std::time::Instant::now();
+                        let raw = last_raw.as_ref().expect("pending capture");
+                        let native = matches!(raw.pixels, CapturedPixels::Native(_)) && native_available;
+                        let mut cpu = None;
+                        let should_encode = if native {
+                            force || refresh_unchanged || last_native_sent != Some((raw.generation, raw.pts_us))
+                        } else {
+                            let pixels = cpu_pixels(raw, dims)?;
+                            let changed = dedup.should_encode(&pixels, force || refresh_unchanged);
+                            cpu = Some(pixels);
+                            changed
                         };
-                        if !dedup.should_encode(&bgra, force || refresh_unchanged) {
+                        if !should_encode {
                             next_frame = tokio::time::Instant::now() + frame_interval(quality.fps);
                             continue;
                         }
                         if force { encoder.request_keyframe(); }
-                        let pts = last_pts.map_or(*pts, |last| (*pts).max(last.saturating_add(1)));
+                        let pts = last_pts.map_or(raw.pts_us, |last| raw.pts_us.max(last.saturating_add(1)));
                         last_pts = Some(pts);
-                        submitted.insert(pts, bgra);
+                        let result = if native {
+                            let CapturedPixels::Native(buffer) = &raw.pixels else { unreachable!() };
+                            match encoder.encode_native(buffer, pts) {
+                                Err(removent_media_codec::VideoError::Gpu(error)) => {
+                                    tracing::warn!(%error, "GPU frame processing unavailable; using CPU fallback");
+                                    native_available = false;
+                                    let pixels = cpu_pixels(raw, dims)?;
+                                    let result = encoder.encode_bgra(&pixels, pts);
+                                    submitted.insert(pts, pixels);
+                                    result
+                                }
+                                result => result,
+                            }
+                        } else {
+                            let pixels = cpu.expect("CPU pixels prepared");
+                            let result = encoder.encode_bgra(&pixels, pts);
+                            submitted.insert(pts, pixels);
+                            result
+                        };
                         if submitted.len() > 8 && let Some(oldest) = submitted.keys().copied().min() {
                             submitted.remove(&oldest);
                         }
-                        let frames = match encoder.encode_bgra(submitted.get(&pts).unwrap(), pts) {
+                        let frames = match result {
                             Ok(frames) => frames,
                             Err(e) => {
                                 tracing::warn!(err=%e, "video encode failed; forcing refresh");
@@ -168,6 +201,9 @@ pub fn spawn_video_loop(
                                 continue;
                             }
                         };
+                        if let Some(health) = &delivery {
+                            health.encoded(encode_started.elapsed(), frame_interval(quality.fps));
+                        }
                         let mut sent = false;
                         for ef in frames {
                             frame_id += 1;
@@ -190,6 +226,7 @@ pub fn spawn_video_loop(
                             mark_submitted_frame_sent(&mut dedup, &mut submitted, ef.pts_us);
                         }
                         if sent {
+                            if native { last_native_sent = Some((raw.generation, raw.pts_us)); }
                             failed_encodes = 0;
                             force = false;
                             refresh_unchanged = false;
@@ -205,9 +242,9 @@ pub fn spawn_video_loop(
                             }
                         }
                         if codec != CodecId::Av1 { submitted.remove(&pts); }
-                        // Schedule from completion: a stalled writer must never
-                        // burst to catch up with elapsed frame deadlines.
-                        next_frame = tokio::time::Instant::now() + frame_interval(quality.fps);
+                        // Encode/write time consumes this frame's budget. Do not
+                        // add another full interval or accumulate missed deadlines.
+                        next_frame = next_frame_deadline(next_frame, tokio::time::Instant::now(), quality.fps);
                     }
                 }
             }
@@ -236,7 +273,7 @@ pub(super) fn bounded_quality(value: QualityState, ceiling: QualityState) -> Qua
         bitrate_kbps: value.bitrate_kbps.clamp(1, ceiling.bitrate_kbps.max(1)),
         fps: value.fps.clamp(1, ceiling.fps.max(1)),
         scale: if value.scale.is_finite() {
-            value.scale.clamp(0.5, 1.0)
+            value.scale.clamp(0.125, 1.0)
         } else {
             1.0
         },
@@ -245,13 +282,21 @@ pub(super) fn bounded_quality(value: QualityState, ceiling: QualityState) -> Qua
 
 pub(super) fn scaled_dims((w, h): (usize, usize), scale: f32) -> (usize, usize) {
     (
-        ((w as f32 * scale) as usize & !1).max(2),
-        ((h as f32 * scale) as usize & !1).max(2),
+        ((w as f32 * scale).round() as usize & !1).max(2),
+        ((h as f32 * scale).round() as usize & !1).max(2),
     )
 }
 
 pub(super) fn frame_interval(fps: u8) -> Duration {
     Duration::from_secs_f64(1.0 / f64::from(fps.max(1)))
+}
+
+pub(super) fn next_frame_deadline(
+    scheduled: tokio::time::Instant,
+    completed: tokio::time::Instant,
+    fps: u8,
+) -> tokio::time::Instant {
+    (scheduled + frame_interval(fps)).max(completed)
 }
 
 /// Coalesce raw audio captures. Snapshot the queue length so a fast producer
@@ -266,32 +311,52 @@ pub(super) fn newest_queued<T>(mut newest: T, rx: &mut mpsc::Receiver<T>) -> T {
     newest
 }
 
-/// Capture bounding box: the encoder input never exceeds 1920×1080.
-pub const MAX_CAPTURE_W: u32 = 1920;
-pub const MAX_CAPTURE_H: u32 = 1080;
+/// Absolute long/short-edge bounds; each connection selects its own ceiling.
+pub const MAX_CAPTURE_W: u32 = 3840;
+pub const MAX_CAPTURE_H: u32 = 2160;
 
 /// Fits display pixel dims into the capture bounding box, preserving the
 /// display's aspect ratio (an independent per-axis clamp would stretch e.g.
 /// 16:10 panels). Never upscales; results are forced even for the encoder.
 pub fn fit_capture_dims(w_px: u32, h_px: u32) -> (u32, u32) {
-    let s = (MAX_CAPTURE_W as f64 / w_px as f64)
-        .min(MAX_CAPTURE_H as f64 / h_px as f64)
-        .min(1.0);
-    let w = ((w_px as f64 * s) as u32) & !1;
-    let h = ((h_px as f64 * s) as u32) & !1;
-    (w.max(2), h.max(2))
-}
-
-/// Current capture dimensions for `display_id`, mirroring the runner's sizing
-/// rule (the captured display's pixels aspect-fit into 1920×1080). Falls back
-/// to the first display when the id is unknown; None in headless environments.
-pub(super) fn current_capture_dims(display_id: u64) -> Option<(usize, usize)> {
-    let list = removent_input::display_list();
-    let d = list.iter().find(|d| d.id == display_id).or(list.first())?;
-    let (w, h) = fit_capture_dims(d.w_px, d.h_px);
-    Some((w as usize, h as usize))
+    removent_proto::VideoQuality::Ultra.fit_dimensions(w_px, h_px)
 }
 
 pub(super) fn annexb_len_of(ef: &removent_media_codec::EncodedVideoFrame) -> u32 {
     ef.data.len() as u32
+}
+
+fn cpu_pixels(frame: &CapturedVideoFrame, dims: (usize, usize)) -> Result<Arc<Vec<u8>>, String> {
+    if dims == (frame.width, frame.height)
+        && let CapturedPixels::Bgra(pixels) = &frame.pixels
+    {
+        return Ok(pixels.clone());
+    }
+    let source = frame.pixels.bgra(frame.width, frame.height)?;
+    let pixels = if dims == (frame.width, frame.height) {
+        source.into_owned()
+    } else {
+        removent_media_codec::scale::scale_bgra(&source, (frame.width, frame.height), dims)?
+    };
+    Ok(Arc::new(pixels))
+}
+
+#[cfg(test)]
+mod pacing_tests {
+    use super::*;
+    #[test]
+    fn processing_consumes_the_frame_budget_and_stalls_do_not_accumulate_debt() {
+        let start = tokio::time::Instant::now();
+        let frame = frame_interval(60);
+        assert_eq!(
+            next_frame_deadline(start, start + Duration::from_millis(8), 60),
+            start + frame
+        );
+        let stalled = start + Duration::from_millis(100);
+        assert_eq!(next_frame_deadline(start, stalled, 60), stalled);
+        assert_eq!(
+            next_frame_deadline(stalled, stalled + Duration::from_millis(8), 60),
+            stalled + frame
+        );
+    }
 }

@@ -41,6 +41,7 @@ pub trait InputSink: Send + Sync {
     /// refer to (called when capture starts or restarts with new dimensions).
     /// Default no-op (test recorders don't need it).
     fn set_capture_dims(&self, _width_px: u32, _height_px: u32) {}
+    fn set_capture_display(&self, _display_id: u64) {}
 }
 
 /// Maps a Moved event to the matching drag kind when a button is held; all
@@ -74,12 +75,14 @@ pub struct RealInputSink {
     /// are smaller than physical pixels and must be rescaled before the
     /// scale/origin conversion. None = wire coords are physical pixels.
     capture_dims: std::sync::Mutex<Option<(u32, u32)>>,
+    capture_display: std::sync::atomic::AtomicU64,
 }
 
 impl RealInputSink {
     pub fn new() -> Self {
         Self {
             capture_dims: std::sync::Mutex::new(None),
+            capture_display: std::sync::atomic::AtomicU64::new(0),
         }
     }
 }
@@ -103,6 +106,10 @@ impl InputSink for RealInputSink {
         kind: MouseKind,
     ) -> Result<(), String> {
         let kind = drag_kind_for(buttons, kind);
+        let captured = self
+            .capture_display
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let display_id = if captured == 0 { display_id } else { captured };
         // Wire coords are capture-frame pixels of the target display; CGEvent
         // expects global display points. Rescale capture px → display physical
         // px (the capture may be downscaled), then divide by the display scale
@@ -136,6 +143,10 @@ impl InputSink for RealInputSink {
     ) -> Result<(), String> {
         // mm → px using the target display's real DPI (96 × scale), falling
         // back to 96dpi when the display cannot be resolved.
+        let captured = self
+            .capture_display
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let display_id = if captured == 0 { display_id } else { captured };
         let dpi = display_geometry(display_id)
             .map(|g| g.dpi())
             .unwrap_or(96.0);
@@ -149,6 +160,10 @@ impl InputSink for RealInputSink {
 
     fn set_capture_dims(&self, width_px: u32, height_px: u32) {
         *self.capture_dims.lock().unwrap() = Some((width_px, height_px));
+    }
+    fn set_capture_display(&self, display_id: u64) {
+        self.capture_display
+            .store(display_id, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

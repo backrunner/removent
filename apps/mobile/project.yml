@@ -33,6 +33,7 @@ targets:
         LSRequiresIPhoneOS: true
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true
+        CADisableMinimumFrameDurationOnPhone: true
         NSLocalNetworkUsageDescription: Find and connect to your computers on the local network.
         NSBonjourServices: ["_removent._udp", "_rfb._tcp", "_rdp._tcp", "_ms-wbt-server._tcp"]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]

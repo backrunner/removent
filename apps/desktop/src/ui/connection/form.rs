@@ -81,6 +81,7 @@ impl ConnectionDialog {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         Self {
+            video_quality: Default::default(),
             step: Step::Protocol,
             saved_id: None,
             save_warning: None,
@@ -337,6 +338,7 @@ impl ConnectionDialog {
             None
         };
         Ok(ConnectionRequest {
+            video_quality: self.video_quality,
             pairing_code,
             protocol,
             address,
@@ -393,6 +395,7 @@ impl ConnectionDialog {
             return;
         }
         self.saved_id = Some(saved.id.clone());
+        self.video_quality = saved.video_quality;
         self.via_relay = saved.relay.is_some();
         self.relay_secret_task = None;
         self.host.update(cx, |s, cx| {

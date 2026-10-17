@@ -71,4 +71,6 @@ pub mod feature_bits {
     /// System account credentials over authenticated TLS (no PIN fallback).
     pub const SYSTEM_ACCOUNT_AUTH: u64 = 1 << 8;
     pub const PAIRING_INVITATION: u64 = 1 << 7;
+    /// Per-connection resolution range, up to 4K and 240 fps.
+    pub const DYNAMIC_VIDEO: u64 = 1 << 9;
 }

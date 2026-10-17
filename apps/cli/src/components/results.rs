@@ -127,7 +127,16 @@ fn status(data: &Value) {
             card.field(&label(key), &value(&data[key]), Tone::Plain);
         }
     }
-    for key in ["host_error", "relay_error"] {
+    for key in ["prevent_idle_sleep", "idle_sleep_prevented"] {
+        if let Some(on) = data[key].as_bool() {
+            card.field(
+                &label(key),
+                &value(&serde_json::Value::Bool(on)),
+                Tone::Plain,
+            );
+        }
+    }
+    for key in ["host_error", "relay_error", "power_error"] {
         if let Some(error) = data[key].as_str() {
             card.text(error, Tone::Danger);
         }

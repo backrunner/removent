@@ -11,6 +11,17 @@ use removent_proto::{KeyKind, KeyModifiers, ScrollPhase};
 /// only.
 pub const UNICODE_ONLY_VK: u16 = 0xFFFF;
 
+/// Text must not override physical control/navigation keys. GPUI supplies LF
+/// for Return, but loginwindow expects the native Return event (CR).
+pub fn key_text(vk: u16, mods: KeyModifiers, unicode: Option<char>) -> Option<char> {
+    if mods.intersects(KeyModifiers::COMMAND | KeyModifiers::CONTROL)
+        || matches!(vk, 0x24 | 0x30 | 0x33 | 0x35 | 0x4C | 0x72..=0x7E)
+    {
+        return None;
+    }
+    unicode.filter(|c| !c.is_control() && !('\u{f700}'..='\u{f8ff}').contains(c))
+}
+
 fn source() -> Result<core_graphics::event_source::CGEventSource, String> {
     core_graphics::event_source::CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
         .map_err(|_| "event source create failed".to_string())
@@ -94,6 +105,10 @@ pub fn inject_key(
     kind: KeyKind,
     unicode: Option<char>,
 ) -> Result<(), String> {
+    let unicode = key_text(vk_code, modifiers, unicode);
+    if vk_code == UNICODE_ONLY_VK && unicode.is_none() {
+        return Ok(());
+    }
     match kind {
         KeyKind::FlagsChanged => {
             // Modifier key's own state change: macOS FlagsChanged does not
@@ -122,9 +137,7 @@ pub fn inject_key(
             let event = CGEvent::new_keyboard_event(source()?, vk, down)
                 .map_err(|_| "keyboard event create failed".to_string())?;
             event.set_flags(flags_of(modifiers));
-            if let Some(c) = unicode
-                && !modifiers.intersects(KeyModifiers::COMMAND | KeyModifiers::CONTROL)
-            {
+            if let Some(c) = unicode {
                 let mut buf = [0u16; 2];
                 event.set_string_from_utf16_unchecked(c.encode_utf16(&mut buf));
             }
@@ -204,6 +217,22 @@ pub fn build_scroll(dx_px: f64, dy_px: f64, phase: ScrollPhase) -> Result<(), St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn control_keys_keep_physical_semantics_and_text_keeps_client_layout() {
+        for (vk, text) in [
+            (0x24, '\n'),
+            (0x4c, '\r'),
+            (0x30, '\t'),
+            (0x35, '\u{1b}'),
+            (0x7b, '\u{f702}'),
+        ] {
+            assert_eq!(key_text(vk, KeyModifiers::empty(), Some(text)), None);
+        }
+        assert_eq!(key_text(0, KeyModifiers::empty(), Some('é')), Some('é'));
+        assert_eq!(key_text(0x31, KeyModifiers::empty(), Some(' ')), Some(' '));
+        assert_eq!(key_text(0, KeyModifiers::COMMAND, Some('a')), None);
+    }
 
     #[test]
     fn unicode_only_vk_is_no_modifier() {

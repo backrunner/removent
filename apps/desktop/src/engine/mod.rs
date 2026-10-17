@@ -104,6 +104,11 @@ pub enum UiEvent {
     HostStateChanged(bool),
     /// daemon IPC connection state.
     DaemonOnline(bool),
+    DaemonPower {
+        enabled: bool,
+        active: bool,
+        error: Option<String>,
+    },
     /// daemon-process TCC permission snapshot (from StatusReport; changes only —
     /// the daemon preflights at poll time and can hold stale grants after the user
     /// just toggled a permission for the app).

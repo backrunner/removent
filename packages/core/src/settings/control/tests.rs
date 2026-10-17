@@ -166,6 +166,12 @@ fn enum_aliases_and_host_effects_match_the_catalog() {
     next.theme = super::super::Theme::Dark;
     next.discovery.rdp = true;
     next.update_channel = super::super::UpdateChannel::Beta;
+    assert!(!current.prevent_idle_sleep);
+    next.prevent_idle_sleep = true;
+    assert_eq!(
+        find("prevent_idle_sleep").unwrap().view(&next)["apply"],
+        "daemon_reload"
+    );
     assert!(!host_changed(&current, &next));
     next.host_port += 1;
     assert!(host_changed(&current, &next));

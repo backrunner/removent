@@ -16,6 +16,7 @@ struct Window {
     partial_since: Option<Instant>,
     previous: Option<(i64, Instant)>,
     jitter_ms: f32,
+    jitter_observed: bool,
     decode_ms: f32,
     pending: VecDeque<(i64, Instant)>,
 }
@@ -41,9 +42,15 @@ impl VideoFeedback {
                 && now.duration_since(at) < Duration::from_secs(2)
             {
                 let arrival_ms = now.duration_since(at).as_secs_f32() * 1000.;
-                w.jitter_ms = w
-                    .jitter_ms
-                    .max((arrival_ms - source_us as f32 / 1000.).abs());
+                let variation = (arrival_ms - source_us as f32 / 1000.).abs();
+                // Smooth interarrival variation across frames. A window maximum
+                // mistakes a single scheduler/keyframe burst for sustained
+                // congestion, repeatedly reducing even a healthy wired LAN.
+                w.jitter_ms += (variation - w.jitter_ms) / 16.;
+                w.jitter_observed = true;
+            } else {
+                // Capture restarts and static refreshes break the timing series.
+                w.jitter_ms = 0.;
             }
         }
     }
@@ -82,7 +89,7 @@ impl VideoFeedback {
             w.bytes > 0 || w.partial_since.is_some() || !w.pending.is_empty() || w.decode_ms > 0.;
         let recv_kbps = (w.bytes as f64 * 8. / elapsed.as_secs_f64().max(0.001) / 1000.)
             .min(f64::from(u32::MAX)) as u32;
-        let mut jitter_ms = w.jitter_ms;
+        let mut jitter_ms = if w.jitter_observed { w.jitter_ms } else { 0. };
         if let Some(at) = w.partial_since {
             // Includes ordered-stream head-of-line delay on QUIC or WSS. Only
             // excess over a generous transport allowance counts as pressure.
@@ -95,7 +102,7 @@ impl VideoFeedback {
                 .max(now.duration_since(*at).as_secs_f32() * 1000.)
         });
         w.bytes = 0;
-        w.jitter_ms = 0.;
+        w.jitter_observed = false;
         w.decode_ms = 0.;
         active.then_some(ControlMsg::StatsReport {
             rtt_ms,
@@ -175,20 +182,26 @@ mod tests {
     }
 
     #[test]
-    fn arrival_jitter_and_partial_frame_stalls_reach_feedback() {
+    fn sustained_arrival_jitter_and_partial_frame_stalls_reach_feedback() {
         let f = VideoFeedback::default();
         let t = Instant::now();
         f.received_at(0, 1000, t);
-        f.received_at(33_333, 1000, t + Duration::from_millis(133));
+        for i in 1..=32 {
+            f.received_at(
+                i * 33_333,
+                1000,
+                t + Duration::from_micros(i as u64 * 133_333),
+            );
+        }
         let r = f
             .report(
                 Duration::from_millis(500),
                 80.,
                 0.,
-                t + Duration::from_millis(500),
+                t + Duration::from_secs(5),
             )
             .unwrap();
-        assert!(matches!(r, ControlMsg::StatsReport { jitter_ms, .. } if jitter_ms > 99.));
+        assert!(matches!(r, ControlMsg::StatsReport { jitter_ms, .. } if jitter_ms > 85.));
         f.0.lock().unwrap().partial_since = Some(t);
         let r = f
             .report(
@@ -206,6 +219,56 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn isolated_lan_bursts_do_not_ratchet_down_a_healthy_session() {
+        use removent_core::{AdaptationController, QualityPreset, Sample};
+        let f = VideoFeedback::default();
+        let mut controller = AdaptationController::new(24_000, 60, QualityPreset::Auto);
+        let initial = controller.state();
+        let t = Instant::now();
+        for i in 0..7200u64 {
+            let source_us = i * 16_667;
+            // Two frames arrive together after a 28ms scheduling delay every
+            // half second; transport catches up instead of accumulating delay.
+            let arrival_us = match i % 30 {
+                26 => source_us + 28_000,
+                27 => source_us + 12_000,
+                _ => source_us,
+            };
+            f.received_at(
+                source_us as i64,
+                50_000,
+                t + Duration::from_micros(arrival_us),
+            );
+            if i % 30 == 29 {
+                let Some(ControlMsg::StatsReport {
+                    jitter_ms,
+                    recv_kbps,
+                    ..
+                }) = f.report(
+                    Duration::from_millis(500),
+                    1.,
+                    0.,
+                    t + Duration::from_micros(source_us),
+                )
+                else {
+                    panic!("missing active feedback")
+                };
+                controller.on_sample(
+                    &Sample {
+                        rtt_ms: 1.,
+                        loss_pct: 0.,
+                        recv_kbps,
+                        jitter_ms,
+                        decode_ms: 4.,
+                    },
+                    500,
+                );
+                assert_eq!(controller.state(), initial);
+            }
+        }
     }
 
     #[test]

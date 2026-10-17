@@ -30,6 +30,23 @@ enum ConnectionProtocol: String, CaseIterable, Codable, Identifiable {
     var port: Int { switch self { case .removent: 48688; case .vnc: 5900; case .rdp: 3389 } }
 }
 
+enum VideoQuality: String, CaseIterable, Codable, Identifiable {
+    case low, standard, high, ultra
+    var id: String { rawValue }
+    var title: String { switch self {
+        case .low: L("Low", "低")
+        case .standard: L("Standard", "标准")
+        case .high: L("High (2K)", "高（2K）")
+        case .ultra: L("Ultra (4K)", "超高（4K）")
+    } }
+    var range: String { switch self {
+        case .low: "480–720p"
+        case .standard: "540–1080p"
+        case .high: "540–1440p"
+        case .ultra: "540–2160p"
+    } }
+}
+
 struct RelayRoute: Codable, Equatable {
     var endpoint: String
     var transport: String
@@ -40,6 +57,7 @@ struct RelayRoute: Codable, Equatable {
 }
 
 struct Bookmark: Codable, Identifiable {
+    var video_quality: VideoQuality? = nil
     var id: String
     var name: String
     var `protocol`: ConnectionProtocol
@@ -81,6 +99,7 @@ struct NearbyDevice: Identifiable, Equatable {
 
 struct ConnectionDraft: Identifiable {
     var id = UUID()
+    var videoQuality = VideoQuality.standard
     var bookmarkID: String?
     var name = ""
     var `protocol` = ConnectionProtocol.removent
@@ -107,6 +126,7 @@ struct ConnectionDraft: Identifiable {
     }
     init(_ bookmark: Bookmark) {
         original = bookmark
+        videoQuality = bookmark.video_quality ?? .standard
         bookmarkID = bookmark.id; name = bookmark.name; `protocol` = bookmark.protocol
         host = bookmark.host; port = String(bookmark.port); username = bookmark.username
         domain = bookmark.domain; allowUntrustedCertificate = bookmark.accept_invalid_certificate
@@ -144,7 +164,7 @@ struct ConnectionDraft: Identifiable {
         var result: [String: Any] = ["protocol":`protocol`.rawValue, "host":host,
             "port":useRelay ? 0 : (isPairingCode ? 48688 : Int(port)!), "username":username, "password":password,
             "domain":domain, "accept_invalid_certificate":allowUntrustedCertificate,
-            "audio":audio, "clipboard":clipboard]
+            "audio":audio, "clipboard":clipboard, "video_quality":videoQuality.rawValue]
         if useRelay {
             result["relay"] = ["endpoint":relayEndpoint, "transport":relayTransport,
                 "server_name":relayServerName, "accept_invalid_certificate":!verifyRelayCertificate,

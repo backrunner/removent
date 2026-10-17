@@ -2,6 +2,7 @@ use super::*;
 
 mod appearance;
 mod otp;
+mod power;
 mod security;
 
 impl HomeView {
@@ -90,7 +91,11 @@ impl HomeView {
             )
     }
 
-    pub(super) fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_settings(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let colors = cx.theme().colors;
         let settings = self.engine.settings();
         let row = || div().flex().flex_col().gap_3().p_5().w_full().min_w_0();
@@ -443,7 +448,8 @@ impl HomeView {
                         "settings.system",
                         "settings.system_description",
                     ))
-                    .child(self.render_update_section(cx))
+                    .child(self.render_update_section(window, cx))
+                    .child(self.render_power_settings(cx))
                     .child(
                         form_group(cx).child(
                             row()

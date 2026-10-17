@@ -26,10 +26,11 @@ impl ViewerView {
                     {
                         break;
                     }
-                    // Always return time to the UI event loop. The latest-frame
-                    // channel replaces stale pictures while key/mouse events run.
+                    // Yield to input/layout without imposing a second frame
+                    // clock. The single slot coalesces frames if rendering is
+                    // slower than capture/send pacing.
                     cx.background_executor()
-                        .timer(Duration::from_millis(16))
+                        .timer(Duration::from_millis(1))
                         .await;
                 }
                 let _ = this.update_in(&mut *cx, |this, window, cx| {
@@ -202,6 +203,13 @@ impl ViewerView {
         self.fps_shown = self.fps_counter as f64 / seconds;
         self.fps_counter = 0;
         self.last_fps_tick = Instant::now();
+        tracing::debug!(
+            fps = self.fps_shown,
+            width = self.width,
+            height = self.height,
+            frame_age_ms = self.last_frame.map(|at| at.elapsed().as_millis() as u64),
+            "viewer frame delivery"
+        );
         self.diagnostics = self.engine.client_diagnostics(self.session_generation);
         if let Some(stats) = self.diagnostics.vnc {
             self.receive_rate =

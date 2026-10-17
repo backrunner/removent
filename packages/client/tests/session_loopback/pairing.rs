@@ -89,6 +89,7 @@ async fn wrong_pin_fails_with_pairing_error() {
         server_addr,
         &client_id,
         ClientConfig {
+            video_quality: Default::default(),
             host_identity_verified: false,
             pairing_code: None,
             device_name: "WrongPinClient".into(),

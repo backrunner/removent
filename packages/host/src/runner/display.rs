@@ -68,7 +68,22 @@ impl Drop for DisplayAwake {
 }
 
 pub(super) async fn wait_for_display() -> Result<DisplayInfo, HostError> {
-    wait_for_display_with(removent_input::display_list, Duration::from_secs(5)).await
+    wait_for_display_id(None).await
+}
+
+pub(super) async fn wait_for_display_id(preferred: Option<u64>) -> Result<DisplayInfo, HostError> {
+    wait_for_display_with(
+        || {
+            let list = removent_input::display_list();
+            if let Some(display) = list.iter().find(|d| Some(d.id) == preferred) {
+                vec![display.clone()]
+            } else {
+                list
+            }
+        },
+        Duration::from_secs(5),
+    )
+    .await
 }
 
 async fn wait_for_display_with(

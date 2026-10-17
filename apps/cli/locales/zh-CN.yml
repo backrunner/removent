@@ -1,5 +1,9 @@
 # removent-cli 的简体中文文案。
 _version: 1
+tui.setting.prevent_idle_sleep: "后台服务运行时防止电脑自动休眠"
+terminal.field.prevent_idle_sleep: "防止自动休眠"
+terminal.field.idle_sleep_prevented: "防休眠已生效"
+terminal.field.power_error: "电源管理错误"
 
 cli.name: removent-cli
 

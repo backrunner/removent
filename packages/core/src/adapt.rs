@@ -1,5 +1,5 @@
-//! Readability-first adaptive quality. Preserve negotiated spatial detail, spend
-//! fewer frames on a constrained link, and only recover after sustained evidence.
+//! Adaptive quality. Dynamic profiles reduce pixels within the selected range
+//! before motion smoothness; legacy peers preserve their negotiated dimensions.
 //! The per-frame budget is a conservative rate-control floor, not a proof that
 //! arbitrary content/font sizes remain legible (see the codec quantizer ceiling).
 
@@ -33,6 +33,7 @@ impl Sample {
 
 const MIN_CHANGE_INTERVAL_MS: u64 = 2000;
 const HEALTHY_UPGRADE_MS: u64 = 5000;
+const PRESSURE_DOWNGRADE_MS: u64 = 1000;
 pub const MIN_REFRESH_FPS: u8 = 2;
 
 /// 0.08 bits/pixel/frame, rounded up. An engineering guardrail for screen
@@ -50,8 +51,10 @@ pub struct AdaptationController {
     frame_bits: u64,
     preferred_frame_bits: u64,
     healthy_since_ms: Option<u64>,
+    pressure_since_ms: Option<u64>,
     last_change_ms: u64,
     now_ms: u64,
+    dynamic: Option<(removent_proto::VideoQuality, u32, u32)>,
 }
 
 impl AdaptationController {
@@ -94,9 +97,42 @@ impl AdaptationController {
             preferred_frame_bits: (u64::from(max_bitrate_kbps) * 1000 / u64::from(base_fps))
                 .max(frame_bits),
             healthy_since_ms: None,
+            pressure_since_ms: None,
             last_change_ms: 0,
             now_ms: 0,
+            dynamic: None,
         }
+    }
+
+    pub fn with_video_quality(
+        bitrate_kbps: u32,
+        fps: u8,
+        quality: removent_proto::VideoQuality,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        let mut controller =
+            Self::with_dimensions(bitrate_kbps, fps, QualityPreset::Auto, width, height);
+        controller.dynamic = Some((quality, width, height));
+        controller.base_fps = fps.max(1);
+        controller.preferred_frame_bits =
+            (u64::from(bitrate_kbps) * 1000 / u64::from(fps.max(1))).max(controller.frame_bits);
+        controller.refresh_dynamic();
+        controller
+    }
+
+    fn refresh_dynamic(&mut self) {
+        let Some((quality, width, height)) = self.dynamic else {
+            return;
+        };
+        let minimum = quality.minimum_scale(width, height);
+        let budget = f64::from(self.state.bitrate_kbps) * 1000.;
+        let full_frame = self.preferred_frame_bits as f64;
+        self.state.scale = (budget / (full_frame * f64::from(self.base_fps)))
+            .sqrt()
+            .clamp(f64::from(minimum), 1.) as f32;
+        let frame = full_frame * f64::from(self.state.scale).powi(2);
+        self.state.fps = ((budget / frame).round() as u8).clamp(self.min_fps, self.base_fps);
     }
 
     pub fn state(&self) -> QualityState {
@@ -107,10 +143,23 @@ impl AdaptationController {
     /// readability budget before consuming the next delivery sample.
     pub fn set_dimensions(&mut self, width: u32, height: u32) {
         let bits = readable_frame_bits(width, height);
-        if self.frame_bits == bits {
+        if self.frame_bits == bits
+            && self
+                .dynamic
+                .is_none_or(|(_, w, h)| (w, h) == (width, height))
+        {
             return;
         }
         self.frame_bits = bits;
+        if let Some((quality, _, _)) = self.dynamic {
+            self.dynamic = Some((quality, width, height));
+            self.preferred_frame_bits =
+                (u64::from(self.max_bitrate_kbps) * 1000 / u64::from(self.base_fps)).max(bits);
+            self.state.bitrate_kbps = self.state.bitrate_kbps.max(self.bitrate_floor_kbps());
+            self.refresh_dynamic();
+            self.pause_recovery();
+            return;
+        }
         self.base_fps = self
             .negotiated_fps
             .min((u64::from(self.max_bitrate_kbps) * 1000 / bits).clamp(1, 255) as u8);
@@ -128,7 +177,11 @@ impl AdaptationController {
     }
 
     pub fn bitrate_floor_kbps(&self) -> u32 {
-        (self.frame_bits * u64::from(self.min_fps))
+        let frame_bits = self.dynamic.map_or(self.frame_bits, |(quality, w, h)| {
+            let s = quality.minimum_scale(w, h);
+            readable_frame_bits((w as f32 * s) as u32, (h as f32 * s) as u32)
+        });
+        (frame_bits * u64::from(self.min_fps))
             .div_ceil(1000)
             .max(64)
             .min(u64::from(self.max_bitrate_kbps)) as u32
@@ -137,6 +190,7 @@ impl AdaptationController {
     /// No fresh delivery evidence: idle time must not count toward recovery.
     pub fn pause_recovery(&mut self) {
         self.healthy_since_ms = None;
+        self.pressure_since_ms = None;
     }
 
     pub fn on_sample(&mut self, sample: &Sample, window_ms: u64) -> Option<QualityState> {
@@ -151,22 +205,39 @@ impl AdaptationController {
         }
         // Absolute RTT is not congestion: an otherwise healthy distant path
         // should retain quality. A slow decoder is receiver-side pressure too.
-        let bad = sample.loss_pct > 2.0
-            || sample.jitter_ms > 20.0
-            || sample.decode_ms > (1000.0 / f32::from(self.state.fps)).max(40.0);
+        let decode_budget_ms = if self.dynamic.is_some() {
+            (1500.0 / f32::from(self.state.fps)).max(8.0)
+        } else {
+            (1000.0 / f32::from(self.state.fps)).max(40.0)
+        };
+        let bad =
+            sample.loss_pct > 2.0 || sample.jitter_ms > 20.0 || sample.decode_ms > decode_budget_ms;
         if !bad && sample.loss_pct < 0.5 && sample.jitter_ms < 10. {
             self.healthy_since_ms.get_or_insert(self.now_ms);
         } else {
-            self.pause_recovery();
+            self.healthy_since_ms = None;
+        }
+        if bad {
+            self.pressure_since_ms.get_or_insert(self.now_ms);
+        } else {
+            self.pressure_since_ms = None;
         }
         if self.now_ms.saturating_sub(self.last_change_ms) < MIN_CHANGE_INTERVAL_MS {
             return None;
         }
         let before = self.state;
-        if bad {
+        if bad
+            && self
+                .pressure_since_ms
+                .is_some_and(|t| self.now_ms.saturating_sub(t) >= PRESSURE_DOWNGRADE_MS)
+        {
             let mut bitrate = (u64::from(self.state.bitrate_kbps) * 7 / 10) as u32;
             let mut fps = self.state.fps;
-            if fps > 15 {
+            if self.dynamic.is_some() {
+                // Spend fewer pixels before sacrificing motion smoothness.
+                self.state.bitrate_kbps = bitrate.max(self.bitrate_floor_kbps());
+                self.refresh_dynamic();
+            } else if fps > 15 {
                 // Keep bits/frame while first shedding motion smoothness.
                 fps = ((u16::from(fps) * 7 / 10) as u8).max(15);
                 bitrate = (u64::from(self.state.bitrate_kbps) * u64::from(fps)
@@ -177,16 +248,19 @@ impl AdaptationController {
                 let observed = (u64::from(sample.recv_kbps) * 85 / 100) as u32;
                 bitrate = bitrate.min(observed.max(self.state.bitrate_kbps / 2));
             }
-            self.state.bitrate_kbps = bitrate.max(self.bitrate_floor_kbps());
-            self.state.fps = fps
-                .min(
-                    (u64::from(self.state.bitrate_kbps) * 1000 / self.frame_bits).clamp(1, 255)
-                        as u8,
-                )
-                .max(self.min_fps);
-        } else if self
-            .healthy_since_ms
-            .is_some_and(|t| self.now_ms.saturating_sub(t) >= HEALTHY_UPGRADE_MS)
+            if self.dynamic.is_none() {
+                self.state.bitrate_kbps = bitrate.max(self.bitrate_floor_kbps());
+                self.state.fps = fps
+                    .min(
+                        (u64::from(self.state.bitrate_kbps) * 1000 / self.frame_bits).clamp(1, 255)
+                            as u8,
+                    )
+                    .max(self.min_fps);
+            }
+        } else if !bad
+            && self
+                .healthy_since_ms
+                .is_some_and(|t| self.now_ms.saturating_sub(t) >= HEALTHY_UPGRADE_MS)
         {
             self.state.bitrate_kbps = ((u64::from(self.state.bitrate_kbps) * 5)
                 .div_ceil(4)
@@ -196,6 +270,7 @@ impl AdaptationController {
             let affordable = (u64::from(self.state.bitrate_kbps) * 1000 / self.preferred_frame_bits)
                 .clamp(1, u64::from(self.base_fps)) as u8;
             self.state.fps = self.state.fps.max(affordable);
+            self.refresh_dynamic();
             self.healthy_since_ms = Some(self.now_ms);
         }
         if self.state != before {
@@ -229,6 +304,56 @@ mod tests {
     fn feed(c: &mut AdaptationController, s: Sample, seconds: u64) {
         for _ in 0..seconds * 4 {
             c.on_sample(&s, 250);
+        }
+    }
+
+    #[test]
+    fn high_refresh_decoder_pressure_reduces_pixels_before_motion() {
+        let quality = removent_proto::VideoQuality::Ultra;
+        let mut c = AdaptationController::with_video_quality(
+            quality.bitrate_kbps(3840, 2160, 120),
+            120,
+            quality,
+            3840,
+            2160,
+        );
+        feed(
+            &mut c,
+            Sample {
+                decode_ms: 18.,
+                ..good()
+            },
+            2,
+        );
+        assert_eq!(c.state().fps, 120);
+        assert!(c.state().scale < 1.);
+        feed(&mut c, good(), 15);
+        assert_eq!(c.state().scale, 1.);
+    }
+
+    #[test]
+    fn dynamic_profiles_preserve_motion_then_recover_within_their_pixel_bounds() {
+        for quality in removent_proto::VideoQuality::ALL {
+            let (w, h) = quality.max_dimensions();
+            let bitrate = quality.bitrate_kbps(w, h, 120);
+            let mut c = AdaptationController::with_video_quality(bitrate, 120, quality, w, h);
+            let initial = c.state();
+            assert_eq!(initial.fps, 120);
+            feed(&mut c, bad(), 2);
+            assert_eq!(c.state().fps, 120, "first shed pixels, not motion");
+            assert!(c.state().scale < 1.);
+            for _ in 0..600 {
+                c.on_sample(&bad(), 250);
+                let state = c.state();
+                assert!(state.scale >= quality.minimum_scale(w, h));
+                assert!(state.scale <= 1.);
+                assert!((h as f32 * state.scale).round() >= quality.min_height() as f32);
+            }
+            assert_eq!(c.state().fps, MIN_REFRESH_FPS);
+            feed(&mut c, good(), 180);
+            assert_eq!(c.state(), initial);
+            c.set_dimensions(640, 360);
+            assert_eq!(c.state().scale, 1., "never upscale a small source");
         }
     }
 
@@ -307,6 +432,22 @@ mod tests {
             2,
         );
         assert!(c.state().fps < 30);
+    }
+
+    #[test]
+    fn isolated_pressure_does_not_accumulate_across_healthy_windows() {
+        let mut c = AdaptationController::new(24_000, 60, QualityPreset::Auto);
+        let initial = c.state();
+        for _ in 0..120 {
+            c.on_sample(&bad(), 500);
+            c.on_sample(&good(), 500);
+        }
+        assert_eq!(c.state(), initial);
+        feed(&mut c, bad(), 2);
+        assert!(
+            c.state().fps < initial.fps,
+            "sustained pressure still reduces load"
+        );
     }
 
     #[test]

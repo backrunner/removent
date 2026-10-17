@@ -1,5 +1,10 @@
 # English (source locale) UI strings for the Removent app.
 _version: 1
+settings.prevent_idle_sleep: "Prevent idle sleep while the background service runs"
+settings.prevent_idle_sleep_hint: "The display can still turn off. Stopping the service restores normal sleep behavior"
+settings.power_active: "Idle system sleep is prevented"
+settings.power_pending: "Waiting for the background service to apply this setting"
+settings.power_failed: "Could not prevent sleep. Toggle this option again and check the service logs"
 
 app.name: Removent
 
@@ -121,7 +126,8 @@ update.checking: Checking for updates…
 update.up_to_date: No newer version in this channel
 update.last_checked: Last checked at %{time}
 update.never_checked: Updates have not been checked yet
-update.available: "New version available: %{version}"
+update.available: "Removent %{version}"
+update.release_notes: Release Notes
 update.download_install: Download and Install
 update.downloading: "Downloading %{version}…"
 update.verifying: Verifying update…
@@ -442,3 +448,9 @@ auth.system_desc: "Enter the username and login password of the account running 
 auth.system_hint: "Verifies the account running the sharing service with macOS. Its login password is never stored in Removent."
 auth.system_username: "System username"
 auth.system_password: "Login password"
+
+connection.video_quality: "Quality ceiling"
+connection.quality_low: "Low"
+connection.quality_standard: "Standard"
+connection.quality_high: "High (2K)"
+connection.quality_ultra: "Ultra (4K)"

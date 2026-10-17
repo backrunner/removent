@@ -3,6 +3,8 @@
 pub mod constants;
 pub mod frames;
 pub mod msg;
+pub mod video_quality;
+pub use video_quality::{MAX_VIDEO_BITRATE_KBPS, MAX_VIDEO_FPS, VideoQuality};
 
 pub use constants::*;
 pub use frames::{

@@ -177,6 +177,30 @@ final class ControllerTests: XCTestCase {
         XCTAssertEqual(RemoteKeyboard.macKey(for:"c"),8)
     }
 
+    func testVideoQualitySurvivesSaveEditAndReloadPerConnection() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let model = ControllerModel(storageDirectory: directory, startServices: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for quality in VideoQuality.allCases {
+            var draft = ConnectionDraft()
+            draft.host = "\(quality.rawValue).test.invalid"
+            draft.videoQuality = quality
+            try model.save(draft)
+        }
+        try model.reload()
+        XCTAssertEqual(model.bookmarks.count, 4)
+        for bookmark in model.bookmarks {
+            let quality = try XCTUnwrap(bookmark.video_quality)
+            var edit = ConnectionDraft(bookmark)
+            XCTAssertEqual(edit.videoQuality, quality)
+            edit.name = "Renamed"
+            try model.save(edit)
+            XCTAssertEqual(try edit.request(audio: false, clipboard: false)["video_quality"] as? String, quality.rawValue)
+        }
+        try model.reload()
+        XCTAssertEqual(Set(model.bookmarks.compactMap { $0.video_quality }), Set(VideoQuality.allCases))
+    }
+
     func testDraftValidationAndSavedPasswordIntent() throws {
         var draft = ConnectionDraft()
         draft.host = "  \n"

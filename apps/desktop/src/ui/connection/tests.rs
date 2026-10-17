@@ -594,3 +594,42 @@ fn programmatic_destination_change_cannot_send_a_previous_routes_credential(
         });
     });
 }
+
+#[gpui::test]
+fn quality_choices_round_trip_per_bookmark_and_keep_geometry(cx: &mut TestAppContext) {
+    let (dialog, cx) = setup(cx);
+    cx.update(|window, cx| {
+        dialog.update(cx, |form, cx| {
+            form.prefill_discovered(
+                ConnectionProtocol::Removent,
+                "host".into(),
+                "127.0.0.1:48688".parse().unwrap(),
+                window,
+                cx,
+            );
+        })
+    });
+    for (i, quality) in removent_proto::VideoQuality::ALL.into_iter().enumerate() {
+        cx.run_until_parked();
+        let selector = [
+            "connection-quality-0",
+            "connection-quality-1",
+            "connection-quality-2",
+            "connection-quality-3",
+        ][i];
+        let before = cx.debug_bounds(selector).expect("quality choice visible");
+        cx.simulate_click(before.center(), Default::default());
+        cx.run_until_parked();
+        assert_eq!(cx.debug_bounds(selector), Some(before));
+        cx.update(|window, cx| {
+            dialog.update(cx, |form, cx| {
+                let request = form.request(cx).unwrap();
+                assert_eq!(request.video_quality, quality);
+                let saved = SavedConnection::from_request(&request, "host");
+                form.video_quality = Default::default();
+                form.prefill(&saved, None, window, cx);
+                assert_eq!(form.request(cx).unwrap().video_quality, quality);
+            })
+        });
+    }
+}

@@ -119,6 +119,7 @@ async fn resume_rejected_falls_back_to_full_negotiation() {
     )
     .unwrap();
     let mk_cfg = || ClientConfig {
+        video_quality: Default::default(),
         host_identity_verified: false,
         pairing_code: None,
         device_name: "RejectClient".into(),

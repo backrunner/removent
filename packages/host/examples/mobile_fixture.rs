@@ -331,7 +331,15 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                 }
-                if tx.send((frame, (index * 10000) as i64)).is_err() {
+                if tx
+                    .send(removent_media_capture::CapturedVideoFrame::new(
+                        frame,
+                        width,
+                        height,
+                        (index * 10000) as i64,
+                    ))
+                    .is_err()
+                {
                     break;
                 }
             }

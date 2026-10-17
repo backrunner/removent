@@ -64,6 +64,12 @@ pub struct SessionInfo {
 /// Status snapshot (Status response + tray polling).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StatusReport {
+    #[serde(default)]
+    pub prevent_idle_sleep: bool,
+    #[serde(default)]
+    pub idle_sleep_prevented: bool,
+    #[serde(default)]
+    pub power_error: Option<String>,
     /// Desired sharing switch, independent of listener readiness.
     pub running: bool,
     /// Actual RVP listener readiness, independent of the desired switch.
@@ -314,6 +320,7 @@ mod tests {
             tray_connected: true,
             screen_recording_granted: true,
             accessibility_granted: false,
+            ..Default::default()
         };
         let json = serde_json::to_string(&report).unwrap();
         assert!(json.contains("\"running\":true"));

@@ -93,6 +93,11 @@ pub(super) fn apply_status(
     sessions: &Arc<AtomicUsize>,
 ) {
     let prev = running.swap(report.running, Ordering::SeqCst);
+    let _ = events.send(UiEvent::DaemonPower {
+        enabled: report.prevent_idle_sleep,
+        active: report.idle_sleep_prevented,
+        error: report.power_error,
+    });
     if prev != report.running {
         let _ = events.send(UiEvent::HostStateChanged(report.running));
     }

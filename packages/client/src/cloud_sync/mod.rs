@@ -114,6 +114,7 @@ impl ConnectionData {
             entry.last_used_unix = previous.last_used_unix;
             if self.same_destination(&Self::from(previous)) {
                 entry.wake_on_lan = previous.wake_on_lan.clone();
+                entry.video_quality = previous.video_quality;
             }
             if self.same_scope(&Self::from(previous)) {
                 entry.password_hint = previous.password_hint;

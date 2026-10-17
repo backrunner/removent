@@ -350,11 +350,19 @@ impl HomeView {
                 if !on {
                     self.host_on = false;
                     self.daemon_perms = None;
+                    self.daemon_power = None;
                     // A dead daemon can no longer resolve a pending admission request;
                     // drop it so the dialog does not hang forever.
                     self.admission = None;
                     self.set_status(t!("status.daemon_offline").to_string(), StatusTone::Warn);
                 }
+            }
+            UiEvent::DaemonPower {
+                enabled,
+                active,
+                error,
+            } => {
+                self.daemon_power = Some((enabled, active, error));
             }
             UiEvent::DaemonPermissions {
                 screen_recording,

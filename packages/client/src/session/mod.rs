@@ -39,6 +39,7 @@ pub enum ConnectError {
 
 /// Connection configuration.
 pub struct ClientConfig {
+    pub video_quality: removent_proto::VideoQuality,
     /// Caller pins the host certificate or supplies first-use certificate confirmation.
     /// System passwords must never be sent over a permissive, unconfirmed TLS session.
     pub host_identity_verified: bool,

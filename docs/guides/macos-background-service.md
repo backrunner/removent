@@ -76,6 +76,36 @@ versions; it is not needed to make the current processes independent.
 
 ## First-time unattended setup
 
+In **Settings → System**, **Prevent idle sleep while the background service runs**
+keeps the computer available even when no remote session is connected. It defaults
+to **off**. The display can still turn off. The daemon releases its power assertion
+when the option is disabled or the daemon exits, without changing macOS power settings.
+Disabling sharing leaves the daemon running, so it does not release this opt-in assertion.
+Manual sleep, lid closure and low-battery sleep remain controlled by macOS.
+
+The same setting is available through the CLI and applies immediately without
+restarting listeners or disconnecting active sessions:
+
+```sh
+removent-cli settings set prevent_idle_sleep true
+removent-cli settings get prevent_idle_sleep
+removent-cli settings reset prevent_idle_sleep
+removent-cli daemon status --json
+```
+
+Status reports the requested policy (`prevent_idle_sleep`), whether the daemon
+holds an assertion (`idle_sleep_prevented`), and any failure (`power_error`).
+The assertion indicates idle-sleep prevention, not a guarantee against every
+system sleep reason. Offline edits take effect the next time the daemon starts.
+
+Authenticated Removent sessions also wake and retain the capture display. Capture
+startup failures, sustained blank/suspended frames, and display changes trigger
+bounded capture recovery on the existing connection. A stationary desktop is
+healthy and does not trigger recovery. Recovery preserves input/control and media
+streams, refreshes the real display dimensions, and forces a decoder keyframe.
+Permission denial and user-stopped capture end the session without restarting it.
+Native video omits the captured cursor; the viewer keeps its local pointer.
+
 1. Install and open Removent. Its server starts independently from saved settings.
 2. In the menu bar, choose **Set Up Screen Sharing Permissions…**. This asks from
    the running daemon's own process, which is the identity that needs Screen
@@ -90,7 +120,7 @@ versions; it is not needed to make the current processes independent.
    compatibility service and does not use this trust model.
 4. Enable **Start Server at Login**. Optionally enable the separate tray login
    item. Check System Settings → General → Login Items if macOS blocks background
-   activity. Disable automatic system sleep as appropriate for the host's use.
+   activity. Optionally enable Removent's idle-sleep prevention setting above.
 5. Close the client and tray, reconnect from the paired controller, then test a
    logout/login cycle on the intended host before depending on unattended access.
 

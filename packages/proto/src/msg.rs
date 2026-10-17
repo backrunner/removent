@@ -330,6 +330,10 @@ pub enum ControlMsg {
         width: u32,
         height: u32,
     },
+    /// Sent before SessionRequest only when both peers advertise DYNAMIC_VIDEO.
+    VideoPreferences {
+        quality: crate::VideoQuality,
+    },
 }
 
 /// Host-selected native connection authentication. Append variants for wire compatibility.

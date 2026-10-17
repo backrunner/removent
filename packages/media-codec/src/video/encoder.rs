@@ -1,4 +1,6 @@
 use super::*;
+mod native;
+mod preferences;
 
 // ---------------- Encoding ----------------
 
@@ -92,6 +94,7 @@ pub(super) struct EncoderSession {
     pub(super) callback_state: *mut c_void,
     pub(super) out_rx: mpsc::Receiver<Result<Option<RawEncodedSample>, i32>>,
     pub(super) quality_ceiling_supported: bool,
+    pub(super) hardware_accelerated: bool,
 }
 
 // SAFETY: VideoToolbox sessions are documented as thread-safe; the output
@@ -110,23 +113,7 @@ impl EncoderSession {
         let callback_state = Arc::into_raw(Arc::new(EncoderCallbackState { out_tx: tx }))
             .cast_mut()
             .cast::<c_void>();
-        let mut session: videotoolbox::ffi::VTCompressionSessionRef = std::ptr::null_mut();
-        // SAFETY: all pointers are valid; callback_state is an Arc leaked for
-        // the session lifetime and reclaimed on failure below or in Drop.
-        let status = unsafe {
-            videotoolbox::ffi::VTCompressionSessionCreate(
-                videotoolbox::ffi::kCFAllocatorDefault,
-                width,
-                height,
-                codec.as_cm_codec_type(),
-                std::ptr::null(),
-                std::ptr::null(),
-                videotoolbox::ffi::kCFAllocatorDefault,
-                Some(encode_output_callback),
-                callback_state,
-                &mut session,
-            )
-        };
+        let (session, status) = preferences::create(codec, width, height, callback_state);
         if status != 0 || session.is_null() {
             // SAFETY: created above via Arc::into_raw; the session never took it.
             unsafe { drop(Arc::from_raw(callback_state.cast::<EncoderCallbackState>())) };
@@ -137,6 +124,7 @@ impl EncoderSession {
             callback_state,
             out_rx: rx,
             quality_ceiling_supported: false,
+            hardware_accelerated: false,
         };
         s.set_bool_property(
             unsafe { videotoolbox::ffi::kVTCompressionPropertyKey_RealTime },
@@ -146,6 +134,29 @@ impl EncoderSession {
             unsafe { videotoolbox::ffi::kVTCompressionPropertyKey_AllowFrameReordering },
             false,
         )?;
+        // A dynamic stream can cross SD/HD boundaries. Keep the matrix
+        // explicit so its interpretation cannot change with resolution.
+        let matrix_status = unsafe {
+            videotoolbox::ffi::VTSessionSetProperty(
+                session,
+                videotoolbox::ffi::kVTCompressionPropertyKey_YCbCrMatrix,
+                apple_cf::raw::kCVImageBufferYCbCrMatrix_ITU_R_709_2.cast(),
+            )
+        };
+        if matrix_status != 0 {
+            tracing::warn!(matrix_status, "encoder cannot set explicit BT.709 matrix");
+        }
+        // H.264/HEVC hardware defaults favor quality over speed, even with
+        // RealTime enabled. Remote control needs the frame deadline first;
+        // the existing QP ceiling still protects readable screen content.
+        if let Err(error) = s.set_bool_property(
+            unsafe {
+                videotoolbox::ffi::kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality
+            },
+            true,
+        ) {
+            tracing::debug!(%error, "encoder has no speed-priority option");
+        }
         s.set_i32_property(
             unsafe { videotoolbox::ffi::kVTCompressionPropertyKey_AverageBitRate },
             (bitrate_kbps * 1000) as i32,
@@ -175,6 +186,13 @@ impl EncoderSession {
         if status != 0 {
             return Err(VideoError::CoreMedia(status));
         }
+        s.hardware_accelerated = preferences::is_hardware(session);
+        tracing::info!(
+            hardware = s.hardware_accelerated,
+            width,
+            height,
+            "VideoToolbox encoder ready"
+        );
         Ok(s)
     }
 
@@ -253,20 +271,16 @@ impl EncoderSession {
         pts_us: i64,
         force_keyframe: bool,
     ) -> Result<Option<RawEncodedSample>, VideoError> {
-        let mut pb: videotoolbox::ffi::CVPixelBufferRef = std::ptr::null_mut();
-        // SAFETY: surface is valid; pb is released below right after the
-        // encode call.
-        let status = unsafe {
-            videotoolbox::ffi::CVPixelBufferCreateWithIOSurface(
-                videotoolbox::ffi::kCFAllocatorDefault,
-                surface.as_ptr().cast::<c_void>(),
-                std::ptr::null(),
-                &mut pb,
-            )
-        };
-        if status != 0 || pb.is_null() {
-            return Err(VideoError::CoreMedia(status));
-        }
+        let buffer = super::gpu::from_surface(surface)?;
+        self.encode_buffer(&buffer, pts_us, force_keyframe)
+    }
+
+    fn encode_buffer(
+        &self,
+        buffer: &apple_cf::cv::CVPixelBuffer,
+        pts_us: i64,
+        force_keyframe: bool,
+    ) -> Result<Option<RawEncodedSample>, VideoError> {
         let pts = apple_cf::cm::CMTime {
             value: pts_us,
             timescale: TIMESCALE_US,
@@ -282,7 +296,7 @@ impl EncoderSession {
         let status = unsafe {
             videotoolbox::ffi::VTCompressionSessionEncodeFrame(
                 self.session,
-                pb,
+                buffer.as_ptr().cast(),
                 pts,
                 apple_cf::cm::CMTime::INVALID,
                 props_ref,
@@ -290,7 +304,6 @@ impl EncoderSession {
                 std::ptr::null_mut(),
             )
         };
-        unsafe { videotoolbox::ffi::CFRelease(pb.cast()) };
         if status != 0 {
             return Err(VideoError::CoreMedia(status));
         }
@@ -367,6 +380,7 @@ pub struct VideoEncoder {
     pub(super) param_sets: Option<Vec<Vec<u8>>>,
     pub(super) force_keyframe_pending: bool,
     pub(super) surface: Option<IOSurface>,
+    scaler: Option<super::gpu::MetalScaler>,
 }
 
 impl VideoEncoder {
@@ -403,7 +417,14 @@ impl VideoEncoder {
             param_sets: None,
             force_keyframe_pending: false,
             surface: None,
+            scaler: None,
         })
+    }
+
+    pub fn hardware_accelerated(&self) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|s| s.hardware_accelerated)
     }
 
     pub fn width(&self) -> usize {
@@ -517,12 +538,16 @@ impl VideoEncoder {
                 .ok_or_else(|| VideoError::Surface("no base address".into()))?;
             // SAFETY: both memory regions are owned by this function and lengths match.
             unsafe {
-                for row in 0..self.height {
-                    std::ptr::copy_nonoverlapping(
-                        bgra.as_ptr().add(row * bpr_expected),
-                        dst.add(row * stride),
-                        bpr_expected,
-                    );
+                if stride == bpr_expected {
+                    std::ptr::copy_nonoverlapping(bgra.as_ptr(), dst, bgra.len());
+                } else {
+                    for row in 0..self.height {
+                        std::ptr::copy_nonoverlapping(
+                            bgra.as_ptr().add(row * bpr_expected),
+                            dst.add(row * stride),
+                            bpr_expected,
+                        );
+                    }
                 }
             }
         }
@@ -537,7 +562,15 @@ impl VideoEncoder {
             // An errored completion may still retain this surface in VT.
             self.surface = None;
         }
-        let Some(raw) = encoded? else {
+        self.finish_encoded(encoded?, pts_us)
+    }
+
+    fn finish_encoded(
+        &mut self,
+        raw: Option<RawEncodedSample>,
+        pts_us: i64,
+    ) -> Result<Vec<EncodedVideoFrame>, VideoError> {
+        let Some(raw) = raw else {
             return Ok(Vec::new());
         };
 

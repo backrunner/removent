@@ -1,4 +1,6 @@
 use super::*;
+mod capture;
+mod resolution;
 
 #[tokio::test]
 async fn adaptive_recovery_uses_real_static_refreshes_without_reducing_text_size() {
@@ -19,7 +21,7 @@ async fn adaptive_recovery_uses_real_static_refreshes_without_reducing_text_size
         320,
         240,
     );
-    for _ in 0..20 {
+    for _ in 0..200 {
         controller.on_sample(
             &Sample {
                 rtt_ms: 0.,
@@ -28,11 +30,15 @@ async fn adaptive_recovery_uses_real_static_refreshes_without_reducing_text_size
                 jitter_ms: 100.,
                 decode_ms: 0.,
             },
-            2500,
+            250,
         );
     }
     assert_eq!(controller.state().scale, 1.0);
     let degraded = controller.state();
+    assert!(
+        degraded.bitrate_kbps < 3000,
+        "fixture must establish sustained pressure"
+    );
     let (quality_tx, quality_rx) = tokio::sync::watch::channel(controller.state());
     let health = Arc::new(crate::delivery::DeliveryHealth::new(host.clone()));
     let (cmd_tx, cmd_rx) = mpsc::channel(4);
@@ -79,7 +85,12 @@ async fn adaptive_recovery_uses_real_static_refreshes_without_reducing_text_size
         None,
     );
     frames
-        .send(([40, 80, 160, 255].repeat(320 * 240), 0))
+        .send(removent_media_capture::CapturedVideoFrame::new(
+            [40, 80, 160, 255].repeat(320 * 240),
+            320,
+            240,
+            0,
+        ))
         .unwrap();
     let mut stream = client.accept_media_stream().await.unwrap();
     let (first, _) = video_packet(&mut stream).await;
@@ -256,7 +267,10 @@ async fn static_recovery_probe_uses_temporal_compression_and_explicit_refresh_is
                 ]
             })
             .collect();
-        tx.send((frame, 10)).unwrap();
+        tx.send(removent_media_capture::CapturedVideoFrame::new(
+            frame, 320, 240, 10,
+        ))
+        .unwrap();
         let mut stream = client.accept_media_stream().await.unwrap();
         video_packet(&mut stream).await;
         quality_tx.send_replace(QualityState {
@@ -332,7 +346,13 @@ async fn dynamic_quality_refreshes_static_frame_and_decodes_each_size() {
             None,
             None,
         );
-        tx.send(([40, 90, 160, 255].repeat(320 * 240), 10)).unwrap();
+        tx.send(removent_media_capture::CapturedVideoFrame::new(
+            [40, 90, 160, 255].repeat(320 * 240),
+            320,
+            240,
+            10,
+        ))
+        .unwrap();
         let mut stream = client.accept_media_stream().await.unwrap();
         let (initial, _) = video_packet(&mut stream).await;
         assert_eq!((initial.width, initial.height), (320, 240));
@@ -427,7 +447,13 @@ async fn dynamic_fps_limits_real_wire_frame_rate_under_capture_flood() {
         None,
         None,
     );
-    tx.send(([0, 80, 170, 255].repeat(64 * 64), 0)).unwrap();
+    tx.send(removent_media_capture::CapturedVideoFrame::new(
+        [0, 80, 170, 255].repeat(64 * 64),
+        64,
+        64,
+        0,
+    ))
+    .unwrap();
     let mut stream = client.accept_media_stream().await.unwrap();
     video_packet(&mut stream).await;
     quality_tx.send_replace(QualityState { fps: 15, ..max });
@@ -439,7 +465,7 @@ async fn dynamic_fps_limits_real_wire_frame_rate_under_capture_flood() {
             tokio::select! {
                 _ = stop.cancelled() => break,
                 _ = tokio::time::sleep(Duration::from_millis(1)) => {
-                    if tx.send(([pts as u8, 80, 170, 255].repeat(64 * 64), pts)).is_err() { break; }
+                    if tx.send(removent_media_capture::CapturedVideoFrame::new([pts as u8, 80, 170, 255].repeat(64 * 64), 64, 64, pts)).is_err() { break; }
                     pts += 1;
                 }
             }
@@ -651,13 +677,13 @@ fn token_bucket_caps_refill_at_capacity() {
 
 #[test]
 fn fit_capture_dims_preserves_aspect_ratio() {
-    // 16:10 Retina panel: height is the binding constraint → 1728×1080,
-    // not the old stretched 1920×1080.
-    assert_eq!(fit_capture_dims(2880, 1800), (1728, 1080));
+    // A Retina panel within the 4K ceiling retains its native pixels.
+    assert_eq!(fit_capture_dims(2880, 1800), (2880, 1800));
     // 16:9 exactly at the box: unchanged.
     assert_eq!(fit_capture_dims(1920, 1080), (1920, 1080));
     // 4K 16:9: width binds.
-    assert_eq!(fit_capture_dims(3840, 2160), (1920, 1080));
+    assert_eq!(fit_capture_dims(3840, 2160), (3840, 2160));
+    assert_eq!(fit_capture_dims(5760, 3600), (3456, 2160));
     // Smaller than the box: never upscale.
     assert_eq!(fit_capture_dims(1280, 720), (1280, 720));
 }
@@ -673,8 +699,8 @@ fn fit_capture_dims_forces_even_and_nonzero() {
 
 #[test]
 fn delayed_packet_commits_its_own_submitted_pixels() {
-    let frame_a: Arc<[u8]> = Arc::from([1, 2, 3, 4]);
-    let frame_b: Arc<[u8]> = Arc::from([5, 6, 7, 8]);
+    let frame_a = Arc::new(vec![1, 2, 3, 4]);
+    let frame_b = Arc::new(vec![5, 6, 7, 8]);
     let mut submitted = HashMap::new();
     submitted.insert(10, frame_a.clone());
     submitted.insert(20, frame_b.clone());

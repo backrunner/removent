@@ -90,6 +90,7 @@ impl ViewerView {
             return;
         }
         let modifiers = key_modifiers(&keystroke.modifiers, self.sent_modifiers);
+        let unicode = removent_input::keyboard::key_text(vk_code, modifiers, unicode);
         self.engine
             .send_input_key(vk_code, modifiers, kind, unicode);
         // Track forwarded-but-unreleased keys so a focus loss can release them

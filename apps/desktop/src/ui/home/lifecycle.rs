@@ -207,6 +207,7 @@ impl HomeView {
             host_on: false,
             daemon_online: false,
             daemon_perms: None,
+            daemon_power: None,
             connecting: None,
             connection_stage: ConnectionStage::Resolving,
             cancelled_generation: None,

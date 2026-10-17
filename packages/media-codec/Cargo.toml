@@ -11,5 +11,7 @@ apple-cf = "0.11"
 opus = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+metal = "0.33"
+objc = "0.2"
 rav1e = { version = "0.8.1", default-features = false, features = ["asm", "threading"] }
 rusty_av1d = { version = "1.2.0", default-features = false, features = ["bitdepth_8"] }

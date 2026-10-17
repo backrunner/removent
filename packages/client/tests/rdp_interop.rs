@@ -126,6 +126,7 @@ impl TestServer {
 
     fn request(&self, allow_untrusted: bool, password: &str) -> ConnectionRequest {
         ConnectionRequest {
+            video_quality: Default::default(),
             pairing_code: None,
             protocol: ConnectionProtocol::Rdp,
             address: ConnectionAddress::from_socket(self.addr),

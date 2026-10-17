@@ -37,6 +37,7 @@ enum Step {
 }
 
 pub struct ConnectionDialog {
+    video_quality: removent_proto::VideoQuality,
     step: Step,
     saved_id: Option<String>,
     save_warning: Option<String>,
@@ -91,6 +92,8 @@ pub fn stage_label(stage: ConnectionStage) -> String {
 }
 
 mod form;
+mod quality;
 mod render;
+pub(crate) use quality::quality_label;
 #[cfg(test)]
 mod tests;

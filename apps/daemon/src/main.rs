@@ -83,6 +83,7 @@ async fn run(paths: DataPaths) -> anyhow::Result<()> {
         _ = sigterm.recv() => {},
         _ = state.shutdown.cancelled() => {},
         result = &mut ipc => {
+            state.power.lock().unwrap().set_enabled(false);
             state.shutdown.cancel();
             let _ = mgr.await;
             result.context("IPC task failed")??;
@@ -90,6 +91,7 @@ async fn run(paths: DataPaths) -> anyhow::Result<()> {
         },
     }
     tracing::info!("removentd shutting down");
+    state.power.lock().unwrap().set_enabled(false);
     state.shutdown.cancel();
     let _ = ipc.await;
     let _ = mgr.await;

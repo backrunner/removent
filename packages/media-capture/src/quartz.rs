@@ -5,6 +5,7 @@ use block::{Block, ConcreteBlock};
 use std::{
     ffi::{c_char, c_void},
     ptr,
+    sync::{Arc, Mutex},
     time::Instant,
 };
 use tokio::sync::mpsc;
@@ -44,6 +45,7 @@ pub struct QuartzCapture {
     stream: Object,
     queue: Object,
     stopped: Option<mpsc::Receiver<String>>,
+    health: Arc<Mutex<crate::health::CaptureHealth>>,
 }
 // CGDisplayStream uses its dedicated dispatch queue; ownership can move between
 // Tokio workers. Stream APIs themselves are thread safe.
@@ -51,6 +53,9 @@ unsafe impl Send for QuartzCapture {}
 impl QuartzCapture {
     pub fn take_stopped_rx(&mut self) -> Option<mpsc::Receiver<String>> {
         self.stopped.take()
+    }
+    pub fn health_failure(&self) -> Option<&'static str> {
+        self.health.lock().unwrap().failure(Instant::now())
     }
 }
 impl Drop for QuartzCapture {
@@ -69,12 +74,15 @@ pub fn start(
     display: u32,
     width: u32,
     height: u32,
-    frames: removent_core::latest::Sender<(Vec<u8>, i64)>,
+    frames: removent_core::latest::Sender<crate::CapturedVideoFrame>,
 ) -> Result<QuartzCapture, String> {
     if width == 0 || height == 0 || width > 8192 || height > 8192 {
         return Err("Invalid capture dimensions".into());
     }
     let (tx, rx) = mpsc::channel(1);
+    let health = Arc::new(Mutex::new(crate::health::CaptureHealth::default()));
+    let callback_health = health.clone();
+    let generation = crate::next_capture_generation();
     static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
     let started = *EPOCH.get_or_init(Instant::now);
     let handler = ConcreteBlock::new(
@@ -84,6 +92,9 @@ pub fn start(
                 return;
             }
             if status != 0 || surface.is_null() {
+                if status == 2 {
+                    callback_health.lock().unwrap().unavailable(Instant::now());
+                }
                 return;
             }
             // SAFETY: IOSurface is valid during this callback. Read only while locked,
@@ -112,7 +123,14 @@ pub fn start(
                             w * 4,
                         );
                     }
-                    let _ = frames.send((pixels, started.elapsed().as_micros() as i64));
+                    callback_health.lock().unwrap().frame();
+                    let _ = frames.send(crate::CapturedVideoFrame {
+                        pixels: crate::CapturedPixels::Bgra(pixels.into()),
+                        pts_us: started.elapsed().as_micros() as i64,
+                        width: w,
+                        height: h,
+                        generation,
+                    });
                 }
                 IOSurfaceUnlock(surface, 1, ptr::null_mut());
             }
@@ -149,6 +167,7 @@ pub fn start(
             stream,
             queue,
             stopped: Some(rx),
+            health,
         })
     }
 }

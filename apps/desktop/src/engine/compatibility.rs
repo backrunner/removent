@@ -159,10 +159,12 @@ pub(super) async fn run_requested_client(
                 }
                 let pin_key = format!("relay:{}:{}", route.endpoint, request.address.host);
                 attempt.claim_relay_room(&route.endpoint, &request.address.host)?;
+                let video_quality = request.video_quality;
                 let invitation = request.pairing_code.is_some().then_some(request);
                 return run_client(
                     identity,
                     native::NativeDestination {
+                        video_quality,
                         address: bridge.address,
                         expected_host: route.optional_host_pin(),
                         key: Some(pin_key),
@@ -189,10 +191,12 @@ pub(super) async fn run_requested_client(
                 request.address = removent_client::connection::ConnectionAddress::from_socket(addr);
             }
             attempt.claim_addresses(&[addr])?;
+            let video_quality = request.video_quality;
             let invitation = request.pairing_code.is_some().then_some(request);
             run_client(
                 identity.ok_or_else(|| anyhow::anyhow!("Device identity missing"))?,
                 native::NativeDestination {
+                    video_quality,
                     address: addr,
                     expected_host: None,
                     key: None,

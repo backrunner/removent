@@ -1,5 +1,4 @@
 use super::{DisplayTarget, MAX_FRAME_BYTES, RFB_VERSION, SEC_NONE, SEC_VNC_AUTH};
-use crate::session::fit_capture_dims;
 use des::Des;
 use des::cipher::{BlockCipherEncrypt, KeyInit};
 use rand::Rng;
@@ -118,7 +117,14 @@ fn current_display() -> DisplayTarget {
             dpi: 96,
             is_main: true,
         });
-    let (capture_width, capture_height) = fit_capture_dims(display.w_px, display.h_px);
+    target_for_display(display)
+}
+
+pub(super) fn target_for_display(display: removent_proto::DisplayInfo) -> DisplayTarget {
+    // Raw VNC keeps its existing framebuffer budget independently of the
+    // native protocol's 4K ceiling, including when the source is HiDPI.
+    let (capture_width, capture_height) =
+        removent_proto::VideoQuality::Standard.fit_dimensions(display.w_px, display.h_px);
     DisplayTarget {
         id: display.id,
         width: capture_width,

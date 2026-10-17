@@ -2,6 +2,20 @@
 
 use core_graphics::display::{CGDisplay, CGMainDisplayID};
 
+/// Zero refresh rate denotes a variable/unknown mode. Leave room for ProMotion
+/// instead of imposing a 60 Hz ceiling; capture still emits only real updates.
+pub fn capture_frame_rate(display_id: u32) -> u8 {
+    let rate = CGDisplay::new(display_id)
+        .display_mode()
+        .map_or(0., |m| m.refresh_rate());
+    if rate.is_finite() && rate > 0. {
+        rate.ceil()
+            .clamp(1., f64::from(removent_proto::MAX_VIDEO_FPS)) as u8
+    } else {
+        120
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct DisplayGeometry {
     pub id: u32,
@@ -22,17 +36,22 @@ impl DisplayGeometry {
     pub fn from_cg(id: u32) -> Self {
         let d = CGDisplay::new(id);
         let b = d.bounds();
-        let scale = if b.size.width > 0.0 {
-            d.pixels_wide() as f64 / b.size.width
-        } else {
-            1.0
-        };
+        // CGDisplayPixelsWide/High can describe the UI resolution of a HiDPI
+        // mode. Capture and protocol geometry need its backing pixel size.
+        let mode_pixels = d
+            .display_mode()
+            .map(|m| (m.pixel_width(), m.pixel_height()));
+        let (width_px, height_px, scale) = pixel_geometry(
+            mode_pixels,
+            (d.pixels_wide(), d.pixels_high()),
+            b.size.width,
+        );
         Self {
             id,
             width_pt: b.size.width,
             height_pt: b.size.height,
-            width_px: d.pixels_wide(),
-            height_px: d.pixels_high(),
+            width_px,
+            height_px,
             scale,
             origin_x: b.origin.x,
             origin_y: b.origin.y,
@@ -71,9 +90,9 @@ impl DisplayGeometry {
     }
 
     /// Converts capture-frame pixels into global display points, where the
-    /// capture was scaled to `capture_w_px`×`capture_h_px` (the host caps the
-    /// capture at 1920×1080, so on Retina displays capture pixels no longer
-    /// equal physical pixels). Falls back to [`Self::px_to_global_pt`] when
+    /// capture was scaled to `capture_w_px`×`capture_h_px` within the connection's
+    /// quality ceiling, so capture pixels may differ from backing pixels.
+    /// Falls back to [`Self::px_to_global_pt`] when
     /// the capture dims are unknown or match the display's physical pixels.
     pub fn capture_px_to_global_pt(
         &self,
@@ -90,6 +109,22 @@ impl DisplayGeometry {
         }
         self.px_to_global_pt(x_px * w / capture_w_px, y_px * h / capture_h_px)
     }
+}
+
+fn pixel_geometry(
+    mode_pixels: Option<(u64, u64)>,
+    fallback: (u64, u64),
+    width_pt: f64,
+) -> (u64, u64, f64) {
+    let (w, h) = mode_pixels
+        .filter(|&(w, h)| w > 0 && h > 0)
+        .unwrap_or(fallback);
+    let scale = if width_pt > 0.0 {
+        w as f64 / width_pt
+    } else {
+        1.0
+    };
+    (w, h, scale)
 }
 
 #[cfg(test)]
@@ -114,6 +149,35 @@ mod tests {
     fn retina_px_maps_to_half_points() {
         let g = geo(2.0, 0.0, 0.0);
         assert_eq!(g.px_to_global_pt(200.0, 100.0), (100.0, 50.0));
+    }
+
+    #[test]
+    fn hidpi_4k_mode_keeps_backing_pixels_and_scaled_input_coordinates() {
+        let (width_px, height_px, scale) = pixel_geometry(Some((3840, 2160)), (1920, 1080), 1920.0);
+        assert_eq!((width_px, height_px, scale), (3840, 2160, 2.0));
+        let g = DisplayGeometry {
+            width_pt: 1920.0,
+            height_pt: 1080.0,
+            width_px,
+            height_px,
+            ..geo(scale, 100.0, -50.0)
+        };
+        for (w, h) in [(3840.0, 2160.0), (1920.0, 1080.0), (960.0, 540.0)] {
+            assert_eq!(
+                g.capture_px_to_global_pt(w / 2.0, h / 2.0, w, h),
+                (1060.0, 490.0)
+            );
+        }
+    }
+
+    #[test]
+    fn absent_or_empty_display_mode_falls_back_to_display_pixels() {
+        for mode in [None, Some((0, 2160)), Some((3840, 0))] {
+            assert_eq!(
+                pixel_geometry(mode, (1920, 1080), 1920.0),
+                (1920, 1080, 1.0)
+            );
+        }
     }
 
     #[test]

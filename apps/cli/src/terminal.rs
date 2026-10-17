@@ -190,6 +190,9 @@ fn status(value: &Value) {
         "relay_connected",
         "host_error",
         "relay_error",
+        "prevent_idle_sleep",
+        "idle_sleep_prevented",
+        "power_error",
     ] {
         if !value[key].is_null() {
             fields(&serde_json::json!({key: value[key]}));

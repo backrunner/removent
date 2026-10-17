@@ -7,6 +7,7 @@ mod tests;
 mod authentication;
 mod system_account;
 
+use super::negotiation::preferred_video_codec;
 use authentication::run_authentication;
 
 pub(super) async fn expect_msg(
@@ -121,7 +122,8 @@ where
                 // opt-in during negotiation.
                 feature_bits: removent_proto::feature_bits::SOFTWARE_AV1
                     | removent_proto::feature_bits::AUTH_METHODS
-                    | removent_proto::feature_bits::SYSTEM_ACCOUNT_AUTH,
+                    | removent_proto::feature_bits::SYSTEM_ACCOUNT_AUTH
+                    | removent_proto::feature_bits::DYNAMIC_VIDEO,
                 device_name: cfg.device_name.clone(),
                 // Honest resume verdict (§7.4): Some(true) only when the presented token
                 // validated; Some(false) tells the client to fall back to full
@@ -158,6 +160,19 @@ where
         ));
     }
 
+    let video_quality = if hello.feature_bits & removent_proto::feature_bits::DYNAMIC_VIDEO != 0 {
+        let msg = expect_msg(&mut source, "VideoPreferences", |m| {
+            matches!(m, ControlMsg::VideoPreferences { .. })
+        })
+        .await?;
+        let ControlMsg::VideoPreferences { quality } = msg else {
+            unreachable!()
+        };
+        Some(quality)
+    } else {
+        None
+    };
+
     // Quick-resume path: skips pairing/admission and reuses the last negotiation
     // parameters; the old token is single-use and rotated after consumption (§7.4).
     if let Some(token) = hello.hello.resume_token
@@ -168,6 +183,11 @@ where
         let new_token = new_token();
         let peer_caps = cfg.available_caps(peer_caps);
         let mut ack = prev_ack;
+        let (max_fps, max_bitrate) =
+            super::negotiation::video_limits(cfg, &main_display, video_quality);
+        ack.video.max_fps = ack.video.max_fps.clamp(1, max_fps);
+        ack.video.max_bitrate_kbps = ack.video.max_bitrate_kbps.clamp(1, max_bitrate);
+        ack.video.initial_scale = 1.;
         ack.audio.enabled &= peer_caps.audio;
         ack.resume_token = Some(new_token);
         // Tolerate one lost rotation reply: the just-consumed current token stays
@@ -184,9 +204,17 @@ where
         })
         .await?;
         let cancel = CancellationToken::new();
-        let (cap_w, cap_h) = fit_capture_dims(main_display.w_px, main_display.h_px);
+        let (cap_w, cap_h) = video_quality
+            .unwrap_or_default()
+            .fit_dimensions(main_display.w_px, main_display.h_px);
         let (cmd_tx, cmd_rx, controller, kf_tx, kf_rx, quality_tx, quality_rx) =
-            build_session_channels(ack.video.max_bitrate_kbps, ack.video.max_fps, cap_w, cap_h);
+            build_session_channels(
+                ack.video.max_bitrate_kbps,
+                ack.video.max_fps,
+                cap_w,
+                cap_h,
+                video_quality,
+            );
         let clip_state = cfg
             .local_clip
             .clone()
@@ -194,6 +222,7 @@ where
             .map(|clip| spawn_clip_poller(clip, cmd_tx.clone(), &cancel));
         return Ok((
             EstablishedSession {
+                video_quality,
                 peer_name: hello.hello.device_name.clone(),
                 peer_fp_hex: peer_fp,
                 ack,
@@ -360,22 +389,27 @@ where
     sink.send(ControlMsg::SessionAccept).await?;
     let display_w = main_display.w_px;
     let display_h = main_display.h_px;
+    let (capture_w, capture_h) = video_quality
+        .unwrap_or_default()
+        .fit_dimensions(display_w, display_h);
+    let (max_fps, max_bitrate) =
+        super::negotiation::video_limits(cfg, &main_display, video_quality);
     let displays = vec![main_display];
     let selected = displays[0].id;
     let codec = preferred_video_codec(
         hello.feature_bits,
-        display_w,
-        display_h,
-        cfg.video_bitrate_kbps,
-        cfg.video_fps,
+        capture_w,
+        capture_h,
+        max_bitrate,
+        max_fps,
     );
     let negotiate = Negotiate {
         displays,
         selected_display: selected,
         video: VideoParams {
             codec,
-            max_fps: cfg.video_fps,
-            max_bitrate_kbps: cfg.video_bitrate_kbps,
+            max_fps,
+            max_bitrate_kbps: max_bitrate,
             initial_scale: 1.0,
         },
         audio: removent_proto::AudioParams {
@@ -398,6 +432,17 @@ where
 
     // Issue a resume token and send it back.
     let mut ack = *ack;
+    if ack.video.codec != negotiate.video.codec || !ack.video.initial_scale.is_finite() {
+        return Err(HostError::Rejected(
+            "invalid video negotiation reply".into(),
+        ));
+    }
+    ack.video.max_fps = ack.video.max_fps.clamp(1, negotiate.video.max_fps);
+    ack.video.max_bitrate_kbps = ack
+        .video
+        .max_bitrate_kbps
+        .clamp(1, negotiate.video.max_bitrate_kbps);
+    ack.video.initial_scale = 1.;
     ack.audio.enabled &= caps.audio;
     let token = new_token();
     remember_resume(&peer_fp, &token, &ack, caps, None);
@@ -409,9 +454,16 @@ where
     .await?;
 
     let cancel = CancellationToken::new();
-    let (cap_w, cap_h) = fit_capture_dims(display_w, display_h);
-    let (cmd_tx, cmd_rx, controller, kf_tx, kf_rx, quality_tx, quality_rx) =
-        build_session_channels(ack.video.max_bitrate_kbps, ack.video.max_fps, cap_w, cap_h);
+    let (cap_w, cap_h) = video_quality
+        .unwrap_or_default()
+        .fit_dimensions(display_w, display_h);
+    let (cmd_tx, cmd_rx, controller, kf_tx, kf_rx, quality_tx, quality_rx) = build_session_channels(
+        ack.video.max_bitrate_kbps,
+        ack.video.max_fps,
+        cap_w,
+        cap_h,
+        video_quality,
+    );
     let clip_state = cfg
         .local_clip
         .clone()
@@ -419,6 +471,7 @@ where
         .map(|clip| spawn_clip_poller(clip, cmd_tx.clone(), &cancel));
     Ok((
         EstablishedSession {
+            video_quality,
             peer_name: hello.hello.device_name.clone(),
             peer_fp_hex: peer_fp,
             ack,
@@ -456,40 +509,6 @@ where
             .await?;
             Err(error)
         }
-    }
-}
-
-/// AV1 is intentionally opt-in for remote desktop sessions. Software AV1 has
-/// materially higher CPU cost and a few frames of encoder pipeline delay, so a
-/// peer must advertise the decoder feature and the operator must request it via
-/// `REMOVENT_VIDEO_CODEC=av1`. Any failed probe falls back to HEVC.
-pub(super) fn preferred_video_codec(
-    peer_features: u64,
-    display_w: u32,
-    display_h: u32,
-    bitrate_kbps: u32,
-    fps: u8,
-) -> CodecId {
-    let requested = std::env::var("REMOVENT_VIDEO_CODEC")
-        .ok()
-        .is_some_and(|v| v.eq_ignore_ascii_case("av1") || v.eq_ignore_ascii_case("software-av1"));
-    if !requested || peer_features & removent_proto::feature_bits::SOFTWARE_AV1 == 0 {
-        return CodecId::Hevc;
-    }
-    let (w, h) = fit_capture_dims(display_w, display_h);
-    if removent_media_codec::VideoEncoder::new(
-        CodecId::Av1,
-        w as usize,
-        h as usize,
-        bitrate_kbps,
-        fps,
-    )
-    .is_ok()
-    {
-        CodecId::Av1
-    } else {
-        tracing::warn!("software AV1 probe failed; falling back to HEVC");
-        CodecId::Hevc
     }
 }
 

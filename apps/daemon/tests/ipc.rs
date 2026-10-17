@@ -267,6 +267,31 @@ async fn admission_reply_resolves() {
 }
 
 #[tokio::test]
+async fn power_policy_applies_over_ipc_without_restarting_active_sharing() {
+    let d = spawn_daemon_with(None).await;
+    let mut host_changes = d.state.enabled_watch.subscribe();
+    host_changes.borrow_and_update();
+    let mut client = Client::connect(&d.paths).await;
+    assert!(!d.state.snapshot().idle_sleep_prevented);
+    Settings::update(&d.paths, |s| s.prevent_idle_sleep = true).unwrap();
+    assert!(matches!(
+        client.request(IpcRequest::ReloadSettings).await,
+        IpcResponse::Ok
+    ));
+    let status = d.state.snapshot();
+    assert!(status.prevent_idle_sleep);
+    assert!(status.idle_sleep_prevented, "{:?}", status.power_error);
+    assert!(!host_changes.has_changed().unwrap());
+    Settings::update(&d.paths, |s| s.prevent_idle_sleep = false).unwrap();
+    assert!(matches!(
+        client.request(IpcRequest::ReloadSettings).await,
+        IpcResponse::Ok
+    ));
+    assert!(!d.state.snapshot().idle_sleep_prevented);
+    assert!(!host_changes.has_changed().unwrap());
+}
+
+#[tokio::test]
 async fn admission_timeout_denies() {
     let d = spawn_daemon_with(Some(Duration::from_millis(150))).await;
 

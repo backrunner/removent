@@ -20,6 +20,9 @@ pub struct Settings {
     pub authentication: crate::authentication::AuthenticationSettings,
     /// Service master switch (toggleable from the menu bar).
     pub host_enabled: bool,
+    /// Keep the computer available while removentd runs; the display may sleep.
+    /// Opt-in and independent of the sharing switch.
+    pub prevent_idle_sleep: bool,
     pub host_port: u16,
     /// Opt-in legacy WindowServer capture for lock/login-window compatibility.
     /// Video/input only; requires signed-app validation on the target macOS.
@@ -113,6 +116,7 @@ impl Default for Settings {
             admission: AdmissionMode::AlwaysAsk,
             authentication: Default::default(),
             host_enabled: true,
+            prevent_idle_sleep: false,
             host_port: removent_proto::DEFAULT_PORT,
             window_server_capture: false,
             paired_only: false,

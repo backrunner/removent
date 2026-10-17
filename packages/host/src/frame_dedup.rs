@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 #[derive(Debug, Default)]
 pub struct FrameDeduplicator {
-    last_sent: Option<Arc<[u8]>>,
+    last_sent: Option<Arc<Vec<u8>>>,
 }
 
 impl FrameDeduplicator {
@@ -20,19 +20,19 @@ impl FrameDeduplicator {
     /// Returns true when `frame` differs from the last frame committed to the
     /// wire, or when a caller explicitly requires a refresh.
     pub fn should_encode(&self, frame: &[u8], force: bool) -> bool {
-        force || self.last_sent.as_deref() != Some(frame)
+        force || self.last_sent.as_deref().map(Vec::as_slice) != Some(frame)
     }
 
     /// Records a frame only after its encoded packet has been accepted and
     /// written. Keeping this separate from [`should_encode`] is important:
     /// backpressure drops and encoder failures must not suppress a retry.
     pub fn mark_sent(&mut self, frame: &[u8]) {
-        self.last_sent = Some(Arc::from(frame));
+        self.last_sent = Some(Arc::new(frame.to_vec()));
     }
 
     /// Same as [`mark_sent`], but reuses an existing frame allocation shared
     /// with the capture cache and pending encoder submission.
-    pub fn mark_sent_shared(&mut self, frame: Arc<[u8]>) {
+    pub fn mark_sent_shared(&mut self, frame: Arc<Vec<u8>>) {
         self.last_sent = Some(frame);
     }
 
@@ -44,6 +44,17 @@ impl FrameDeduplicator {
 #[cfg(test)]
 mod tests {
     use super::FrameDeduplicator;
+
+    #[test]
+    fn shared_frame_retains_capture_allocation_without_copying_pixels() {
+        let pixels = vec![42; 3840 * 2160 * 4];
+        let original = pixels.as_ptr();
+        let frame = std::sync::Arc::new(pixels);
+        let mut dedup = FrameDeduplicator::new();
+        dedup.mark_sent_shared(frame.clone());
+        assert_eq!(dedup.last_sent.as_ref().unwrap().as_ptr(), original);
+        assert!(!dedup.should_encode(&frame, false));
+    }
 
     #[test]
     fn first_frame_is_encoded_and_identical_frame_is_skipped_after_commit() {

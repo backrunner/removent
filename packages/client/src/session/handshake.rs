@@ -108,6 +108,7 @@ pub async fn connect_session_with_confirmation(
             feature_bits: removent_proto::feature_bits::SOFTWARE_AV1
                 | removent_proto::feature_bits::AUTH_METHODS
                 | removent_proto::feature_bits::SYSTEM_ACCOUNT_AUTH
+                | removent_proto::feature_bits::DYNAMIC_VIDEO
                 | if cfg.pairing_code.is_some() {
                     removent_proto::feature_bits::PAIRING_INVITATION
                 } else {
@@ -162,6 +163,12 @@ pub async fn connect_session_with_confirmation(
     }
 
     let mut sink = sink;
+    if server_ack.feature_bits & removent_proto::feature_bits::DYNAMIC_VIDEO != 0 {
+        sink.send(ControlMsg::VideoPreferences {
+            quality: cfg.video_quality,
+        })
+        .await?;
+    }
     sink.send(ControlMsg::SessionRequest { caps: cfg.caps })
         .await?;
 

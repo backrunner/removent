@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SavedConnection {
+    /// Local rendering preference, independent of other devices sharing this bookmark.
+    pub video_quality: removent_proto::VideoQuality,
     /// Stable identity for sidebar selection and deletion; assigned on insert.
     pub id: String,
     /// User memo name; display falls back to the address when empty.
@@ -43,6 +45,7 @@ pub struct SavedConnection {
 impl Default for SavedConnection {
     fn default() -> Self {
         Self {
+            video_quality: Default::default(),
             id: String::new(),
             name: String::new(),
             protocol: ConnectionProtocol::Removent,
@@ -82,6 +85,7 @@ impl SavedConnection {
     /// Identity/timestamps are placeholders: `SavedConnections::upsert` assigns them.
     pub fn from_request(request: &ConnectionRequest, name: impl Into<String>) -> Self {
         Self {
+            video_quality: request.video_quality,
             name: name.into(),
             protocol: request.protocol,
             host: request.address.host.clone(),
@@ -98,6 +102,7 @@ impl SavedConnection {
     /// Rebuild a request; the password field is empty because it is never persisted.
     pub fn to_request(&self) -> ConnectionRequest {
         ConnectionRequest {
+            video_quality: self.video_quality,
             pairing_code: None,
             protocol: self.protocol,
             address: ConnectionAddress {

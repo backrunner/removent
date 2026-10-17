@@ -95,7 +95,7 @@ impl HostConfig {
 #[derive(Clone)]
 pub struct HostMediaFeeds {
     /// BGRA frames (stride=width*4) + pts in microseconds.
-    pub video_tx: removent_core::latest::Sender<(Vec<u8>, i64)>,
+    pub video_tx: removent_core::latest::Sender<removent_media_capture::CapturedVideoFrame>,
     /// 10ms stereo PCM frames with source presentation timestamps.
     pub audio_tx: mpsc::Sender<removent_media_capture::AudioFrame>,
 }
@@ -111,18 +111,27 @@ type SessionChannels = (
     tokio::sync::watch::Receiver<QualityState>,
 );
 
-fn build_session_channels(bitrate_kbps: u32, fps: u8, width: u32, height: u32) -> SessionChannels {
+fn build_session_channels(
+    bitrate_kbps: u32,
+    fps: u8,
+    width: u32,
+    height: u32,
+    quality: Option<removent_proto::VideoQuality>,
+) -> SessionChannels {
     let (cmd_tx, cmd_rx) = mpsc::channel::<ControlMsg>(64);
     let (kf_tx, kf_rx) = mpsc::channel::<()>(4);
-    let controller = Arc::new(std::sync::Mutex::new(
-        AdaptationController::with_dimensions(
+    let controller = Arc::new(std::sync::Mutex::new(match quality {
+        Some(quality) => {
+            AdaptationController::with_video_quality(bitrate_kbps, fps, quality, width, height)
+        }
+        None => AdaptationController::with_dimensions(
             bitrate_kbps,
             fps,
             removent_core::QualityPreset::Auto,
             width,
             height,
         ),
-    ));
+    }));
     let (quality_tx, quality_rx) = tokio::sync::watch::channel(controller.lock().unwrap().state());
     (
         cmd_tx, cmd_rx, controller, kf_tx, kf_rx, quality_tx, quality_rx,
@@ -148,6 +157,7 @@ fn spawn_clip_poller(
 }
 
 pub struct EstablishedSession {
+    pub video_quality: Option<removent_proto::VideoQuality>,
     pub peer_name: String,
     pub peer_fp_hex: String,
     pub ack: NegotiateAck,
@@ -177,6 +187,7 @@ pub struct EstablishedSession {
 mod audio;
 mod control;
 mod handshake;
+mod negotiation;
 mod resume;
 #[cfg(test)]
 mod tests;

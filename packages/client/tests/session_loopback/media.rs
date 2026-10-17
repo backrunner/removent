@@ -110,7 +110,8 @@ async fn full_session_pair_negotiate_media() {
         }
 
         // Media loops (order: video first, then audio; the client accepts in this order).
-        let (video_tx, video_rx) = removent_core::latest::channel::<(Vec<u8>, i64)>();
+        let (video_tx, video_rx) =
+            removent_core::latest::channel::<removent_media_capture::CapturedVideoFrame>();
         let (audio_tx, audio_rx) = mpsc::channel::<removent_media_capture::AudioFrame>(16);
         let vstream = conn.open_media_stream().await.unwrap();
         let vhandle = spawn_video_loop(
@@ -140,7 +141,13 @@ async fn full_session_pair_negotiate_media() {
         // Feed the streams.
         for t in 0..10usize {
             if video_tx
-                .send((synthetic_bgra(t), (t as i64) * 33_333))
+                .send(removent_media_capture::CapturedVideoFrame {
+                    pixels: removent_media_capture::CapturedPixels::Bgra(synthetic_bgra(t).into()),
+                    pts_us: (t as i64) * 33_333,
+                    width: W,
+                    height: H,
+                    generation: 0,
+                })
                 .is_err()
             {
                 break;
@@ -194,6 +201,7 @@ async fn full_session_pair_negotiate_media() {
         server_addr,
         &client_id,
         ClientConfig {
+            video_quality: Default::default(),
             host_identity_verified: false,
             pairing_code: None,
             device_name: "ClientLoop".into(),

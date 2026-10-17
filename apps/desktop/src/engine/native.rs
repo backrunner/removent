@@ -16,6 +16,7 @@ pub(super) fn client_bind_addr(peer: SocketAddr) -> SocketAddr {
 }
 
 pub(super) struct NativeDestination {
+    pub video_quality: removent_proto::VideoQuality,
     pub address: SocketAddr,
     pub expected_host: Option<[u8; 32]>,
     pub key: Option<String>,
@@ -30,6 +31,7 @@ pub(super) async fn run_client(
     attempt: ClientAttempt,
 ) -> Result<()> {
     let NativeDestination {
+        video_quality,
         address: addr,
         expected_host,
         key: destination_key,
@@ -67,6 +69,7 @@ pub(super) async fn run_client(
     let audio_enabled = audio_player.is_some();
 
     let mk_cfg = || removent_client::ClientConfig {
+        video_quality,
         host_identity_verified: expected_host.is_some() || trust.needs_confirmation,
         pairing_code: pairing_code.clone(),
         device_name: settings.device_name.clone(),

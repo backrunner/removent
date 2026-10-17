@@ -323,6 +323,12 @@ pub fn spawn_control_pump(
                             (before != controller.state()).then(|| controller.state())
                         });
                         if let Some(st) = decision {
+                            tracing::info!(
+                                bitrate_kbps = st.bitrate_kbps, fps = st.fps,
+                                local_healthy = ?local, sample = ?sample,
+                                frame_work_load = ?deps.delivery.as_ref().map(|d| d.frame_work_load()),
+                                "video quality adapted"
+                            );
                             if let Some(tx) = &deps.quality_tx { tx.send_replace(st); }
                             if writer.enqueue(ControlMsg::QualityControl {
                                 bitrate_kbps: st.bitrate_kbps, fps: st.fps, scale: st.scale,

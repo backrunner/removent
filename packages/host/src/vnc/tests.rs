@@ -146,3 +146,21 @@ async fn server_handshake_supports_all_standard_versions() {
         }
     }
 }
+
+#[test]
+fn hidpi_source_stays_within_vnc_framebuffer_budget() {
+    for (width, height, expected) in [(3840, 2160, (1920, 1080)), (2160, 3840, (1080, 1920))] {
+        let target = protocol::target_for_display(removent_proto::DisplayInfo {
+            id: 2,
+            w_px: width,
+            h_px: height,
+            scale: 2.0,
+            dpi: 192,
+            is_main: true,
+        });
+        assert_eq!((target.capture_width, target.capture_height), expected);
+        assert!(
+            target.capture_width as usize * target.capture_height as usize * 4 <= MAX_FRAME_BYTES
+        );
+    }
+}

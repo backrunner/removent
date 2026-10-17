@@ -54,7 +54,7 @@ final class ControllerModel: ObservableObject {
     private var servicesStarted = false
     private var handle: OpaquePointer?
     private var generation: UInt64 = 0
-    private var timer: Timer?
+    private var displayLink: CADisplayLink?
     private var retryCommand: [String: Any]?
     private var pendingInvitation: ConnectionDraft?
     private var sampleTime = CACurrentMediaTime()
@@ -103,10 +103,11 @@ final class ControllerModel: ObservableObject {
             guard startServices else { return }
             servicesStarted = true
             cloudSync?.start()
-            timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.poll() }
-            }
-            RunLoop.main.add(timer!, forMode: .common)
+            let target = DisplayTickTarget { [weak self] in self?.poll() }
+            let link = CADisplayLink(target: target, selector: #selector(DisplayTickTarget.tick))
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 240, preferred: 240)
+            link.add(to: .main, forMode: .common)
+            displayLink = link
             #if DEBUG
             if !ProcessInfo.processInfo.arguments.contains("--ui-testing") { startDiscovery() }
             #else
@@ -115,7 +116,7 @@ final class ControllerModel: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
 
-    deinit { timer?.invalidate(); if let handle { rm_destroy(handle) } }
+    deinit { displayLink?.invalidate(); if let handle { rm_destroy(handle) } }
 
     @discardableResult
     func call(_ command: [String: Any]) throws -> Any {
@@ -263,12 +264,12 @@ final class ControllerModel: ObservableObject {
             disconnect(dismiss:false)
             status = L("Session paused while in the background.", "进入后台后会话已暂停。")
         }
-        timer?.fireDate = .distantFuture
+        displayLink?.isPaused = true
     }
     func foreground() {
         cloudSync?.wake()
         servicesStarted = true
-        timer?.fireDate = .now
+        displayLink?.isPaused = false
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-testing") { return }
         #endif
@@ -392,4 +393,11 @@ final class ControllerModel: ObservableObject {
         default: break
         }
     }
+}
+
+@MainActor
+private final class DisplayTickTarget: NSObject {
+    private let action: () -> Void
+    init(action: @escaping () -> Void) { self.action = action }
+    @objc func tick() { action() }
 }

@@ -188,7 +188,8 @@ async fn serve_client(
             "VNC".into(),
         )
     });
-    let (raw_tx, mut raw_rx) = removent_core::latest::channel::<(Vec<u8>, i64)>();
+    let (raw_tx, mut raw_rx) =
+        removent_core::latest::channel::<removent_media_capture::CapturedVideoFrame>();
     let (frame_tx, frame_rx) = removent_core::latest::channel::<Frame>();
     let capture = removent_media_capture::start_display_capture(
         target.id as u32,
@@ -201,9 +202,12 @@ async fn serve_client(
     let frame_target = target.clone();
     let mut tasks = tokio::task::JoinSet::new();
     tasks.spawn(async move {
-        while let Some((data, _pts)) = raw_rx.recv().await {
+        while let Some(captured) = raw_rx.recv().await {
+            let Ok(pixels) = captured.pixels.bgra(captured.width, captured.height) else {
+                continue;
+            };
             let frame = Frame {
-                data,
+                data: pixels.into_owned(),
                 width: frame_target.capture_width,
                 height: frame_target.capture_height,
             };

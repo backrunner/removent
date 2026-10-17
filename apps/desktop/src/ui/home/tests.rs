@@ -2,6 +2,7 @@ use super::*;
 use gpui::{AnyView, TestAppContext};
 
 mod authentication;
+mod power;
 mod sessions;
 
 #[gpui::test]
@@ -422,6 +423,8 @@ fn update_action_stays_above_long_release_notes_in_both_themes(cx: &mut TestAppC
     };
     let (commands, _rx) = tokio::sync::mpsc::channel(1);
     let engine = Engine::for_ui_test(paths, commands);
+    let slot = Rc::new(std::cell::RefCell::new(None));
+    let out = slot.clone();
     let (_, cx) = cx.add_window_view(move |window, cx| {
         let view = cx.new(|cx| HomeView::new(engine, window, cx));
         view.update(cx, |view, _| {
@@ -429,11 +432,13 @@ fn update_action_stays_above_long_release_notes_in_both_themes(cx: &mut TestAppC
             view.settings_section = 4;
             view.update_status = UpdateStatus::Available {
                 version: "9.0.0".into(),
-                notes: "修复连接恢复，改进远程画面与后台服务。\n".repeat(80),
+                notes: "## 连接改进\n\n- **恢复连接**，改进远程画面与后台服务（包含 VNC、RDP）。\n- 支持 `Removent` 多窗口。\n\n".repeat(40),
             };
         });
+        *out.borrow_mut() = Some(view.clone());
         gpui_component::Root::new(AnyView::from(view), window, cx)
     });
+    let home = slot.borrow_mut().take().unwrap();
     for dark in [false, true] {
         cx.update(|window, cx| {
             let mode = if dark {
@@ -465,8 +470,59 @@ fn update_action_stays_above_long_release_notes_in_both_themes(cx: &mut TestAppC
                 button.bottom() <= size.height,
                 "action must be visible without scrolling"
             );
+            let viewport = cx.debug_bounds("update-release-notes-viewport").unwrap();
+            let content = cx.debug_bounds("update-release-notes-content").unwrap();
+            assert!(viewport.size.height <= px(260.));
+            assert!(viewport.right() <= size.width && viewport.bottom() <= size.height);
+            assert!(content.size.height > viewport.size.height);
+            cx.simulate_event(gpui::ScrollWheelEvent {
+                position: viewport.center(),
+                delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-200.))),
+                ..Default::default()
+            });
+            cx.run_until_parked();
+            assert!(
+                cx.debug_bounds("update-release-notes-content")
+                    .unwrap()
+                    .top()
+                    < content.top()
+            );
+            assert_eq!(cx.debug_bounds("update-download").unwrap(), button);
+            assert_eq!(
+                cx.debug_bounds("update-release-notes-viewport").unwrap(),
+                viewport
+            );
+
+            // A new release must not inherit the previous release's scroll offset.
+            cx.update(|_, cx| {
+                home.update(cx, |home, cx| {
+                    if let UpdateStatus::Available { version, .. } = &mut home.update_status {
+                        version.push('1');
+                    }
+                    cx.notify();
+                })
+            });
+            cx.run_until_parked();
+            assert_eq!(
+                cx.debug_bounds("update-release-notes-content")
+                    .unwrap()
+                    .top(),
+                content.top()
+            );
         }
     }
+    cx.update(|_, cx| {
+        home.update(cx, |home, cx| {
+            home.update_status = UpdateStatus::Available {
+                version: "9.1.0".into(),
+                notes: " \n\t ".into(),
+            };
+            cx.notify();
+        })
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("update-release-notes").is_none());
+    assert!(cx.debug_bounds("update-download").is_some());
 }
 
 #[gpui::test]

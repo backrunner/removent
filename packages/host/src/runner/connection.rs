@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::session::{
-    ControlPumpDeps, HostConfig, HostInteractions, fit_capture_dims, serve_connection_with_display,
-    spawn_audio_loop, spawn_control_pump, spawn_video_loop,
+    ControlPumpDeps, HostConfig, HostInteractions, serve_connection_with_display, spawn_audio_loop,
+    spawn_control_pump, spawn_video_loop,
 };
 
 /// Resets the mDNS busy bit when the session task exits (any path).
@@ -100,8 +100,8 @@ pub(super) async fn run_connection(
         preapproved_only: ctx.settings.paired_only,
         device_name: ctx.settings.device_name.clone(),
         admission: ctx.settings.admission,
-        video_bitrate_kbps: 8_000,
-        video_fps: 60,
+        video_bitrate_kbps: removent_proto::MAX_VIDEO_BITRATE_KBPS,
+        video_fps: removent_proto::MAX_VIDEO_FPS,
         input_sink: ctx.input_sink.clone(),
         local_clip: if ctx.settings.window_server_capture {
             None
@@ -199,11 +199,14 @@ pub(super) async fn run_connection(
     };
     tasks.0.push(spawn_control_pump(source, sink, deps, cmd_rx));
 
-    // Media loops + SCK capture. The capture is aspect-fit into the 1920×1080
-    // bounding box (independent clamping would stretch e.g. 16:10 panels).
-    let (video_tx, video_rx) = removent_core::latest::channel::<(Vec<u8>, i64)>();
+    // Capture at the connection ceiling; adaptation scales encoded frames within its range.
+    let (video_tx, video_rx) =
+        removent_core::latest::channel::<removent_media_capture::CapturedVideoFrame>();
     let (audio_tx, audio_rx) = tokio::sync::mpsc::channel::<removent_media_capture::AudioFrame>(32);
-    let (cap_w, cap_h) = fit_capture_dims(display.w_px, display.h_px);
+    let (cap_w, cap_h) = established
+        .video_quality
+        .unwrap_or_default()
+        .fit_dimensions(display.w_px, display.h_px);
     let (w, h) = (cap_w as usize, cap_h as usize);
     // Tell the input sink which frame dimensions the peer's coordinates refer
     // to, so it can rescale capture px → display physical px before injection.
@@ -255,96 +258,29 @@ pub(super) async fn run_connection(
         ));
     }
 
-    if ctx.settings.window_server_capture {
-        // Retain control/media tasks during bounded WindowServer restarts. Password
-        // input is still normal HID input; no account secret is stored or parsed.
-        let mut failures = 0;
-        loop {
-            let capture = removent_media_capture::quartz::start(
-                display.id as u32,
-                cap_w,
-                cap_h,
-                video_tx.clone(),
-            );
-            match capture {
-                Ok(mut capture) => {
-                    let started = std::time::Instant::now();
-                    let mut stopped = capture.take_stopped_rx().unwrap();
-                    tokio::select! {
-                        _ = established.cancel.cancelled() => break,
-                        _ = stopped.recv() => {},
-                    }
-                    if started.elapsed() >= Duration::from_secs(30) {
-                        failures = 0;
-                    }
-                    drop(capture);
-                }
-                Err(error) => tracing::warn!(%error, "WindowServer capture unavailable"),
-            }
-            failures += 1;
-            if failures >= 3 {
-                established.cancel.cancel();
-                break;
-            }
-            tokio::select! {
-                _ = established.cancel.cancelled() => break,
-                _ = tokio::time::sleep(Duration::from_secs(1)) => {},
-            }
-        }
-    } else {
-        let mut cap = removent_media_capture::start_display_capture(
-            display.id as u32,
-            cap_w,
-            cap_h,
-            // Keep the producers alive until the explicit capture failure has
-            // been sent. Otherwise video EOF cancels the control pump first.
-            video_tx.clone(),
-            audio_enabled.then_some(audio_tx.clone()),
-        );
-        match &mut cap {
-            Ok(cap) => {
-                // The capture stream may stop on its own (SCK error, display
-                // reconfiguration): end the session explicitly instead of leaving
-                // the client on a frozen frame.
-                if let Some(mut stopped_rx) = cap.take_stopped_rx() {
-                    let cmd_tx = established.cmd_tx.clone();
-                    let cancel = established.cancel.clone();
-                    tasks.0.push(tokio::spawn(async move {
-                        if let Some(reason) = stopped_rx.recv().await {
-                            tracing::error!(%reason, "capture stream stopped unexpectedly");
-                            let _ = cmd_tx
-                                .send(ControlMsg::SessionEnd {
-                                    reason: removent_proto::EndReason::InternalError,
-                                })
-                                .await;
-                            let _ =
-                                tokio::time::timeout(Duration::from_secs(1), cancel.cancelled())
-                                    .await;
-                            cancel.cancel();
-                        }
-                    }));
-                }
-            }
-            Err(e) => {
-                tracing::error!(err=%e, "SCK capture failed (permission or environment)");
-                // Without capture the client would stare at a black screen forever; end the
-                // session explicitly (same SessionEnd{InternalError} reporting as the
-                // encoder-fatal path in spawn_video_loop) and stop the media loops.
-                let _ = established
-                    .cmd_tx
-                    .send(ControlMsg::SessionEnd {
-                        reason: removent_proto::EndReason::InternalError,
-                    })
-                    .await;
-                let _ =
-                    tokio::time::timeout(Duration::from_secs(1), established.cancel.cancelled())
-                        .await;
-                established.cancel.cancel();
-            }
-        }
-
-        established.cancel.cancelled().await;
-        drop(cap);
+    if let Err(error) = super::capture::run(
+        display,
+        ctx.settings.window_server_capture,
+        established.video_quality.unwrap_or_default(),
+        established.ack.video.max_fps,
+        // Retain the producers until an explicit failure reaches the peer;
+        // otherwise media EOF can cancel control before SessionEnd is sent.
+        video_tx.clone(),
+        audio_enabled.then_some(audio_tx.clone()),
+        host_cfg.input_sink.clone(),
+        established.cancel.clone(),
+    )
+    .await
+    {
+        tracing::error!(%error, "capture recovery exhausted");
+        let _ = established
+            .cmd_tx
+            .send(ControlMsg::SessionEnd {
+                reason: removent_proto::EndReason::InternalError,
+            })
+            .await;
+        let _ = tokio::time::timeout(Duration::from_secs(1), established.cancel.cancelled()).await;
+        established.cancel.cancel();
     }
     // Release input before returning the session permit. Drop handles safely
     // on early return or cancellation as well.

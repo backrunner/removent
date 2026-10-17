@@ -52,7 +52,12 @@ async fn audio_capture_eof_does_not_cancel_video() {
         None,
     );
     frames
-        .send(([40, 80, 160, 255].repeat(320 * 240), 1))
+        .send(removent_media_capture::CapturedVideoFrame::new(
+            [40, 80, 160, 255].repeat(320 * 240),
+            320,
+            240,
+            1,
+        ))
         .unwrap();
     // The unused audio stream is finished without bytes; discard its EOF.
     let header = tokio::time::timeout(Duration::from_secs(5), async {

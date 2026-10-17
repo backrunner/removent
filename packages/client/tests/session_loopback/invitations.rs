@@ -124,6 +124,7 @@ async fn pair_with_grants(
             addr,
             &client_id,
             ClientConfig {
+                video_quality: Default::default(),
                 host_identity_verified: false,
                 pairing_code: code,
                 device_name: "PairClient".into(),

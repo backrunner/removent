@@ -18,6 +18,7 @@ pub struct DaemonState {
     pub login_window: bool,
     pub paths: DataPaths,
     pub settings: Mutex<Settings>,
+    pub power: Mutex<crate::power::IdleSleepAssertion>,
     /// Local certificate short fingerprint (computed at startup, used by Status snapshots).
     pub fp_short: String,
     /// Controlled-service switch (whether the host runner should be online).
@@ -68,6 +69,8 @@ impl Drop for PendingAdmission<'_> {
 impl DaemonState {
     pub fn new(paths: DataPaths, settings: Settings, fp_short: String) -> Self {
         let enabled = settings.host_enabled;
+        let mut power = crate::power::IdleSleepAssertion::default();
+        power.set_enabled(settings.prevent_idle_sleep);
         let relay_configured = paths.root.join("relay-host.toml").exists();
         let (events, _) = broadcast::channel(64);
         let (enabled_watch, _) = watch::channel(enabled);
@@ -75,6 +78,7 @@ impl DaemonState {
             login_window: false,
             paths,
             settings: Mutex::new(settings),
+            power: Mutex::new(power),
             fp_short,
             enabled: AtomicBool::new(enabled),
             host_ready: AtomicBool::new(false),
@@ -104,7 +108,11 @@ impl DaemonState {
         let relay = self.relay_state.lock().unwrap().clone();
         let enabled = self.enabled.load(Ordering::SeqCst);
         let ready = enabled && self.host_ready.load(Ordering::SeqCst);
+        let power = self.power.lock().unwrap();
         StatusReport {
+            prevent_idle_sleep: settings.prevent_idle_sleep,
+            idle_sleep_prevented: power.is_active(),
+            power_error: power.error().map(str::to_owned),
             running: enabled,
             host_ready: ready,
             host_error: enabled
@@ -154,6 +162,10 @@ impl DaemonState {
     }
 
     fn apply_settings(&self, current: &mut Settings, next: Settings) {
+        self.power
+            .lock()
+            .unwrap()
+            .set_enabled(next.prevent_idle_sleep);
         let restart = removent_core::settings::control::host_changed(current, &next);
         let enabled = next.host_enabled;
         let policy_changed = current.authentication != next.authentication

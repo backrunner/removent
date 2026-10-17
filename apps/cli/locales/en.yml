@@ -1,5 +1,9 @@
 # English (source locale) strings for removent-cli.
 _version: 1
+tui.setting.prevent_idle_sleep: "Prevent idle sleep while the background service runs"
+terminal.field.prevent_idle_sleep: "Prevent idle sleep"
+terminal.field.idle_sleep_prevented: "Idle sleep assertion active"
+terminal.field.power_error: "Power policy error"
 
 cli.name: removent-cli
 

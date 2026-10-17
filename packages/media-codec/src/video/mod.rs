@@ -56,6 +56,8 @@ fn is_hevc(codec: removent_proto::CodecId) -> bool {
 pub enum VideoError {
     #[error("videotoolbox: {0}")]
     Vt(#[from] videotoolbox::VTError),
+    #[error("GPU processing: {0}")]
+    Gpu(String),
     #[error("surface: {0}")]
     Surface(String),
     #[error("pixel data size mismatch: need {need}, got {got}")]
@@ -93,6 +95,7 @@ fn vt_codec(codec: removent_proto::CodecId) -> Codec {
 mod annexb;
 mod decoder;
 mod encoder;
+mod gpu;
 mod pixels;
 #[cfg(test)]
 mod tests;

@@ -75,6 +75,7 @@ pub const SETTINGS: &[Setting] = &[
     setting!("authentication.password", Kind::Text(1024), true, true),
     setting!("authentication.otp_secret", Kind::Text(1024), true, true),
     setting!("host_enabled", Kind::Bool, false, true),
+    setting!("prevent_idle_sleep", Kind::Bool, false, true),
     setting!("host_port", Kind::Integer(1, 65535), false, true),
     setting!("window_server_capture", Kind::Bool, false, true),
     setting!("paired_only", Kind::Bool, false, true),
@@ -267,7 +268,8 @@ pub fn edit(paths: &DataPaths, key: &str, input: Option<&str>) -> Result<Setting
 pub fn host_changed(previous: &Settings, next: &Settings) -> bool {
     SETTINGS
         .iter()
-        .filter(|setting| setting.host)
+        // Power policy is applied live by the daemon without restarting listeners.
+        .filter(|setting| setting.host && setting.key != "prevent_idle_sleep")
         .any(|setting| read_value(previous, setting.key) != read_value(next, setting.key))
 }
 

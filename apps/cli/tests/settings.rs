@@ -53,6 +53,40 @@ impl Cli {
 fn stdout(output: &Output) -> String {
     String::from_utf8(output.stdout.clone()).unwrap()
 }
+
+#[test]
+fn idle_sleep_setting_defaults_off_and_supports_set_get_reset() {
+    let cli = Cli::new();
+    let get = || cli.run(&["settings", "get", "prevent_idle_sleep", "--json"], None);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&stdout(&get())).unwrap()["value"],
+        false
+    );
+    let set = cli.run(
+        &["settings", "set", "prevent_idle_sleep", "true", "--json"],
+        None,
+    );
+    assert!(
+        set.status.success(),
+        "{}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_str(&stdout(&set)).unwrap();
+    assert_eq!(value["application"], "daemon_offline");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&stdout(&get())).unwrap()["value"],
+        true
+    );
+    assert!(
+        cli.run(&["settings", "reset", "prevent_idle_sleep", "--json"], None)
+            .status
+            .success()
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&stdout(&get())).unwrap()["value"],
+        false
+    );
+}
 fn stderr(output: &Output) -> String {
     String::from_utf8(output.stderr.clone()).unwrap()
 }

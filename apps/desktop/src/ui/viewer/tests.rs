@@ -90,6 +90,26 @@ fn decoded_picture_is_uploaded_for_painting(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn return_with_gpui_newline_is_forwarded_as_a_physical_key(cx: &mut TestAppContext) {
+    let (mut fixture, cx) = setup(cx);
+    cx.update(|_, cx| {
+        fixture.viewer.update(cx, |viewer, _| {
+            let mut enter = Keystroke::parse("enter").unwrap();
+            enter.key_char = Some("\n".into());
+            viewer.forward_key(&enter, KeyKind::Down);
+            viewer.forward_key(&enter, KeyKind::Up);
+        })
+    });
+    for expected in [KeyKind::Down, KeyKind::Up] {
+        assert!(
+            matches!(fixture.commands.try_recv().unwrap(), ControlMsg::KeyEvent {
+            vk_code: 0x24, unicode: None, kind, ..
+        } if kind == expected)
+        );
+    }
+}
+
+#[gpui::test]
 fn info_toggle_and_panel_clicks_stay_local(cx: &mut TestAppContext) {
     let (mut fixture, cx) = setup(cx);
     cx.run_until_parked();

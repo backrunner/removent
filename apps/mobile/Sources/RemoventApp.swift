@@ -236,6 +236,13 @@ struct ConnectionForm: View {
                     }
                 }
                 if draft.protocol == .removent {
+                    Section {
+                        Picker(L("Quality ceiling", "画质上限"), selection: $draft.videoQuality) {
+                            ForEach(VideoQuality.allCases) { quality in
+                                Text(quality.title).tag(quality)
+                            }
+                        }.accessibilityIdentifier("videoQuality")
+                    }
                     Section(L("Relay", "中继")) {
                         Toggle(L("Connect through relay", "通过中继连接"), isOn: $draft.useRelay)
                             .accessibilityIdentifier("useRelay")

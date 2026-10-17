@@ -198,6 +198,10 @@ impl Render for ConnectionDialog {
                         );
                 }
 
+                if protocol == ConnectionProtocol::Removent {
+                    body = body.child(self.render_quality(cx));
+                }
+
                 if protocol == ConnectionProtocol::Removent && self.via_relay {
                     body = body.child(
                         div()
@@ -382,6 +386,9 @@ impl Render for ConnectionDialog {
                             Button::new("connection-back")
                                 .ghost()
                                 .small()
+                                .size(px(28.))
+                                .p_0()
+                                .flex_shrink_0()
                                 .icon(icon_16("arrow-left"))
                                 .tooltip(t!("action.back").to_string())
                                 .disabled(busy)
@@ -403,6 +410,9 @@ impl Render for ConnectionDialog {
                         Button::new("connection-close")
                             .ghost()
                             .small()
+                            .size(px(28.))
+                            .p_0()
+                            .flex_shrink_0()
                             .icon(icon_16("x"))
                             .tooltip(
                                 t!(if busy {

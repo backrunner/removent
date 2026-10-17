@@ -61,6 +61,7 @@ async fn cancelling_connect_aborts_pairing_while_pin_dialog_is_still_open() {
             addr,
             &client_id,
             ClientConfig {
+                video_quality: Default::default(),
                 host_identity_verified: false,
                 pairing_code: None,
                 device_name: "CancelClient".into(),

@@ -570,6 +570,12 @@ impl HomeView {
                                 t!("device.address").to_string(),
                                 entry.address().to_string(),
                             ))
+                            .when(entry.protocol == ConnectionProtocol::Removent, |el| {
+                                el.child(Divider::horizontal()).child(meta_row(
+                                    t!("connection.video_quality").to_string(),
+                                    crate::ui::connection::quality_label(entry.video_quality),
+                                ))
+                            })
                             .when(!entry.username.is_empty(), |el| {
                                 el.child(Divider::horizontal()).child(meta_row(
                                     t!("connection.username").to_string(),

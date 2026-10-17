@@ -7,8 +7,8 @@
 
 use crate::sck_ffi as ffi;
 use core_foundation::error::CFError;
-use screencapturekit::cm::CMSampleBuffer;
 use screencapturekit::cm::CMTime;
+use screencapturekit::cm::{CMSampleBuffer, CMSampleBufferSCExt, SCFrameStatus};
 use screencapturekit::error::SCError;
 use screencapturekit::{
     shareable_content::SCShareableContent,
@@ -21,7 +21,7 @@ use screencapturekit::{
         output_type::SCStreamOutputType,
     },
 };
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -32,6 +32,8 @@ pub enum CaptureError {
     Sc(String),
     #[error("display {0} not found")]
     DisplayNotFound(u32),
+    #[error("screen recording permission denied or capture stopped by the user: {0}")]
+    NotAuthorized(String),
 }
 
 /// Enter ScreenCaptureKit's native consent flow without creating a stream or
@@ -45,13 +47,31 @@ pub fn request_screen_capture_access() -> Result<(), CaptureError> {
 
 impl From<CFError> for CaptureError {
     fn from(e: CFError) -> Self {
-        CaptureError::Sc(e.to_string())
+        if matches!(e.code(), -3801 | -3803 | -3817) {
+            Self::NotAuthorized(e.to_string())
+        } else {
+            Self::Sc(e.to_string())
+        }
     }
 }
 
 impl From<SCError> for CaptureError {
     fn from(e: SCError) -> Self {
-        CaptureError::Sc(e.to_string())
+        use screencapturekit::error::SCStreamErrorCode;
+        if matches!(
+            e,
+            SCError::PermissionDenied(_)
+                | SCError::SCStreamError {
+                    code: SCStreamErrorCode::UserDeclined
+                        | SCStreamErrorCode::UserStopped
+                        | SCStreamErrorCode::MissingEntitlements,
+                    ..
+                }
+        ) {
+            Self::NotAuthorized(e.to_string())
+        } else {
+            Self::Sc(e.to_string())
+        }
     }
 }
 
@@ -124,7 +144,9 @@ struct AudioState {
 }
 
 struct SckOutput {
-    video_tx: removent_core::latest::Sender<(Vec<u8>, i64)>,
+    video_tx: removent_core::latest::Sender<crate::CapturedVideoFrame>,
+    generation: u64,
+    health: Arc<Mutex<crate::health::CaptureHealth>>,
     /// None for the screen-only output (audio capture disabled or this handler
     /// is the video one); audio callbacks are ignored then.
     audio_tx: Option<mpsc::Sender<AudioFrame>>,
@@ -152,37 +174,23 @@ unsafe fn pts_us(sb: &CMSampleBuffer) -> Option<i64> {
     }
 }
 
-/// Copies a screen frame to BGRA (row by row, honoring the row stride).
-fn copy_screen_bgra(sb: &CMSampleBuffer) -> Option<(Vec<u8>, i64)> {
+/// Retain the native pixel buffer without locking or reading it on the CPU.
+fn retain_screen_frame(sb: &CMSampleBuffer) -> Option<crate::CapturedVideoFrame> {
     let pb = unsafe { pixel_ptr(sb) }?;
-    let w = unsafe { ffi::CVPixelBufferGetWidth(pb) };
-    let h = unsafe { ffi::CVPixelBufferGetHeight(pb) };
-
-    // SAFETY: copies w*h*4 bytes while the read-only lock is held.
-    unsafe {
-        if ffi::CVPixelBufferLockBaseAddress(pb, ffi::LOCK_READ_ONLY) != 0 {
-            return None;
-        }
-    }
-    let base = unsafe { ffi::CVPixelBufferGetBaseAddress(pb) } as *const u8;
-    if base.is_null() {
-        unsafe { ffi::CVPixelBufferUnlockBaseAddress(pb, ffi::LOCK_READ_ONLY) };
-        tracing::warn!("pixel buffer base address is null; dropping frame");
-        return None;
-    }
-    let bpr = unsafe { ffi::CVPixelBufferGetBytesPerRow(pb) };
-    let mut bgra = vec![0u8; w * h * 4];
-    for row in 0..h {
-        let src = unsafe { base.add(row * bpr) };
-        let dst = unsafe { bgra.as_mut_ptr().add(row * w * 4) };
-        unsafe {
-            std::ptr::copy_nonoverlapping(src, dst, w * 4);
-        }
-    }
-    unsafe { ffi::CVPixelBufferUnlockBaseAddress(pb, ffi::LOCK_READ_ONLY) };
-
-    let pts = unsafe { pts_us(sb) }?;
-    Some((bgra, pts))
+    // SAFETY: the sample buffer owns pb during this call; the wrapper takes a
+    // separate retain so the capture pool cannot reuse it before encoding.
+    let buffer = unsafe { apple_cf::cv::CVPixelBuffer::from_raw_borrowed(pb.cast()) }?;
+    let frame = crate::CapturedVideoFrame {
+        width: buffer.width(),
+        height: buffer.height(),
+        pixels: crate::CapturedPixels::Native(buffer),
+        pts_us: unsafe { pts_us(sb) }?,
+        generation: 0,
+    };
+    frame
+        .pixels
+        .valid_for(frame.width, frame.height)
+        .then_some(frame)
 }
 
 /// Copy the configured 48 kHz stereo float PCM layout, including the planar
@@ -270,10 +278,21 @@ unsafe fn copy_audio_samples_ref(sb: ffi::CMSampleBufferRef) -> Option<Vec<f32>>
 
 impl SckOutput {
     fn on_video(&self, sb: &CMSampleBuffer) {
-        let Some((bgra, pts)) = copy_screen_bgra(sb) else {
+        match sb.frame_status() {
+            Some(SCFrameStatus::Idle) => return,
+            Some(SCFrameStatus::Blank | SCFrameStatus::Suspended | SCFrameStatus::Stopped) => {
+                self.health.lock().unwrap().unavailable(Instant::now());
+                return;
+            }
+            _ => {}
+        }
+        let Some(mut frame) = retain_screen_frame(sb) else {
+            self.health.lock().unwrap().unavailable(Instant::now());
             return;
         };
-        let _ = self.video_tx.send((bgra, pts));
+        self.health.lock().unwrap().frame();
+        frame.generation = self.generation;
+        let _ = self.video_tx.send(frame);
     }
 
     fn on_audio(&self, sb: &CMSampleBuffer) {
@@ -318,28 +337,32 @@ impl SCStreamOutputTrait for SckOutput {
 /// Stream delegate: reports fatal stream errors (lock screen, fast user
 /// switch, revoked permission, disconnected display) to the session owner.
 struct StoppedDelegate {
-    stopped_tx: mpsc::Sender<String>,
+    stopped_tx: mpsc::Sender<CaptureError>,
 }
 
 impl SCStreamDelegateTrait for StoppedDelegate {
     fn did_stop_with_error(&self, error: SCError) {
         let msg = error.to_string();
         tracing::error!(error = %msg, "screen capture stream stopped with error");
-        let _ = self.stopped_tx.try_send(msg);
+        let _ = self.stopped_tx.try_send(error.into());
     }
 }
 
 /// A running capture session; stops the stream on drop.
 pub struct SckCapture {
     stream: SCStream,
-    stopped_rx: Option<mpsc::Receiver<String>>,
+    stopped_rx: Option<mpsc::Receiver<CaptureError>>,
+    health: Arc<Mutex<crate::health::CaptureHealth>>,
 }
 
 impl SckCapture {
     /// Takes the channel notified once when the capture stream stops with an
     /// error. Returns `None` if the receiver was already taken.
-    pub fn take_stopped_rx(&mut self) -> Option<mpsc::Receiver<String>> {
+    pub fn take_stopped_rx(&mut self) -> Option<mpsc::Receiver<CaptureError>> {
         self.stopped_rx.take()
+    }
+    pub fn health_failure(&self) -> Option<&'static str> {
+        self.health.lock().unwrap().failure(Instant::now())
     }
 }
 
@@ -356,10 +379,35 @@ pub fn start_display_capture(
     display_id: u32,
     width: u32,
     height: u32,
-    video_tx: removent_core::latest::Sender<(Vec<u8>, i64)>,
+    video_tx: removent_core::latest::Sender<crate::CapturedVideoFrame>,
     audio_tx: Option<mpsc::Sender<AudioFrame>>,
 ) -> Result<SckCapture, CaptureError> {
-    let content = SCShareableContent::get().map_err(|e| CaptureError::Sc(e.to_string()))?;
+    start_capture(display_id, width, height, video_tx, audio_tx, true, 60)
+}
+
+/// Native viewers draw a local pointer, so exclude the delayed captured cursor.
+pub fn start_remote_capture(
+    display_id: u32,
+    width: u32,
+    height: u32,
+    video_tx: removent_core::latest::Sender<crate::CapturedVideoFrame>,
+    audio_tx: Option<mpsc::Sender<AudioFrame>>,
+    fps: u8,
+) -> Result<SckCapture, CaptureError> {
+    start_capture(display_id, width, height, video_tx, audio_tx, false, fps)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_capture(
+    display_id: u32,
+    width: u32,
+    height: u32,
+    video_tx: removent_core::latest::Sender<crate::CapturedVideoFrame>,
+    audio_tx: Option<mpsc::Sender<AudioFrame>>,
+    shows_cursor: bool,
+    fps: u8,
+) -> Result<SckCapture, CaptureError> {
+    let content = SCShareableContent::get().map_err(CaptureError::from)?;
     let display = content
         .displays()
         .into_iter()
@@ -388,23 +436,28 @@ pub fn start_display_capture(
         .with_excluding_windows(&own_window_refs)
         .build()
         .map_err(CaptureError::from)?;
-    let frame_interval_60fps = CMTime::new(1, 60);
+    let frame_interval = CMTime::new(1, i32::from(fps.clamp(1, removent_proto::MAX_VIDEO_FPS)));
     let mut config = SCStreamConfiguration::new();
     config
         .set_width(width)
         .set_height(height)
         .set_pixel_format(PixelFormat::BGRA)
         .set_queue_depth(3)
-        .set_minimum_frame_interval(&frame_interval_60fps)
+        .set_shows_cursor(shows_cursor)
+        .set_minimum_frame_interval(&frame_interval)
         .set_captures_audio(audio_tx.is_some())
         .set_excludes_current_process_audio(true)
         .set_sample_rate(removent_proto::AUDIO_SAMPLE_RATE as i32)
         .set_channel_count(CHANNELS as i32);
 
     let (stopped_tx, stopped_rx) = mpsc::channel(1);
+    let generation = crate::next_capture_generation();
+    let health = Arc::new(Mutex::new(crate::health::CaptureHealth::default()));
     let mut stream = SCStream::new_with_delegate(&filter, &config, StoppedDelegate { stopped_tx })
         .map_err(CaptureError::from)?;
     let screen_output = SckOutput {
+        generation,
+        health: health.clone(),
         video_tx: video_tx.clone(),
         audio_tx: None,
         audio: Mutex::new(AudioState {
@@ -419,6 +472,8 @@ pub fn start_display_capture(
         .map_err(CaptureError::from)?;
     if let Some(audio_tx) = audio_tx {
         let audio_output = SckOutput {
+            generation,
+            health: health.clone(),
             video_tx,
             audio_tx: Some(audio_tx),
             audio: Mutex::new(AudioState {
@@ -434,6 +489,7 @@ pub fn start_display_capture(
 
     stream.start_capture().map_err(CaptureError::from)?;
     Ok(SckCapture {
+        health,
         stream,
         stopped_rx: Some(stopped_rx),
     })

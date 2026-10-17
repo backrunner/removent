@@ -226,6 +226,7 @@ async fn attempt_over(
             address,
             &client_id,
             ClientConfig {
+                video_quality: Default::default(),
                 host_identity_verified: true,
                 pairing_code: None,
                 device_name: "AuthClient".into(),

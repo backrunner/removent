@@ -102,7 +102,8 @@ async fn audio_disabled_session_uses_single_media_stream() {
         };
         removent_host::spawn_control_pump(source, sink, deps, cmd_rx);
 
-        let (video_tx, video_rx) = removent_core::latest::channel::<(Vec<u8>, i64)>();
+        let (video_tx, video_rx) =
+            removent_core::latest::channel::<removent_media_capture::CapturedVideoFrame>();
         let vstream = conn.open_media_stream().await.unwrap();
         let vhandle = spawn_video_loop(
             vstream,
@@ -122,7 +123,13 @@ async fn audio_disabled_session_uses_single_media_stream() {
         );
         for t in 0..10usize {
             if video_tx
-                .send((synthetic_bgra(t), (t as i64) * 33_333))
+                .send(removent_media_capture::CapturedVideoFrame {
+                    pixels: removent_media_capture::CapturedPixels::Bgra(synthetic_bgra(t).into()),
+                    pts_us: (t as i64) * 33_333,
+                    width: W,
+                    height: H,
+                    generation: 0,
+                })
                 .is_err()
             {
                 break;
@@ -145,6 +152,7 @@ async fn audio_disabled_session_uses_single_media_stream() {
         server_addr,
         &client_id,
         ClientConfig {
+            video_quality: Default::default(),
             host_identity_verified: false,
             pairing_code: None,
             device_name: "AudioOffClient".into(),

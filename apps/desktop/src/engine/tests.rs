@@ -56,7 +56,9 @@ fn daemon_restart_republishes_unchanged_permissions_and_then_live_changes() {
             .unwrap();
     });
     engine.spawn_daemon_link();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    // Three daemon connections include two retry delays; leave room for CI
+    // runners doing release builds alongside this test.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     let mut grants = Vec::new();
     while grants.len() < 3 {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());

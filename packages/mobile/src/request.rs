@@ -9,6 +9,8 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
+    #[serde(default)]
+    pub video_quality: removent_proto::VideoQuality,
     pub protocol: ConnectionProtocol,
     pub host: String,
     pub port: u16,
@@ -89,6 +91,7 @@ impl Request {
             ensure!(!self.username.trim().is_empty(), "RDP requires a username");
         }
         Ok(ConnectionRequest {
+            video_quality: self.video_quality,
             pairing_code,
             protocol: self.protocol,
             address,

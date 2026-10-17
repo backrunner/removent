@@ -20,7 +20,7 @@ impl Render for HomeView {
         }
         let colors = cx.theme().colors;
         let detail = if self.settings_open {
-            self.render_settings(cx).into_any_element()
+            self.render_settings(window, cx).into_any_element()
         } else {
             match self.selected.clone() {
                 Some(Selection::Device(fp)) => match self.devices.get(&fp).cloned() {

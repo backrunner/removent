@@ -194,6 +194,7 @@ impl std::fmt::Display for ConnectionAddress {
 /// authentication uses the host-selected policy and device identity.
 #[derive(Clone)]
 pub struct ConnectionRequest {
+    pub video_quality: removent_proto::VideoQuality,
     pub pairing_code: Option<removent_core::pairing_invitation::PairingCode>,
     pub protocol: ConnectionProtocol,
     pub address: ConnectionAddress,
@@ -207,6 +208,7 @@ pub struct ConnectionRequest {
 impl ConnectionRequest {
     pub fn native(addr: SocketAddr) -> Self {
         Self {
+            video_quality: Default::default(),
             pairing_code: None,
             protocol: ConnectionProtocol::Removent,
             address: ConnectionAddress::from_socket(addr),

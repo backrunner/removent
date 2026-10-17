@@ -3,11 +3,24 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[tokio::test]
 async fn display_is_prepared_after_admission_including_resume() {
-    for (denied, missing, resume) in [
-        (true, false, false),
-        (false, true, false),
-        (false, false, false),
-        (false, false, true),
+    for (denied, missing, resume, quality) in [
+        (true, false, false, None),
+        (false, true, false, None),
+        (false, false, false, None),
+        (false, false, true, None),
+        (
+            false,
+            false,
+            false,
+            Some(removent_proto::VideoQuality::Ultra),
+        ),
+        (
+            false,
+            false,
+            true,
+            Some(removent_proto::VideoQuality::Ultra),
+        ),
+        (false, false, false, Some(removent_proto::VideoQuality::Low)),
     ] {
         let (_endpoints, client, host) = crate::session::tests::quic_pair().await;
         let dir = tempfile::tempdir().unwrap();
@@ -44,8 +57,8 @@ async fn display_is_prepared_after_admission_including_resume() {
             let ack = NegotiateAck {
                 video: VideoParams {
                     codec: CodecId::Hevc,
-                    max_fps: 30,
-                    max_bitrate_kbps: 1000,
+                    max_fps: 240,
+                    max_bitrate_kbps: 256_000,
                     initial_scale: 1.,
                 },
                 audio: removent_proto::AudioParams {
@@ -91,7 +104,12 @@ async fn display_is_prepared_after_admission_including_resume() {
             .connect_handshake(removent_proto::HandshakeClient {
                 magic: removent_proto::MAGIC,
                 proto_version: PROTO_VERSION,
-                feature_bits: removent_proto::feature_bits::AUTH_METHODS,
+                feature_bits: removent_proto::feature_bits::AUTH_METHODS
+                    | if quality.is_some() {
+                        removent_proto::feature_bits::DYNAMIC_VIDEO
+                    } else {
+                        0
+                    },
                 hello: removent_proto::Hello {
                     app_version: "test".into(),
                     device_name: "test".into(),
@@ -102,6 +120,15 @@ async fn display_is_prepared_after_admission_including_resume() {
             })
             .await
             .unwrap();
+        if let Some(quality) = quality {
+            assert_ne!(
+                hello.feature_bits & removent_proto::feature_bits::DYNAMIC_VIDEO,
+                0
+            );
+            sink.send(ControlMsg::VideoPreferences { quality })
+                .await
+                .unwrap();
+        }
         if resume {
             assert_eq!(hello.resume_accepted, Some(true));
         }
@@ -154,6 +181,11 @@ async fn display_is_prepared_after_admission_including_resume() {
             .unwrap()
             .unwrap();
         assert_eq!(result.is_ok(), !denied && !missing);
+        if let Ok((established, ..)) = result {
+            assert_eq!(established.video_quality, quality);
+            assert!(established.ack.video.max_fps <= 30);
+            assert!(established.ack.video.max_bitrate_kbps <= 1000);
+        }
         assert_eq!(calls.load(Ordering::SeqCst), usize::from(!denied));
         invalidate_resume(&fp);
     }

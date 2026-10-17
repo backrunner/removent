@@ -90,8 +90,8 @@ pub(super) fn is_bt709(pb: &apple_cf::cv::CVPixelBuffer) -> bool {
         if v.is_null() {
             return false;
         }
-        apple_cf::cf::CFString::from_raw_borrowed(v.cast_mut())
-            .is_some_and(|s| s.to_string_lossy() == "ITU_R_709-2")
+        let bt709 = std::ptr::addr_of!(apple_cf::raw::kCVImageBufferYCbCrMatrix_ITU_R_709_2).read();
+        apple_cf::raw::CFEqual(v, bt709.cast()) != 0
     }
 }
 

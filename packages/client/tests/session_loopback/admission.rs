@@ -126,6 +126,7 @@ async fn login_window_admission_uses_available_caps_and_never_prompts() {
                 addr,
                 &client_id,
                 ClientConfig {
+                    video_quality: Default::default(),
                     host_identity_verified: false,
                     pairing_code: None,
                     device_name: "LoginController".into(),
@@ -155,6 +156,7 @@ async fn login_window_admission_uses_available_caps_and_never_prompts() {
                     addr,
                     &client_id,
                     ClientConfig {
+                        video_quality: Default::default(),
                         host_identity_verified: false,
                         pairing_code: None,
                         device_name: "LoginController".into(),

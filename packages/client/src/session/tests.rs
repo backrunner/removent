@@ -69,6 +69,7 @@ async fn fixture(
         ControlSource::new(recv, ControlCodec),
         ack,
         ClientConfig {
+            video_quality: Default::default(),
             host_identity_verified: false,
             pairing_code: None,
             device_name: "test".into(),
@@ -325,7 +326,15 @@ async fn receiver_stall_drives_host_adaptation_and_keeps_input_live() {
     // Decode real cached-screen refreshes. Wall-clock capture/arrival jitter
     // on a shared CI runner is not a deterministic healthy-network fixture.
     // Keyframe requests keep receiver evidence fresh without inventing stats.
-    frames.send((raw, 1)).unwrap();
+    frames
+        .send(removent_media_capture::CapturedVideoFrame {
+            pixels: removent_media_capture::CapturedPixels::Bgra(raw.into()),
+            pts_us: 1,
+            width: 320,
+            height: 240,
+            generation: 0,
+        })
+        .unwrap();
     let _refreshes = AbortOnDrop(tokio::spawn(async move {
         let _keep_capture_open = frames;
         loop {

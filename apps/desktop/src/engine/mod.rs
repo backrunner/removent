@@ -53,7 +53,8 @@ pub enum UiEvent {
     ClientNeedsPin {
         generation: usize,
         mode: removent_core::AuthenticationMode,
-        tx: tokio::sync::oneshot::Sender<String>,
+        prefill: Option<AuthenticationAnswer>,
+        tx: tokio::sync::oneshot::Sender<AuthenticationAnswer>,
     },
     ConfirmCertificate {
         generation: usize,
@@ -503,10 +504,12 @@ fn enqueue_input(
 
 mod compatibility;
 mod connection;
+mod credentials;
 mod daemon;
 mod daemon_events;
 mod input;
 mod native;
+pub use credentials::{AuthenticationAnswer, can_remember};
 /// daemon message dispatch: responses update state, events become UiEvent.
 /// Audio forwarding must stop even when the UI aborts the connection task.
 /// Translate common VNC failures while keeping uncommon protocol details available.

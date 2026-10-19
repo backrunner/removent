@@ -454,3 +454,8 @@ connection.quality_low: "Low"
 connection.quality_standard: "Standard"
 connection.quality_high: "High (2K)"
 connection.quality_ultra: "Ultra (4K)"
+
+auth.remember_credentials: "Remember credentials in Keychain"
+auth.keychain_read_failed: "Cannot read Keychain. Enter your credentials again."
+auth.keychain_save_failed: "Connected, but could not update Keychain credentials. Check Keychain access."
+connection.native_unreachable: "Cannot reach Removent at %{address}. Enable Removent sharing on the host and check UDP port %{port}."

@@ -216,6 +216,7 @@ impl HomeView {
             pin_input,
             auth_username_input,
             auth_mode: Default::default(),
+            remember_auth: false,
             auth_password_input,
             otp_qr: None,
             otp_secret_visible: false,

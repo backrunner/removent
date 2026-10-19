@@ -78,7 +78,7 @@ enum PinDialog {
     /// Controlled side: display the PIN for the peer to enter.
     Display(String),
     /// Controlling side: enter the PIN shown on the peer's screen.
-    Entry(oneshot::Sender<String>),
+    Entry(oneshot::Sender<crate::engine::AuthenticationAnswer>),
     Trust {
         destination: String,
         relay: bool,
@@ -122,6 +122,7 @@ pub struct HomeView {
     pin_input: Entity<InputState>,
     auth_username_input: Entity<InputState>,
     auth_mode: removent_core::AuthenticationMode,
+    remember_auth: bool,
     auth_password_input: Entity<InputState>,
     otp_qr: Option<qrcode::QrCode>,
     otp_secret_visible: bool,

@@ -1,5 +1,28 @@
 use super::*;
 
+fn connection_failure(error: removent_client::ConnectError, addr: SocketAddr) -> anyhow::Error {
+    use removent_client::ConnectError;
+    let unreachable = match &error {
+        ConnectError::Rejected(message) => message == "quinn: timed out",
+        ConnectError::Net(removent_net::NetError::Tls(message)) => {
+            message == "timed out" || message == "Certificate connection timed out"
+        }
+        _ => false,
+    };
+    if unreachable {
+        anyhow::anyhow!(
+            t!(
+                "connection.native_unreachable",
+                address = addr.to_string(),
+                port = addr.port()
+            )
+            .to_string()
+        )
+    } else {
+        error.into()
+    }
+}
+
 pub(super) struct AudioForwardTask(tokio::task::JoinHandle<()>);
 impl Drop for AudioForwardTask {
     fn drop(&mut self) {
@@ -38,6 +61,7 @@ pub(super) async fn run_client(
         invitation,
     } = destination;
     let pairing_code = invitation.as_ref().and_then(|r| r.pairing_code.clone());
+    let direct = destination_key.is_none();
     let pin_key = destination_key.unwrap_or_else(|| addr.to_string());
     let trust = removent_client::host_pins::for_connection(
         &paths,
@@ -82,7 +106,15 @@ pub(super) async fn run_client(
 
     // The PIN prompt is deferred until pairing actually starts: a trusted peer
     // never needs one (no popup flash on every connect).
-    let pin_attempt = attempt.clone();
+    let pending_auth = Arc::new(Mutex::new(None));
+    let local_identity = identity.fingerprint_hex();
+    let pin_request = credentials::prompt(
+        attempt.clone(),
+        local_identity.clone(),
+        // Invitations may replace the host identity; never prefill its old credential.
+        expected_host.filter(|_| pairing_code.is_none()),
+        pending_auth.clone(),
+    );
     attempt.progress(ConnectionStage::Negotiating);
     let destination = pin_key
         .strip_prefix("relay:")
@@ -103,21 +135,17 @@ pub(super) async fn run_client(
             mk_cfg(),
             None,
             None,
-            Some(Box::new(move |mode, pin_tx| {
-                pin_attempt.progress(if mode == removent_core::AuthenticationMode::PairingCode {
-                    ConnectionStage::Pairing
-                } else {
-                    ConnectionStage::Authenticating
-                });
-                let _ = pin_attempt.events.send(UiEvent::ClientNeedsPin {
-                    generation: pin_attempt.generation,
-                    mode,
-                    tx: pin_tx,
-                });
-            })),
+            Some(pin_request),
             confirmation,
         )
-        .await?
+        .await
+        .map_err(|error| {
+            if direct {
+                connection_failure(error, addr)
+            } else {
+                error.into()
+            }
+        })?
     };
 
     let peer_pin = session
@@ -165,6 +193,17 @@ pub(super) async fn run_client(
         session.input_tx.clone(),
         format!("{:?}", session.negotiated.video.codec),
     )?;
+    let submitted_auth = pending_auth.lock().unwrap().take();
+    if let Some(submitted) = submitted_auth {
+        let events = attempt.events.clone();
+        // A locked Keychain must not delay frame/audio forwarding.
+        tokio::spawn(async move {
+            if let Err(error) = submitted.commit(local_identity, peer_pin).await {
+                tracing::warn!(%error, "could not update native host credentials in Keychain");
+                let _ = events.send(UiEvent::Notice(t!("auth.keychain_save_failed").to_string()));
+            }
+        });
+    }
     let _audio_task = audio_player.as_ref().map(|player| {
         let player = player.clone();
         let (_drop_tx, drop_rx) = tokio::sync::mpsc::channel(1);
@@ -187,4 +226,30 @@ pub(super) async fn run_client(
     }
     anyhow::ensure!(!session.was_interrupted(), "Connection interrupted");
     Ok(())
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_service_has_a_recovery_action_but_authentication_errors_are_preserved() {
+        let addr = "127.0.0.1:48688".parse().unwrap();
+        for error in [
+            removent_client::ConnectError::Rejected("quinn: timed out".into()),
+            removent_client::ConnectError::Net(removent_net::NetError::Tls("timed out".into())),
+            removent_client::ConnectError::Net(removent_net::NetError::Tls(
+                "Certificate connection timed out".into(),
+            )),
+        ] {
+            let message = connection_failure(error, addr).to_string();
+            assert!(message.contains("48688"));
+            assert!(message.contains("UDP"));
+        }
+        let error = removent_client::ConnectError::Pairing("incorrect password".into());
+        assert_eq!(
+            connection_failure(error, addr).to_string(),
+            "pairing failed: incorrect password"
+        );
+    }
 }

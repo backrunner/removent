@@ -23,6 +23,7 @@ impl HomeView {
     /// Clear the PIN input: every path that closes the Entry dialog must leave the field
     /// empty so the next Entry dialog does not show the previous 6 digits.
     pub(super) fn clear_pin_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.remember_auth = false;
         self.auth_username_input
             .update(cx, |s, cx| s.set_value("", window, cx));
         self.pin_input
@@ -51,7 +52,10 @@ impl HomeView {
             return;
         }
         if let Some(PinDialog::Entry(tx)) = self.pin_dialog.take() {
-            let _ = tx.send(pin);
+            let _ = tx.send(crate::engine::AuthenticationAnswer {
+                value: pin,
+                remember: self.remember_auth && crate::engine::can_remember(self.auth_mode),
+            });
             self.set_connection_stage(ConnectionStage::Authenticating, cx);
             self.clear_pin_input(window, cx);
             self.set_status(t!("status.pin_submitted").to_string(), StatusTone::Info);

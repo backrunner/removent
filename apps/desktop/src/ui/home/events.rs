@@ -159,8 +159,17 @@ impl HomeView {
                 self.set_status(t!("trust.waiting").to_string(), StatusTone::Info);
                 window.focus(&self.focus, cx);
             }
-            UiEvent::ClientNeedsPin { tx, mode, .. } => {
-                self.set_connection_stage(ConnectionStage::Pairing, cx);
+            UiEvent::ClientNeedsPin {
+                tx, mode, prefill, ..
+            } => {
+                self.set_connection_stage(
+                    if mode == removent_core::AuthenticationMode::PairingCode {
+                        ConnectionStage::Pairing
+                    } else {
+                        ConnectionStage::Authenticating
+                    },
+                    cx,
+                );
                 self.dialog_seq += 1;
                 self.auth_mode = mode;
                 self.pin_input.update(cx, |s, cx| {
@@ -189,6 +198,25 @@ impl HomeView {
                 self.pin_dialog = Some(PinDialog::Entry(tx));
                 // Start from an empty field and hand it the keyboard focus.
                 self.clear_pin_input(window, cx);
+                if crate::engine::can_remember(mode)
+                    && let Some(prefill) = prefill
+                    && mode.valid_input(&prefill.value)
+                {
+                    self.remember_auth = prefill.remember;
+                    if mode == removent_core::AuthenticationMode::SystemAccount {
+                        if let Some(credentials) =
+                            removent_proto::SystemCredentials::decode(&prefill.value)
+                        {
+                            self.auth_username_input
+                                .update(cx, |s, cx| s.set_value(credentials.username, window, cx));
+                            self.pin_input
+                                .update(cx, |s, cx| s.set_value(credentials.password, window, cx));
+                        }
+                    } else {
+                        self.pin_input
+                            .update(cx, |s, cx| s.set_value(prefill.value, window, cx));
+                    }
+                }
                 let focus = if mode == removent_core::AuthenticationMode::SystemAccount {
                     self.auth_username_input.focus_handle(cx)
                 } else {

@@ -1,5 +1,89 @@
 use super::*;
 
+#[cfg(target_os = "macos")]
+#[gpui::test]
+fn remembered_credentials_can_be_reviewed_and_forgotten_without_leaking_between_modes(
+    cx: &mut TestAppContext,
+) {
+    cx.update(gpui_component::init);
+    let directory = tempfile::tempdir().unwrap();
+    let (commands, _rx) = tokio::sync::mpsc::channel(1);
+    let engine = Engine::for_ui_test(
+        removent_core::DataPaths {
+            root: directory.path().into(),
+        },
+        commands,
+    );
+    let slot = Rc::new(std::cell::RefCell::new(None));
+    let out = slot.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        let view = cx.new(|cx| HomeView::new(engine, window, cx));
+        *out.borrow_mut() = Some(view.clone());
+        gpui_component::Root::new(AnyView::from(view), window, cx)
+    });
+    let view = slot.borrow_mut().take().unwrap();
+    cx.simulate_resize(gpui::size(px(860.), px(600.)));
+    for mode in [
+        removent_core::AuthenticationMode::SystemAccount,
+        removent_core::AuthenticationMode::Password,
+        removent_core::AuthenticationMode::Otp,
+    ] {
+        let (tx, mut answer) = oneshot::channel();
+        let value = if mode == removent_core::AuthenticationMode::SystemAccount {
+            removent_proto::SystemCredentials {
+                username: "owner".into(),
+                password: "test-password".into(),
+            }
+            .encode()
+        } else {
+            "test-password".into()
+        };
+        let expected = value.clone();
+        view.update_in(cx, |view, window, cx| {
+            view.connecting = Some("auth fixture".into());
+            view.handle_event(
+                UiEvent::ClientNeedsPin {
+                    generation: view.engine.client_generation(),
+                    mode,
+                    tx,
+                    prefill: Some(crate::engine::AuthenticationAnswer {
+                        value,
+                        remember: true,
+                    }),
+                },
+                window,
+                cx,
+            );
+            assert_eq!(view.connection_stage, ConnectionStage::Authenticating);
+            if mode == removent_core::AuthenticationMode::Otp {
+                assert!(!view.remember_auth);
+                assert!(view.pin_input.read(cx).value().is_empty());
+                assert!(view.auth_username_input.read(cx).value().is_empty());
+                view.cancel_pin(window, cx);
+            }
+        });
+        cx.run_until_parked();
+        if mode == removent_core::AuthenticationMode::Otp {
+            assert!(answer.try_recv().is_err());
+            continue;
+        }
+        let toggle = cx.debug_bounds("remember-auth-toggle").unwrap();
+        assert!(toggle.right() <= px(860.) && toggle.bottom() <= px(600.));
+        cx.simulate_click(toggle.center(), Default::default());
+        cx.run_until_parked();
+        view.update_in(cx, |view, window, cx| {
+            assert!(!view.remember_auth);
+            assert_eq!(view.authentication_input(cx), expected);
+            view.submit_pin(window, cx);
+            assert!(view.pin_input.read(cx).value().is_empty());
+            assert!(view.auth_username_input.read(cx).value().is_empty());
+        });
+        let answer = answer.try_recv().unwrap();
+        assert_eq!(answer.value, expected);
+        assert!(!answer.remember);
+    }
+}
+
 fn open_authentication_choices(cx: &mut gpui::VisualTestContext) {
     let bounds = cx.debug_bounds("authentication-picker").unwrap();
     cx.simulate_mouse_move(bounds.center(), None, Default::default());
@@ -37,12 +121,14 @@ fn system_account_prompt_validates_both_fields_and_clears_credentials(cx: &mut T
                     UiEvent::ClientNeedsPin {
                         generation: view.engine.client_generation(),
                         mode: removent_core::AuthenticationMode::SystemAccount,
+                        prefill: None,
                         tx,
                     },
                     window,
                     cx,
                 );
                 assert!(view.auth_username_input.focus_handle(cx).is_focused(window));
+                assert!(!view.remember_auth);
                 view.submit_pin(window, cx);
                 assert!(view.pin_dialog.is_some(), "empty fields cannot submit");
                 view.auth_username_input
@@ -50,6 +136,7 @@ fn system_account_prompt_validates_both_fields_and_clears_credentials(cx: &mut T
                 view.pin_input.update(cx, |input, cx| {
                     input.set_value("synthetic-password", window, cx)
                 });
+                view.remember_auth = true;
                 if cancel {
                     view.cancel_pin(window, cx);
                 } else {
@@ -57,13 +144,18 @@ fn system_account_prompt_validates_both_fields_and_clears_credentials(cx: &mut T
                 }
                 assert!(view.pin_input.read(cx).value().is_empty());
                 assert!(view.auth_username_input.read(cx).value().is_empty());
+                assert!(!view.remember_auth);
             })
         });
         if cancel {
             assert!(answer.try_recv().is_err());
         } else {
-            let credentials =
-                removent_proto::SystemCredentials::decode(&answer.try_recv().unwrap()).unwrap();
+            let answer = answer.try_recv().unwrap();
+            assert_eq!(
+                answer.remember,
+                crate::engine::can_remember(removent_core::AuthenticationMode::SystemAccount)
+            );
+            let credentials = removent_proto::SystemCredentials::decode(&answer.value).unwrap();
             assert_eq!(credentials.username, "owner");
             assert_eq!(credentials.password, "synthetic-password");
         }

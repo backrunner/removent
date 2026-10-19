@@ -454,3 +454,8 @@ connection.quality_low: "低"
 connection.quality_standard: "标准"
 connection.quality_high: "高（2K）"
 connection.quality_ultra: "超高（4K）"
+
+auth.remember_credentials: "记忆凭据并存入 Keychain"
+auth.keychain_read_failed: "无法读取 Keychain，请重新输入凭据"
+auth.keychain_save_failed: "连接已建立，但无法更新 Keychain 凭据，请检查钥匙串权限"
+connection.native_unreachable: "无法连接 Removent 服务（%{address}）。请在远端开启 Removent 共享，并检查 UDP %{port} 是否可达"

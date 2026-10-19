@@ -208,6 +208,34 @@ impl HomeView {
                     |el| el.child(form_input(&self.auth_username_input)),
                 )
                 .child(form_input(&self.pin_input))
+                .when(crate::engine::can_remember(self.auth_mode), |el| {
+                    el.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_size(px(12.))
+                                    .child(t!("auth.remember_credentials").to_string()),
+                            )
+                            .child(
+                                div()
+                                    .debug_selector(|| "remember-auth-toggle".into())
+                                    .child(
+                                        Switch::new("remember-auth-credentials")
+                                            .checked(self.remember_auth)
+                                            .on_click(cx.listener(|this, checked, _, cx| {
+                                                this.remember_auth = *checked;
+                                                cx.notify();
+                                            })),
+                                    ),
+                            ),
+                    )
+                })
                 .child(
                     div()
                         .flex()

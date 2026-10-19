@@ -99,13 +99,18 @@ state_file = root / 'state.json'
 state = json.loads(state_file.read_text())
 action = sys.argv[-1]
 with (root / 'calls').open('a') as stream: stream.write('service ' + action + '\n')
-if action == 'service-status': print(json.dumps(state))
+if action == '--help': print('install-defaults' if not os.environ.get('INSTALL_TEST_OLD_CLI') else 'start login-on')
+elif action == 'service-status': print(json.dumps(state))
 elif action == 'status': print(json.dumps({'sessions': [1] if os.environ.get('INSTALL_TEST_SESSIONS') == '1' else [], 'host_ready': False}))
 elif action == 'stop': state.update(managed=False, reachable=False, stopped_by_user=True)
+elif action == 'login-off': state.update(launch_at_login=False, login_configured=True)
+elif action == 'install-defaults':
+    if not state.get('login_configured') and not state['stopped_by_user']:
+        state.update(launch_at_login=True, login_configured=True, managed=True, reachable=True)
 elif action in ('start', 'login-on'):
     if os.environ.get('INSTALL_TEST_BAD_START') == '1' and (pathlib.Path(__file__).parent / 'new').exists(): sys.exit(1)
     state.update(managed=True, reachable=True, stopped_by_user=False)
-    if action == 'login-on': state['launch_at_login'] = True
+    if action == 'login-on': state.update(launch_at_login=True, login_configured=True)
 else: raise AssertionError(action)
 state_file.write_text(json.dumps(state))
 '''
@@ -131,8 +136,8 @@ class InstallerTests(unittest.TestCase):
         (self.root / 'SHA256SUMS').write_text(self.checksum)
         self.set_state()
 
-    def set_state(self, running=False, stopped=False, login=False):
-        state = dict(managed=running, reachable=running, stopped_by_user=stopped, launch_at_login=login)
+    def set_state(self, running=False, stopped=False, login=False, configured=False):
+        state = dict(managed=running, reachable=running, stopped_by_user=stopped, launch_at_login=login, login_configured=configured)
         (self.root / 'state.json').write_text(json.dumps(state))
 
     def make_app(self, app, new=False):
@@ -160,13 +165,37 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue((self.destination / 'Contents/MacOS/old').exists(), result.stderr)
         self.assert_clean()
 
-    def test_fresh_install_via_stdin_with_spaces_and_no_service_start(self):
+    def test_fresh_install_via_stdin_defaults_to_login_startup(self):
         result = subprocess.run(['bash', '-s', '--', '--app-dir', str(self.app_dir)], input=SCRIPT.read_text(),
                                 env=self.env, text=True, capture_output=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.destination / 'Contents/MacOS/new').exists())
-        self.assertNotIn('service start', self.calls())
+        state = json.loads((self.root / 'state.json').read_text())
+        self.assertTrue(state['reachable']); self.assertTrue(state['launch_at_login'])
+        self.assertIn('service install-defaults', self.calls())
         self.assert_clean()
+
+    def test_explicit_no_login_installs_without_starting(self):
+        result = self.run_install('--no-login')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = json.loads((self.root / 'state.json').read_text())
+        self.assertFalse(state['reachable']); self.assertFalse(state['launch_at_login'])
+        self.assertTrue(state['login_configured'])
+        self.assertNotIn('service start', self.calls())
+
+    def test_upgrade_preserves_explicit_login_off(self):
+        self.make_app(self.destination)
+        self.set_state(running=True, configured=True)
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = json.loads((self.root / 'state.json').read_text())
+        self.assertTrue(state['reachable']); self.assertFalse(state['launch_at_login'])
+
+    def test_older_release_cli_still_receives_default_login_startup(self):
+        self.env['INSTALL_TEST_OLD_CLI'] = '1'
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads((self.root / 'state.json').read_text())['launch_at_login'])
 
     def test_verify_only_checks_every_component_without_installing(self):
         result = self.run_install('--verify-only')
@@ -307,7 +336,8 @@ class InstallerTests(unittest.TestCase):
         self.env['INSTALL_TEST_NO_GUI'] = '1'
         self.make_app(self.destination)
         self.assert_old(self.run_install('--start'))
-        result = self.run_install()
+        self.assert_old(self.run_install())
+        result = self.run_install('--no-login')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assert_clean()
 
@@ -358,7 +388,7 @@ sys.exit(subprocess.call(args))
         file.write_bytes(plistlib.dumps(value))
         self.assert_old(self.run_install())
 
-    def test_cli_registration_runs_after_commit_and_before_requested_start(self):
+    def test_cli_registration_runs_after_service_setup_commits(self):
         helper = self.root / 'source.app/Contents/Resources/install-cli.sh'
         helper.parent.mkdir(parents=True)
         helper.write_text('#!/bin/bash\n[ -f "$1/Contents/MacOS/new" ] || exit 9\n'
@@ -366,7 +396,7 @@ sys.exit(subprocess.call(args))
         result = self.run_install('--start')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(f'cli setup {self.destination}', self.calls())
-        self.assertLess(self.calls().index('cli setup '), self.calls().index('service start'))
+        self.assertLess(self.calls().index('service start'), self.calls().index('cli setup '))
         self.assert_clean()
 
     def test_cli_setup_failure_keeps_verified_app_and_reports_partial_success(self):

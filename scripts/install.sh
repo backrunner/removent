@@ -7,15 +7,17 @@ umask 077
 fail() { printf 'removent: %s\n' "$*" >&2; exit 1; }
 usage() {
     cat <<'EOF'
-Usage: install.sh [--version vX.Y.Z] [--app-dir DIR] [--start] [--login] [--verify-only]
+Usage: install.sh [--version vX.Y.Z] [--app-dir DIR] [--start | --login | --no-login] [--verify-only]
   --version TAG   Pin a stable or beta release (default: latest stable).
   --app-dir DIR   Absolute application directory (default: /Applications).
-  --start         Start the background service after installation.
-  --login         Start the service and enable startup at future user logins.
+  Default         Start the service and enable login startup unless explicitly disabled.
+  --start         Start now, preserving the current login preference.
+  --login         Explicitly enable startup at future user logins.
+  --no-login      Install without starting; disable login startup.
   --verify-only   Download and verify the release without installing it.
 Run as the target Mac user, without sudo. Only application file operations elevate.
-Existing data, sharing settings and login preferences are preserved. A running
-service is refreshed; an explicitly stopped service stays stopped unless requested.
+Existing data, sharing settings and explicit login preferences are preserved.
+A running service is refreshed; an explicitly stopped service stays stopped unless requested.
 Quit Desktop and the menu bar app and finish remote sessions before upgrading.
 First-time Screen Recording and Accessibility approval requires the Mac's GUI.
 Environment: REMOVENT_VERSION, REMOVENT_REPO (default: backrunner/removent).
@@ -24,21 +26,22 @@ EOF
 version=${REMOVENT_VERSION:-}
 repo=${REMOVENT_REPO:-backrunner/removent}
 app_dir=/Applications
-start=no
-login=no
+start=auto
+login=auto
 verify_only=no
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --version) [ "$#" -ge 2 ] || fail '--version needs a tag'; version=$2; shift 2 ;;
         --app-dir) [ "$#" -ge 2 ] || fail '--app-dir needs a path'; app_dir=$2; shift 2 ;;
-        --start) start=yes; shift ;;
+        --start) start=yes; [ "$login" != auto ] || login=preserve; shift ;;
         --login) login=yes; start=yes; shift ;;
+        --no-login) login=no; start=no; shift ;;
         --verify-only) verify_only=yes; shift ;;
         --help|-h) usage; exit 0 ;;
         *) fail "Unknown option: $1 (see --help)" ;;
     esac
 done
-[ "$verify_only" = no ] || [ "$start" = no ] || fail '--verify-only cannot start a service'
+[ "$verify_only" = no ] || [ "$start" != yes ] || fail '--verify-only cannot start a service'
 case "$app_dir" in /*) ;; *) fail '--app-dir must be absolute' ;; esac
 case "$app_dir" in *$'\n'*|*$'\r'*) fail 'Application path must not contain newlines' ;; esac
 [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail 'Invalid REMOVENT_REPO'
@@ -94,6 +97,8 @@ new_start_attempted=no
 resume=no
 cli=
 old_cli=
+stopped=false
+login_before=false
 as_admin() { if [ "$elevate" = yes ]; then sudo -- "$@"; else "$@"; fi; }
 cleanup() {
     local result=$?
@@ -225,6 +230,7 @@ if [ -e "$destination" ]; then
     managed=$(boolean managed)
     reachable=$(boolean reachable)
     stopped=$(boolean stopped_by_user)
+    login_before=$(boolean launch_at_login)
     if [ "$managed" = true ] || [ "$reachable" = true ]; then
         if [ "$reachable" = true ]; then
             "$old_cli" daemon status > "$work/daemon.json"
@@ -238,8 +244,11 @@ if [ -e "$destination" ]; then
         "$old_cli" daemon stop > /dev/null
     fi
 fi
+if [ "$start" = auto ]; then
+    if [ "$stopped" = true ]; then start=no; else start=yes; fi
+fi
 if [ "$start" = yes ]; then
-    launchctl print "gui/$(id -u)" >/dev/null 2>&1 || fail '--start/--login requires this SSH user to have a logged-in graphical session; omit these options to install only'
+    launchctl print "gui/$(id -u)" >/dev/null 2>&1 || fail 'Starting the service requires this SSH user to have a logged-in graphical session; use --no-login to install only'
 fi
 [ -z "$(processes)" ] || fail 'A process still uses the installed bundle (possibly another user/data directory); stop it before upgrading'
 swap_started=yes
@@ -250,9 +259,25 @@ fi
 as_admin mv -- "$transaction/new.app" "$destination"
 installed=yes
 verify_app "$destination"
-if [ "$resume" = yes ]; then
+if [ "$resume" = yes ] || [ "$start" = yes ]; then
     new_start_attempted=yes
     "$cli" daemon start
+fi
+if [ "$login" = yes ]; then
+    "$cli" daemon login-on
+elif [ "$login" = no ]; then
+    "$cli" daemon login-off
+elif [ "$login" = preserve ]; then
+    # Record an explicit start-only choice for the installed bundle's first launch.
+    if [ "$login_before" = true ]; then "$cli" daemon login-on
+    else "$cli" daemon login-off; fi
+else
+    # The downloaded release may predate the idempotent installation-default API.
+    daemon_help=$("$cli" daemon --help)
+    case "$daemon_help" in
+        *install-defaults*) "$cli" daemon install-defaults ;;
+        *) [ "$stopped" = true ] || "$cli" daemon login-on ;;
+    esac
 fi
 committed=yes
 printf '==> Installed Removent %s at %s\n' "$version" "$destination"
@@ -263,8 +288,6 @@ if [ -f "$cli_setup" ]; then
 else
     printf '==> This release predates automatic terminal commands; use the full CLI path below.\n'
 fi
-if [ "$login" = yes ]; then "$cli" daemon login-on
-elif [ "$start" = yes ]; then "$cli" daemon start; fi
 if [ "$resume" = yes ] || [ "$start" = yes ]; then
     "$cli" daemon service-status
     "$cli" daemon status

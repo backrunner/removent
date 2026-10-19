@@ -69,8 +69,9 @@ Replace `user@mac` with your Mac's SSH destination:
 ssh user@mac 'curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh | bash -s -- --app-dir "$HOME/Applications" --login'
 ```
 
-`--login` starts the service and enables launch at user login. `--start` starts
-without changing login preferences; omitting both installs only. Hosting needs
+Installation starts the service and enables launch at user login by default, preserving
+later explicit choices. `--login` explicitly enables it; `--start` starts without changing
+login preferences. `--no-login` installs without starting and disables login startup. Hosting needs
 a logged-in graphical session, and initial privacy grants require System Settings
 on that Mac. See the [SSH installation guide](docs/guides/ssh-install.md).
 

@@ -1,5 +1,5 @@
 //! User-session launchd management, shared by the app and packaged CLI/tray.
-//! A temporary job survives the UI exiting; only login-on persists it for login.
+//! Installations default to login startup; explicit user choices survive updates.
 
 use crate::{DataDirLock, DataPaths};
 use anyhow::{Context, Result, bail, ensure};
@@ -159,6 +159,45 @@ impl Service {
     /// unmanaged instances are adopted on the next login or explicit restart.
     pub fn set_launch_at_login(&self, on: bool) -> Result<()> {
         let _lock = self.lock()?;
+        self.set_launch_at_login_locked(on)
+    }
+
+    fn login_choice_file(&self) -> PathBuf {
+        self.paths.run_dir().join("login-startup-configured")
+    }
+
+    /// Used by installers and the installed bundle launcher. Never undo a later
+    /// explicit login-off or a manual stop, and refresh retained bundle paths.
+    pub fn install_defaults(&self) -> Result<()> {
+        let _lock = self.lock()?;
+        if self.login_file.is_file() {
+            crate::settings::atomic_write(&self.login_file, self.plist()?.as_bytes())?;
+        }
+        if self.login_choice_file().try_exists()? || crate::service_intent::is_stopped(&self.paths)?
+        {
+            return Ok(());
+        }
+        self.set_launch_at_login_locked(true)
+    }
+
+    fn set_launch_at_login_locked(&self, on: bool) -> Result<()> {
+        // Persist the explicit choice before changing launchd registration. If
+        // setup fails, restore the marker so a later install can retry safely.
+        let choice = self.login_choice_file();
+        let previous_choice = std::fs::read(&choice).ok();
+        crate::settings::atomic_write(&choice, b"1\n")?;
+        let result = self.apply_launch_at_login_locked(on);
+        if result.is_err() {
+            if let Some(previous) = previous_choice {
+                crate::settings::atomic_write(&choice, &previous)?;
+            } else {
+                std::fs::remove_file(&choice)?;
+            }
+        }
+        result
+    }
+
+    fn apply_launch_at_login_locked(&self, on: bool) -> Result<()> {
         if on {
             let plist = self.plist()?;
             std::fs::create_dir_all(self.login_file.parent().unwrap())?;
@@ -260,6 +299,31 @@ mod tests {
     }
 
     #[test]
+    fn installation_defaults_preserve_explicit_login_off_and_manual_stop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = DataPaths {
+            root: tmp.path().join("data"),
+        };
+        let mut service = Service::new(paths.clone(), tmp.path().join("missing-daemon")).unwrap();
+        service.login_file = tmp.path().join("LaunchAgents/test.plist");
+        service.set_launch_at_login(false).unwrap();
+        assert!(service.login_choice_file().is_file());
+        service.install_defaults().unwrap();
+        assert!(!service.login_file.exists());
+        std::fs::remove_file(service.login_choice_file()).unwrap();
+        crate::service_intent::set_stopped(&paths, true).unwrap();
+        service.install_defaults().unwrap();
+        assert!(!service.login_file.exists());
+        assert!(crate::service_intent::is_stopped(&paths).unwrap());
+        crate::service_intent::set_stopped(&paths, false).unwrap();
+        assert!(service.install_defaults().is_err());
+        assert!(
+            !service.login_choice_file().exists(),
+            "failed setup must remain retryable"
+        );
+    }
+
+    #[test]
     fn plist_handles_spaces_and_xml_in_paths() {
         let text = render_plist(
             LABEL,
@@ -326,9 +390,11 @@ while True:
         let pid = || std::fs::read_to_string(paths.root.join("pid")).unwrap();
         let original_pid = pid();
         service.start().unwrap();
-        service.set_launch_at_login(true).unwrap();
+        service.install_defaults().unwrap();
         assert!(service.status().unwrap().launch_at_login);
+        assert!(service.login_choice_file().is_file());
         service.set_launch_at_login(false).unwrap();
+        service.install_defaults().unwrap();
         assert!(!service.status().unwrap().launch_at_login);
         assert_eq!(
             pid(),

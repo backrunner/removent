@@ -67,7 +67,7 @@ curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/in
 ssh user@mac 'curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh | bash -s -- --app-dir "$HOME/Applications" --login'
 ```
 
-`--login` 会启动服务并启用用户登录自启；`--start` 只启动服务；省略两者则仅安装。
+安装默认启动服务并开启用户登录自启，之后手动关闭的选择会保留。`--login` 显式启用登录自启，`--start` 只启动而不改变登录偏好，`--no-login` 仅安装并关闭登录自启。
 共享需要该用户已有已登录的图形会话，首次隐私授权仍需在 Mac 的系统设置中完成。
 详见 [SSH 安装指南](docs/guides/ssh-install.md)。
 

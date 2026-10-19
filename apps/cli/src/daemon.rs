@@ -86,7 +86,14 @@ pub(super) async fn cmd_daemon(action: &str, format: Format) -> anyhow::Result<(
     #[cfg(target_os = "macos")]
     if matches!(
         action,
-        "start" | "ensure" | "stop" | "restart" | "login-on" | "login-off" | "service-status"
+        "start"
+            | "ensure"
+            | "stop"
+            | "restart"
+            | "login-on"
+            | "login-off"
+            | "service-status"
+            | "install-defaults"
     ) {
         let service_action = action.to_owned();
         // launchctl and the startup readiness wait are blocking operations.
@@ -98,6 +105,7 @@ pub(super) async fn cmd_daemon(action: &str, format: Format) -> anyhow::Result<(
                 .with_file_name("removentd");
             let service = removent_core::service::Service::new(paths, exe)?;
             match service_action.as_str() {
+                "install-defaults" => service.install_defaults()?,
                 "start" => service.start()?,
                 "ensure" => service.ensure_running()?,
                 "stop" => service.stop()?,

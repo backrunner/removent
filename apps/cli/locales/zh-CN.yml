@@ -49,6 +49,7 @@ help.daemon: |
     stop            停止后台服务，直到手动启动
     restart         重启后台服务（会中断当前会话）
     ensure          按需启动，尊重手动停止的设置
+    install-defaults  应用安装默认值，保留已明确选择的登录启动和停止状态
     login-on        立即启动并开启登录时启动
     login-off       关闭登录时启动，保留当前服务
     service-status  查询登录启动、进程管理和连接状态（--json 可输出 JSON）

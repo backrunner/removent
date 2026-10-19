@@ -105,8 +105,6 @@ def main():
             destination.rename(backup)
         staged.rename(destination)
         installed_cli = destination / 'Contents/MacOS/removent-cli'
-        if before['launch_at_login']:
-            service('login-on', installed_cli)
         # Keep an existing tray login preference, updating its exact bundle path.
         tray_login = Path.home() / 'Library/LaunchAgents/com.alkinum.removent.tray.plist'
         if tray_login.exists():
@@ -119,6 +117,7 @@ def main():
                 temporary.replace(tray_login)
         if not before['stopped_by_user']:
             service('start', installed_cli)
+        service('install-defaults', installed_cli)
         for relative in ['Contents/MacOS/removent', 'Contents/MacOS/removent-cli', 'Contents/MacOS/removentd',
                          'Contents/Helpers/RemoventTray.app/Contents/MacOS/RemoventTray']:
             expected = hashlib.sha256((source / relative).read_bytes()).hexdigest()

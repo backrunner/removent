@@ -1,6 +1,6 @@
 # Install the current macOS checkout
 
-Run `make install-local` to build and install Desktop, removentd and the SwiftUI menu bar app together at `/Applications/Removent.app`. This refreshes the running service and launches the installed Desktop, preserving data and existing login preferences. Finish active remote sessions first.
+Run `make install-local` to build and install Desktop, removentd and the SwiftUI menu bar app together at `/Applications/Removent.app`. This refreshes the running service and launches the installed Desktop, preserving data. Installation enables background-service startup at login by default; later explicit login-off and manual-stop choices survive reinstallations and updates. Finish active remote sessions first.
 
 For an already built bundle, `python3 scripts/install_local.py --no-build` verifies its source fingerprint before installation. It refuses stale bundles, including local source edits that have not been rebuilt. `--destination ~/Applications/Removent.app` selects a user-owned installation directory.
 

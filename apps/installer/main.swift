@@ -120,6 +120,15 @@ if readOnly {
 // an update. Build/staging bundles do not take over the user's terminal commands.
 let applicationDirectories = ["/Applications", fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path]
 if applicationDirectories.contains(source.deletingLastPathComponent().path) {
+    // Covers drag-and-drop installs as well as the DMG installation flow.
+    // The service owns the persistent choice so a later login-off is respected.
+    do {
+        try run(source.appendingPathComponent("Contents/MacOS/removent-cli").path,
+                ["daemon", "install-defaults"])
+    } catch {
+        _ = alert(tr("Could not configure login startup", "无法配置登录时启动"),
+                  error.localizedDescription, [tr("Continue", "继续")])
+    }
     let task = Process()
     let output = Pipe()
     task.executableURL = URL(fileURLWithPath: "/bin/bash")

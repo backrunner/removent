@@ -17,7 +17,9 @@ This installs `~/Applications/Removent.app` without administrator access, starts
 the background daemon and enables its future user-login startup. It follows the
 saved sharing switch (enabled by default on a new host). It does not open the
 desktop or tray, change authentication, or grant privacy access.
-Omit `--login` to install only. `--start` starts without changing login preferences.
+Login startup is enabled by default on a new installation. `--login` explicitly enables it again;
+`--start` starts without changing login preferences. `--no-login` installs without starting
+and disables login startup.
 Run `--help` for the full options. `REMOVENT_DATA_DIR`, when set on the remote
 machine, must match the directory used by that host's desktop and daemon.
 
@@ -58,9 +60,8 @@ preferences are retained; an explicitly stopped service stays stopped unless
 Copy, replacement, installed-signature or service-refresh failure restores the
 previous app and attempts to resume its prior service. If rollback itself fails,
 the script retains the backup and reports its path for manual recovery. An explicit
-first start or login setup runs after installation commits; if it fails, the verified
-app remains installed and the command exits unsuccessfully. Inspect daemon logs
-and rerun the printed CLI commands after resolving the startup error.
+first start or login setup is also part of the installation transaction. A failure
+attempts rollback before reporting the startup error.
 
 A destination lock prevents concurrent installers. After an uncatchable process
 termination, inspect `.removent-install.lock` and any `.removent-install.*` backups
@@ -70,7 +71,7 @@ the mount for manual ejection and retains its temporary directory.
 
 ## Hosting and permissions
 
-The app can be installed with no graphical login. Starting or refreshing the
+Use `--no-login` to install with no graphical login. Starting or refreshing the
 user-session service requires the SSH user to have a graphical `gui/<uid>` session.
 `--login` refers to future **user login**, not pre-login system boot. A user-session
 daemon does not unlock FileVault or provide a logged-out desktop.

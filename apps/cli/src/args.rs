@@ -125,6 +125,7 @@ pub(super) fn parse(raw: &[String]) -> anyhow::Result<Options> {
                             | "login-on"
                             | "login-off"
                             | "service-status"
+                            | "install-defaults"
                     ))
                 {
                     return Err(Failure::usage(

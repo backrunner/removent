@@ -49,6 +49,7 @@ help.daemon: |
     stop            Stop until explicitly started again
     restart         Restart the service (interrupts active sessions)
     ensure          Start if needed, respecting an explicit stop
+    install-defaults  Apply installation defaults, preserving explicit login/stop choices
     login-on        Start now and enable launch at login
     login-off       Disable launch at login, keeping the current service running
     service-status  Inspect login, process management and connectivity (use --json for scripts)

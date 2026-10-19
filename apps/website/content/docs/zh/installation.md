@@ -35,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/in
 ssh user@mac 'curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh | bash -s -- --app-dir "$HOME/Applications" --login'
 ```
 
-`--login` 启动 daemon 并启用今后的用户登录自启；省略它则仅安装，`--start` 只启动而不改变登录偏好。可用 `--version v0.1.4` 指定已发布版本，或用 `--verify-only` 只下载并验证。以目标 Mac 用户运行，不要给整个脚本加 sudo；安装到 `/Applications` 可能需要管理员授权，`--app-dir "$HOME/Applications"` 使用用户自己的目录。
+新安装默认启动 daemon 并启用用户登录自启，之后手动关闭或停止的选择会保留。`--login` 显式启用登录自启，`--start` 只启动而不改变登录偏好，`--no-login` 仅安装并关闭登录自启。可用 `--version v0.1.4` 指定已发布版本，或用 `--verify-only` 只下载并验证。以目标 Mac 用户运行，不要给整个脚本加 sudo；安装到 `/Applications` 可能需要管理员授权，`--app-dir "$HOME/Applications"` 使用用户自己的目录。
 
 脚本在替换前验证 SHA-256、组件签名和 Gatekeeper，并保留旧应用以便失败时回滚。升级前须退出主应用和菜单栏应用，并结束远程会话。原本运行的 daemon 会更新后重新启动；手动停止的服务保持停止，除非明确要求启动。数据、共享设置和登录偏好会保留。
 

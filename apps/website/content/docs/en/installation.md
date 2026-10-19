@@ -35,7 +35,7 @@ From another computer, install into the Mac user's Applications directory and en
 ssh user@mac 'curl -fsSL https://raw.githubusercontent.com/backrunner/removent/main/scripts/install.sh | bash -s -- --app-dir "$HOME/Applications" --login'
 ```
 
-`--login` starts the daemon and enables startup at future user logins. Omit it to install only; `--start` starts without changing login preferences. Use `--version v0.1.4` to pin a published release or `--verify-only` to download and verify without installing. Run as the target Mac user, without sudo; `/Applications` may require administrator authorization, while `--app-dir "$HOME/Applications"` uses a user-owned directory.
+A new installation starts the daemon and enables startup at future user logins by default. Later explicit login-off and stop choices are preserved. `--login` explicitly enables login startup; `--start` starts without changing login preferences; `--no-login` installs without starting and disables login startup. Use `--version v0.1.4` to pin a published release or `--verify-only` to download and verify without installing. Run as the target Mac user, without sudo; `/Applications` may require administrator authorization, while `--app-dir "$HOME/Applications"` uses a user-owned directory.
 
 The installer verifies SHA-256, component signatures and Gatekeeper acceptance before replacement, and retains the previous app for rollback. Quit the main app and menu bar app and finish remote sessions before upgrading. A previously running daemon is refreshed; an explicitly stopped daemon stays stopped unless you request startup. Data, sharing settings and login preferences are preserved.
 

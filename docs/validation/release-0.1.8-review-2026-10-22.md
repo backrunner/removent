@@ -30,3 +30,11 @@
 [CI 39662421610](https://github.com/backrunner/removent/actions/runs/39662421610) 的官网与 Clippy 通过；mDNS 库 83 项和地址解析 3 项全部通过。集成测试 35 项通过、4 项 IPv6 相关失败，IPv4 与缓存禁用/恢复断言均通过。runner 的 `lo0` 有 `::1` 和 `fe80::1`，但测试只收到 IPv4 数据。
 
 追加的 CI 网络预检显式建立 `ff02::fb%lo0` 的 host 路由，独立使用真实 UDP 验证 IPv4 和 IPv6 组播回环；网络不可用时直接失败。完整协议套件仍全部必跑，并启用失败用例的详细协议日志。预检在本机两种协议均通过。该轮没有创建发布 tag，失败的 CI 已取消，以便重新验收修正后的提交。同提交的 Relay 五项任务全部通过。
+
+## 独立网络预检与执行环境
+
+[CI 39663977202](https://github.com/backrunner/removent/actions/runs/39663977202) 中，显式建立的 `ff02::fb%lo0` host 路由查询显示 `interface: lo0`、`UP/HOST/MULTICAST/IFSCOPE`。独立 Python socket 的 IPv4 回环成功，IPv6 `sendto` 返回 `OSError: [Errno 65] No route to host`，故失败并不依赖 Rust 或缓存实现。
+
+[GitHub runner-images #10924](https://github.com/actions/runner-images/issues/10924) 跟踪了 macOS runner 本地网络访问与组播发送错误。[Apple TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy) 明确说明 root 程序和 launchd daemon 自动允许本地网络访问。
+
+CI 因此将 vendor mDNS 测试可执行文件与内存探针交给 `sudo -n` runner 执行；编译仍为普通用户，Removent workspace、Clippy、应用打包和 Relay 检查的执行用户不变。预检记录普通用户结果，并严格要求 root 上的真实 IPv4/IPv6 组播回环都成功。移除无效的额外 host 路由设置，保留完整测试，不跳过 IPv6 断言。本机普通用户的完整 mDNS 测试已通过；CI 的这个执行环境不作为产品普通用户权限验证的替代证据。

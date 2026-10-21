@@ -55,28 +55,26 @@ jobs:
   mdns:
     runs-on: macos-26
     timeout-minutes: 15
+    env:
+      # Apple TN3179 automatically permits local networking for root programs.
+      # Hosted macOS runners otherwise reject IPv6 multicast even on lo0.
+      # Only vendored protocol executables use this runner; workspace checks do not.
+      CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER: sudo -n /usr/bin/env RUST_LOG=mdns_sd=trace
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Prepare IPv6 loopback multicast route
+      - name: Verify multicast in the permitted CI network context
         run: |
           ifconfig lo0
-          netstat -rn -f inet6
+          route -n get -inet6 ff02::fb%lo0
           python3 - <<'PY'
           import subprocess
-          result = subprocess.run(
-              ["sudo", "route", "-n", "add", "-inet6", "-host", "ff02::fb%lo0", "-interface", "lo0"],
-              capture_output=True, text=True,
-          )
-          print(result.stdout, result.stderr)
-          if result.returncode and "File exists" not in result.stderr:
-              raise SystemExit(result.returncode)
+          command = ["python3", "scripts/qa/check_mdns_transport.py"]
+          normal = subprocess.run(command)
+          print(f"Unprivileged network diagnostic exit: {normal.returncode}", flush=True)
+          subprocess.run(["sudo", "-n", *command], check=True)
           PY
-          route -n get -inet6 ff02::fb%lo0
-          python3 scripts/qa/check_mdns_transport.py
       - name: Check mDNS library, integration, and memory regressions
-        env:
-          RUST_LOG: mdns_sd=trace
         run: cargo test --manifest-path vendor/mdns-sd/Cargo.toml --locked -- --test-threads=1
       - name: Check mDNS memory over loopback UDP
         run: cargo run --manifest-path vendor/mdns-sd/Cargo.toml --locked --example memory_probe

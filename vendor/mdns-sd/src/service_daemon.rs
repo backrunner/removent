@@ -5518,6 +5518,32 @@ mod tests {
     };
     use test_log::test;
 
+    /// Multicast transport regressions must not depend on LAN routing, which
+    /// hosted macOS runners do not provide. They still send real UDP packets.
+    fn multicast_test_interfaces() -> Vec<Interface> {
+        let interfaces: Vec<_> = my_ip_interfaces(true)
+            .into_iter()
+            .filter(|intf| intf.ip() == IpAddr::V4(Ipv4Addr::LOCALHOST))
+            .collect();
+        assert!(!interfaces.is_empty(), "IPv4 loopback must be available");
+        interfaces
+    }
+
+    fn multicast_test_daemon(port: u16) -> crate::Result<ServiceDaemon> {
+        let index = multicast_test_interfaces()[0]
+            .index
+            .expect("loopback index");
+        let daemon = ServiceDaemon::new_with_port(port)?;
+        daemon.disable_interface(IfKind::All)?;
+        daemon.enable_interface(IfKind::IndexV4(index))?;
+        daemon.set_multicast_loop_v4(true)?;
+        daemon
+            .get_metrics()?
+            .recv_timeout(Duration::from_secs(3))
+            .expect("loopback daemon initialization");
+        Ok(daemon)
+    }
+
     /// Builds an interface address for the max packet size tests below.
     fn test_interface(name: &str, index: u32, addr: IfAddr) -> Interface {
         Interface {
@@ -5857,7 +5883,7 @@ mod tests {
     /// rather than clamped, so what reaches the encoder is always legal.
     #[test]
     fn test_set_max_packet_size_range() {
-        let daemon = ServiceDaemon::new().unwrap();
+        let daemon = multicast_test_daemon(MDNS_PORT).unwrap();
 
         assert!(daemon
             .set_max_packet_size(IfKind::All, MIN_MAX_PACKET_SIZE - 1)
@@ -5941,21 +5967,16 @@ mod tests {
         // to the mDNS multicast group, so a multicast-only reply would never
         // reach it — simply receiving the response proves it was unicast.
 
-        let intf_ip = match my_ip_interfaces(false)
+        let intf_ip = multicast_test_interfaces()
             .into_iter()
             .find_map(|intf| match intf.ip() {
                 IpAddr::V4(ip) => Some(ip),
                 IpAddr::V6(_) => None,
-            }) {
-            Some(ip) => ip,
-            None => {
-                println!("No IPv4 interface available; skipping test.");
-                return;
-            }
-        };
+            })
+            .expect("IPv4 loopback interface");
 
         // Register a service with a unique hostname on this host.
-        let daemon = ServiceDaemon::new().expect("Failed to create daemon");
+        let daemon = multicast_test_daemon(MDNS_PORT).expect("Failed to create daemon");
         let unique = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -5973,9 +5994,12 @@ mod tests {
         daemon.register(service_info).expect("register service");
 
         // A one-shot querier: ephemeral source port, not 5353. Binding to
-        // `intf_ip` directs the multicast query out that interface, which is
-        // one the daemon is listening on.
+        // `intf_ip` selects the source address; IP_MULTICAST_IF also selects
+        // the outgoing interface explicitly, including on macOS.
         let querier = UdpSocket::bind((intf_ip, 0)).expect("bind querier socket");
+        socket2::SockRef::from(&querier)
+            .set_multicast_if_v4(&intf_ip)
+            .expect("select querier multicast interface");
         querier
             .set_multicast_loop_v4(true)
             .expect("enable multicast loopback");
@@ -6120,18 +6144,13 @@ mod tests {
         // immediately.
         use socket2::{Domain, Protocol, Socket, Type};
 
-        let (intf, intf_ip) = match my_ip_interfaces(false)
+        let (intf, intf_ip) = multicast_test_interfaces()
             .into_iter()
             .find_map(|intf| match intf.ip() {
-                IpAddr::V4(ip) if !ip.is_loopback() => Some((intf, ip)),
+                IpAddr::V4(ip) => Some((intf, ip)),
                 _ => None,
-            }) {
-            Some(pair) => pair,
-            None => {
-                println!("No IPv4 interface available; skipping test.");
-                return;
-            }
-        };
+            })
+            .expect("IPv4 loopback interface");
         let interface_id = InterfaceId::from(&intf);
 
         // A receiver socket joined to the mDNS group on this interface. The
@@ -6156,7 +6175,7 @@ mod tests {
             % 1_000_000_000;
         let service_type = format!("_qd{unique}._udp.local.");
 
-        let daemon = ServiceDaemon::new().expect("Failed to create daemon");
+        let daemon = multicast_test_daemon(MDNS_PORT).expect("Failed to create daemon");
 
         let sent_at = Instant::now();
         let _browse = daemon.browse(&service_type).expect("browse");
@@ -6220,20 +6239,15 @@ mod tests {
         // instead; see `test_legacy_unicast_response`.)
         use socket2::{Domain, Protocol, Socket, Type};
 
-        let intf_ip = match my_ip_interfaces(false)
+        let intf_ip = multicast_test_interfaces()
             .into_iter()
             .find_map(|intf| match intf.ip() {
-                IpAddr::V4(ip) if !ip.is_loopback() => Some(ip),
+                IpAddr::V4(ip) => Some(ip),
                 _ => None,
-            }) {
-            Some(ip) => ip,
-            None => {
-                println!("No IPv4 interface available; skipping test.");
-                return;
-            }
-        };
+            })
+            .expect("IPv4 loopback interface");
 
-        let daemon = ServiceDaemon::new().expect("Failed to create daemon");
+        let daemon = multicast_test_daemon(MDNS_PORT).expect("Failed to create daemon");
         let monitor = daemon.monitor().expect("monitor daemon events");
 
         // Keep the service name (the `_sd…` label) within the 15-byte limit
@@ -6383,11 +6397,11 @@ mod tests {
     #[test]
     fn test_service_with_temporarily_invalidated_ptr() {
         // Create a daemon
-        let d = ServiceDaemon::new().expect("Failed to create daemon");
+        let d = multicast_test_daemon(MDNS_PORT).expect("Failed to create daemon");
 
         let service = "_test_inval_ptr._udp.local.";
         let host_name = "my_host_tmp_invalidated_ptr.local.";
-        let intfs: Vec<_> = my_ip_interfaces(false);
+        let intfs: Vec<_> = multicast_test_interfaces();
         let intf_ips: Vec<_> = intfs.iter().map(|intf| intf.ip()).collect();
         let port = 5201;
         let my_service =
@@ -6517,11 +6531,11 @@ mod tests {
         my_service._set_host_ttl(new_ttl);
 
         // register my service
-        let mdns_server = ServiceDaemon::new().expect("Failed to create mdns server");
+        let mdns_server = multicast_test_daemon(MDNS_PORT).expect("Failed to create mdns server");
         let result = mdns_server.register(my_service);
         assert!(result.is_ok());
 
-        let mdns_client = ServiceDaemon::new().expect("Failed to create mdns client");
+        let mdns_client = multicast_test_daemon(MDNS_PORT).expect("Failed to create mdns client");
         let browse_chan = mdns_client.browse(service_type).unwrap();
         let timeout = Duration::from_secs(2);
         let mut resolved = false;
@@ -6766,8 +6780,8 @@ mod tests {
             let port = reservation.local_addr().unwrap().port();
             drop(reservation);
             let pair = Self {
-                server: ServiceDaemon::new_with_port(port).unwrap(),
-                client: ServiceDaemon::new_with_port(port).unwrap(),
+                server: multicast_test_daemon(port).unwrap(),
+                client: multicast_test_daemon(port).unwrap(),
                 interface,
             };
             for daemon in [&pair.server, &pair.client] {
@@ -6938,7 +6952,7 @@ mod tests {
         let service_type = "_test_add_answer._udp.local.";
         let instance = "test_instance";
         let host_name = "add_answer_host.local.";
-        let service_intf = my_ip_interfaces(false)
+        let service_intf = multicast_test_interfaces()
             .into_iter()
             .find(|iface| iface.ip().is_ipv4())
             .unwrap();
@@ -7061,7 +7075,7 @@ mod tests {
         let service_type = "_cache_only._udp.local.";
         let instance = "test_instance";
         let host_name = "cache_only_host.local.";
-        let service_ip_addr = my_ip_interfaces(false)
+        let service_ip_addr = multicast_test_interfaces()
             .iter()
             .find(|iface| iface.ip().is_ipv4())
             .map(|iface| iface.ip())
@@ -7080,7 +7094,7 @@ mod tests {
         let new_ttl = 3; // for testing only.
         my_service._set_other_ttl(new_ttl);
 
-        let mdns_client = ServiceDaemon::new().expect("Failed to create mdns client");
+        let mdns_client = multicast_test_daemon(MDNS_PORT).expect("Failed to create mdns client");
 
         // make a single browse request to record that we are interested in the service.  This ensures that
         // subsequent announcements are cached.
@@ -7088,7 +7102,7 @@ mod tests {
         std::thread::sleep(Duration::from_secs(2));
 
         // register my service
-        let mdns_server = ServiceDaemon::new().expect("Failed to create mdns server");
+        let mdns_server = multicast_test_daemon(MDNS_PORT).expect("Failed to create mdns server");
         let result = mdns_server.register(my_service);
         assert!(result.is_ok());
 
@@ -7116,7 +7130,7 @@ mod tests {
         let service_type = "_c_unsolicit._udp.local.";
         let instance = "test_instance";
         let host_name = "c_unsolicit_host.local.";
-        let service_ip_addr = my_ip_interfaces(false)
+        let service_ip_addr = multicast_test_interfaces()
             .iter()
             .find(|iface| iface.ip().is_ipv4())
             .map(|iface| iface.ip())
@@ -7133,11 +7147,11 @@ mod tests {
         .unwrap();
 
         // register my service
-        let mdns_server = ServiceDaemon::new().expect("Failed to create mdns server");
+        let mdns_server = multicast_test_daemon(MDNS_PORT).expect("Failed to create mdns server");
         let result = mdns_server.register(my_service);
         assert!(result.is_ok());
 
-        let mdns_client = ServiceDaemon::new().expect("Failed to create mdns client");
+        let mdns_client = multicast_test_daemon(MDNS_PORT).expect("Failed to create mdns client");
         mdns_client.accept_unsolicited(true).unwrap();
 
         // Wait a bit for the service announcements to go out, before calling browse_cache.  This ensures
@@ -7174,7 +7188,7 @@ mod tests {
         let instance_default = "default_port_instance";
         let host_name = "custom_port_host.local.";
 
-        let service_ip_addr = my_ip_interfaces(false)
+        let service_ip_addr = multicast_test_interfaces()
             .iter()
             .find(|iface| iface.ip().is_ipv4())
             .map(|iface| iface.ip())
@@ -7205,12 +7219,13 @@ mod tests {
         // Create two daemons on custom port 5454
         let custom_port = 5454u16;
         let server_custom =
-            ServiceDaemon::new_with_port(custom_port).expect("Failed to create custom port server");
+            multicast_test_daemon(custom_port).expect("Failed to create custom port server");
         let client_custom =
-            ServiceDaemon::new_with_port(custom_port).expect("Failed to create custom port client");
+            multicast_test_daemon(custom_port).expect("Failed to create custom port client");
 
         // Create daemon on default port (5353)
-        let server_default = ServiceDaemon::new().expect("Failed to create default port server");
+        let server_default =
+            multicast_test_daemon(MDNS_PORT).expect("Failed to create default port server");
 
         // Register service on custom port
         server_custom
@@ -7260,7 +7275,8 @@ mod tests {
 
         // Now verify the default port daemon can find its own services
         // but not the custom port services
-        let client_default = ServiceDaemon::new().expect("Failed to create default port client");
+        let client_default =
+            multicast_test_daemon(MDNS_PORT).expect("Failed to create default port client");
         let browse_default = client_default
             .browse(service_type)
             .expect("Failed to browse on default port");
@@ -7311,18 +7327,13 @@ mod tests {
         use std::net::SocketAddrV4;
 
         // Pick the first IPv4 interface, like the other multicast tests.
-        let intf_ip = match my_ip_interfaces(false)
+        let intf_ip = multicast_test_interfaces()
             .into_iter()
             .find_map(|intf| match intf.ip() {
-                IpAddr::V4(ip) if !ip.is_loopback() => Some(ip),
+                IpAddr::V4(ip) => Some(ip),
                 _ => None,
-            }) {
-            Some(ip) => ip,
-            None => {
-                println!("No non-loopback IPv4 interface available; skipping test.");
-                return;
-            }
-        };
+            })
+            .expect("IPv4 loopback interface");
 
         let unique = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -7403,7 +7414,7 @@ mod tests {
         };
 
         // Start the browse, then announce (unsolicited) to seed the cache.
-        let daemon = ServiceDaemon::new().expect("create daemon");
+        let daemon = multicast_test_daemon(MDNS_PORT).expect("create daemon");
         let browse_rx = daemon.browse(&ty_domain).expect("start browse");
         send_all(announce_packets());
 

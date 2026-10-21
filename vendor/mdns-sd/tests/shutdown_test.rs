@@ -1,4 +1,6 @@
-use mdns_sd::{DaemonStatus, HostnameResolutionEvent, ServiceDaemon, ServiceEvent, ServiceInfo};
+mod common;
+
+use mdns_sd::{DaemonStatus, HostnameResolutionEvent, ServiceEvent, ServiceInfo};
 use std::collections::HashSet;
 use std::thread::sleep;
 use std::time::{Duration, SystemTime};
@@ -7,7 +9,7 @@ use test_log::test;
 /// Test that shutdown properly unregisters all services
 #[test]
 fn test_shutdown_unregisters_services() {
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     // Register a service
     let ty_domain = "_shutdown-test1._udp.local.";
@@ -34,7 +36,7 @@ fn test_shutdown_unregisters_services() {
     sleep(Duration::from_millis(500));
 
     // Browse for the service in another daemon to verify it's announced
-    let d2 = ServiceDaemon::new().expect("Failed to create daemon");
+    let d2 = common::new_daemon().expect("Failed to create daemon");
     let browse_chan = d2.browse(ty_domain).unwrap();
 
     let mut found = false;
@@ -82,7 +84,7 @@ fn test_shutdown_unregisters_services() {
 /// Test that shutdown properly stops all browse operations
 #[test]
 fn test_shutdown_stops_browse() {
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     // Start browsing
     let ty_domain = "_shutdown-browse-test._udp.local.";
@@ -123,7 +125,7 @@ fn test_shutdown_stops_browse() {
 /// Test that shutdown properly stops all hostname resolution
 #[test]
 fn test_shutdown_stops_hostname_resolution() {
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     // Start hostname resolution
     let hostname = "test-shutdown-host.local.";
@@ -164,7 +166,7 @@ fn test_shutdown_stops_hostname_resolution() {
 /// Test that shutdown sends proper notifications to monitors
 #[test]
 fn test_shutdown_notifies_monitors() {
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     // Monitor daemon events
     let _monitor_chan = d.monitor().unwrap();
@@ -208,7 +210,7 @@ fn test_shutdown_notifies_monitors() {
 /// Test that shutdown handles multiple registered services
 #[test]
 fn test_shutdown_multiple_services() {
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     let ty_domain = "_shutdown-multi-test._udp.local.";
     let now = SystemTime::now()
@@ -239,7 +241,7 @@ fn test_shutdown_multiple_services() {
     sleep(Duration::from_millis(500));
 
     // Browse for services in another daemon
-    let d2 = ServiceDaemon::new().expect("Failed to create daemon");
+    let d2 = common::new_daemon().expect("Failed to create daemon");
     let browse_chan = d2.browse(ty_domain).unwrap();
 
     // Verify services are discovered
@@ -293,7 +295,7 @@ fn test_shutdown_multiple_services() {
 /// Test that operations fail gracefully after shutdown
 #[test]
 fn test_operations_fail_after_shutdown() {
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     // Shutdown
     let shutdown_receiver = d.shutdown().unwrap();
@@ -328,7 +330,7 @@ fn test_operations_fail_after_shutdown() {
 /// Test that shutdown is idempotent (can be called multiple times)
 #[test]
 fn test_shutdown_idempotent() {
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     // First shutdown
     let shutdown_receiver1 = d.shutdown().unwrap();
@@ -348,7 +350,7 @@ fn test_shutdown_idempotent() {
 /// Test shutdown with concurrent operations
 #[test]
 fn test_shutdown_concurrent_operations() {
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
     let d_clone = d.clone();
 
     // Start a browse operation in another thread

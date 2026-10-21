@@ -1,7 +1,9 @@
+mod common;
+
 use if_addrs::{IfAddr, Interface};
 use mdns_sd::{
     DaemonEvent, DaemonStatus, HostnameResolutionEvent, IfKind, InterfaceId, IntoTxtProperties,
-    RRType, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo, TxtProperty, UnregisterStatus,
+    RRType, ScopedIp, ServiceEvent, ServiceInfo, TxtProperty, UnregisterStatus,
 };
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -14,7 +16,7 @@ use test_log::test;
 #[test]
 fn integration_success() {
     // Create a daemon
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     // Register a service
     let ty_domain = "_mdns-sd-it._udp.local.";
@@ -253,7 +255,7 @@ fn integration_success() {
 #[test]
 fn service_without_properties_with_alter_net_v4() {
     // Create a daemon
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     // Register a service without properties.
     let ty_domain = "_serv-no-prop._tcp.local.";
@@ -326,7 +328,7 @@ fn service_without_properties_with_alter_net_v4() {
 #[test]
 fn service_without_properties_with_alter_net_v6() {
     // Create a daemon
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     // Register a service without properties.
     let ty_domain = "_serv-no-prop._tcp.local.";
@@ -539,7 +541,7 @@ fn test_info_as_resolved_service() {
 #[test]
 fn service_with_named_interface_only() {
     // Create a daemon
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     // First, disable all interfaces.
     d.disable_interface(IfKind::All).unwrap();
@@ -629,7 +631,7 @@ fn service_with_named_interface_only() {
 #[test]
 fn service_with_ipv4_only() {
     // Create a daemon
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     // Disable IPv6, so the daemon is IPv4 only now.
     d.disable_interface(IfKind::IPv6).unwrap();
@@ -688,7 +690,7 @@ fn service_with_ipv4_only() {
 #[test]
 fn service_ipv6_link_local_only() {
     // Create a daemon
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
     let service_ipv6_intf = "_test_ipv6_intf._udp.local.";
     let host_name = "my_host_ipv6_intf.local.";
     let host_ipv4 = "";
@@ -746,68 +748,71 @@ fn service_ipv6_link_local_only() {
 
 #[test]
 fn test_disable_interface_cache() {
-    // Create a server
-    let server = ServiceDaemon::new().expect("Failed to create the server");
+    let server = common::new_daemon().expect("create server");
+    let client = common::new_daemon().expect("create client");
+    server.disable_interface(IfKind::IPv6).unwrap();
+    client.disable_interface(IfKind::IPv6).unwrap();
 
-    // Register a service with one IPv4.
     let ty_domain = "_disable-intf._tcp.local.";
-    let now = SystemTime::now()
+    let instance_name = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap();
-    let instance_name = now.as_micros().to_string();
+        .unwrap()
+        .as_micros()
+        .to_string();
     let ipv4_list: Vec<_> = my_ip_interfaces()
         .iter()
         .map(|iface| iface.ip())
-        .filter(|ip| ip.is_ipv4() && !ip.is_loopback())
+        .filter(|ip| ip.is_ipv4())
         .collect();
-
-    let host_name = "disabled_intf_host.local.";
-    let port = 5201;
-    let my_service = ServiceInfo::new(
+    assert!(!ipv4_list.is_empty(), "fixture needs an IPv4 address");
+    let service = ServiceInfo::new(
         ty_domain,
         &instance_name,
-        host_name,
+        "disabled_intf_host.local.",
         &ipv4_list[..],
-        port,
+        5201,
         None,
     )
-    .expect("Invalid service info");
-    server
-        .register(my_service)
-        .expect("Failed to register our service");
+    .expect("valid service info");
+    let fullname = service.get_fullname().to_string();
+    server.register(service).unwrap();
 
-    // Create a client
-    let client = ServiceDaemon::new().expect("Failed to create the client");
-
-    // Give it some time to cache mDNS records.
-    sleep(Duration::from_secs(1));
-
-    // Disable the interface for the client.
-    println!("Disabling interface with IP: {:?}", ipv4_list);
-    client.disable_interface(ipv4_list).unwrap();
-
-    // Browse for the service.
+    let wait_for_service = |handle: &flume::Receiver<ServiceEvent>| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if let Ok(ServiceEvent::ServiceResolved(info)) =
+                handle.recv_timeout(Duration::from_millis(100))
+            {
+                if info.get_fullname() == fullname {
+                    return true;
+                }
+            }
+        }
+        false
+    };
+    // Establish a populated cache first; otherwise a failed initial discovery
+    // could make the disabled-interface assertion pass without testing removal.
     let handle = client.browse(ty_domain).unwrap();
-    let timeout = Duration::from_secs(1);
-    let mut resolved = false;
+    assert!(wait_for_service(&handle), "initial discovery must succeed");
 
-    // run till timeout and it should not resolve.
-    while let Ok(event) = handle.recv_timeout(timeout) {
-        if let ServiceEvent::ServiceResolved(info) = event {
-            println!(
-                "Resolved a service of {} addr(s): {:?}",
-                &info.get_fullname(),
-                info.get_addresses()
+    client.disable_interface(ipv4_list.clone()).unwrap();
+    let cached = client.browse_cache(ty_domain).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_millis(500);
+    while std::time::Instant::now() < deadline {
+        if let Ok(ServiceEvent::ServiceResolved(info)) =
+            cached.recv_timeout(Duration::from_millis(50))
+        {
+            assert_ne!(
+                info.get_fullname(),
+                &fullname,
+                "disabled interface retained addresses"
             );
-            resolved = true;
-            break;
         }
     }
 
-    // We cannot resolve the service because the interface is disabled.
-    assert!(!resolved);
-
-    // Clean up.
+    client.enable_interface(ipv4_list).unwrap();
+    let recovered = client.browse(ty_domain).unwrap();
+    assert!(wait_for_service(&recovered), "discovery must recover");
     server.shutdown().unwrap();
     client.shutdown().unwrap();
 }
@@ -815,7 +820,7 @@ fn test_disable_interface_cache() {
 #[test]
 fn service_with_invalid_addr_v4() {
     // Create a daemon
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     // Register a service without properties.
     let ty_domain = "_invalid-addr._tcp.local.";
@@ -872,7 +877,7 @@ fn service_with_invalid_addr_v4() {
 #[test]
 fn service_with_invalid_addr_v6() {
     // Create a daemon
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     // Register a service without properties.
     let ty_domain = "_invalid-addr._tcp.local.";
@@ -929,7 +934,7 @@ fn service_with_invalid_addr_v6() {
 #[test]
 fn service_with_loopback_addr() {
     // Create a daemon
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     d.enable_interface(IfKind::LoopbackV4)
         .expect("Failed to enable loopback interface");
@@ -999,7 +1004,7 @@ fn service_with_loopback_addr() {
 #[test]
 fn subtype() {
     // Create a daemon
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     // Register a service with a subdomain
     let subtype_domain = "_directory._sub._test-subtype._tcp.local.";
@@ -1059,7 +1064,7 @@ fn subtype() {
 #[test]
 fn test_service_name_check() {
     // Create a daemon for the server.
-    let server_daemon = ServiceDaemon::new().expect("Failed to create server daemon");
+    let server_daemon = common::new_daemon().expect("Failed to create server daemon");
     let monitor = server_daemon.monitor().unwrap();
     // Register a service with a name len > 15.
     let service_name_too_long = "_service-name-too-long._udp.local.";
@@ -1120,7 +1125,7 @@ fn test_service_name_check() {
 #[test]
 fn service_new_publish_after_browser() {
     let service_type = "_new-pub._udp.local.";
-    let daemon = ServiceDaemon::new().expect("Failed to create a new daemon");
+    let daemon = common::new_daemon().expect("Failed to create a new daemon");
 
     // First, starts the browser.
     let receiver = daemon.browse(service_type).unwrap();
@@ -1173,52 +1178,9 @@ fn service_new_publish_after_browser() {
     daemon.shutdown().unwrap();
 }
 
-fn is_apple_p2p_by_name(name: &str) -> bool {
-    let p2p_prefixes = ["awdl", "llw"];
-    p2p_prefixes.iter().any(|prefix| name.starts_with(prefix))
-}
-
+// Use the same interfaces as the daemon fixture, retaining IPv6 link-local.
 fn my_ip_interfaces() -> Vec<Interface> {
-    if_addrs::get_if_addrs()
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|i| {
-            if !i.is_oper_up() || i.is_loopback() || i.is_p2p() || is_apple_p2p_by_name(&i.name) {
-                None
-            } else {
-                match &i.addr {
-                    IfAddr::V4(ifv4) =>
-                    // Use a 'bind' to check if this is a valid IPv4 addr.
-                    {
-                        match std::net::UdpSocket::bind((ifv4.ip, 0)) {
-                            Ok(_) => Some(i),
-                            Err(e) => {
-                                println!("failed to bind {}: {e}, skipped.", ifv4.ip);
-                                None
-                            }
-                        }
-                    }
-                    IfAddr::V6(ifv6) =>
-                    // Use a 'bind' to check if this is a valid IPv6 addr.
-                    {
-                        let mut sock = std::net::SocketAddrV6::new(ifv6.ip, 0, 0, 0);
-                        if i.is_link_local() {
-                            // Only link local IPv6 address requires to specify scope_id
-                            sock.set_scope_id(i.index.unwrap_or(0));
-                        }
-
-                        match std::net::UdpSocket::bind(sock) {
-                            Ok(_) => Some(i),
-                            Err(e) => {
-                                println!("failed to bind {}: {e}, skipped.", ifv6.ip);
-                                None
-                            }
-                        }
-                    }
-                }
-            }
-        })
-        .collect()
+    common::interfaces()
 }
 
 /// Returns a made-up IPv4 address "net.1.1.1", where
@@ -1265,7 +1227,7 @@ fn ipv6_alter_net(if_addrs: &[Interface]) -> IpAddr {
 
 #[test]
 fn test_shutdown() {
-    let mdns = ServiceDaemon::new().unwrap();
+    let mdns = common::new_daemon().unwrap();
 
     // Check the status.
     let receiver = mdns.status().unwrap();
@@ -1306,7 +1268,7 @@ fn test_shutdown() {
 
 #[test]
 fn test_hostname_resolution() {
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
     let hostname = "my_host._tcp.local.";
     let interface = my_ip_interfaces()
         .into_iter()
@@ -1348,7 +1310,7 @@ fn test_hostname_resolution() {
 
 #[test]
 fn test_hostname_resolution_case_insensitive() {
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
     let hostname = "My_casE_HOST.local.";
     let interface = my_ip_interfaces()
         .into_iter()
@@ -1410,7 +1372,7 @@ fn test_hostname_resolution_case_insensitive() {
 
 #[test]
 fn hostname_resolution_timeout() {
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     let hostname = "nonexistent._tcp.local.";
 
@@ -1447,7 +1409,7 @@ fn hostname_resolution_timeout() {
 #[test]
 fn test_cache_flush_record() {
     // Create a daemon
-    let server = ServiceDaemon::new().expect("Failed to create server");
+    let server = common::new_daemon().expect("Failed to create server");
     let service = "_test_cache_ptr._udp.local.";
     let host_name = "my_host_tmp_cache_flush.local.";
 
@@ -1473,7 +1435,7 @@ fn test_cache_flush_record() {
     assert!(result.is_ok());
 
     // Browse for a service
-    let client = ServiceDaemon::new().expect("Failed to create client");
+    let client = common::new_daemon().expect("Failed to create client");
     let browse_chan = client.browse(service).unwrap();
     let timeout = Duration::from_secs(2);
     let mut resolved = false;
@@ -1557,7 +1519,7 @@ fn test_cache_flush_record() {
 #[test]
 fn test_cache_flush_remove_one_addr() {
     // Create a daemon
-    let server = ServiceDaemon::new().expect("Failed to create server");
+    let server = common::new_daemon().expect("Failed to create server");
     let service = "_remove_one_addr._udp.local.";
     let host_name = "remove_one_addr_host.local.";
 
@@ -1593,7 +1555,7 @@ fn test_cache_flush_remove_one_addr() {
     assert!(result.is_ok());
 
     // Browse for a service
-    let client = ServiceDaemon::new().expect("Failed to create client");
+    let client = common::new_daemon().expect("Failed to create client");
     let browse_chan = client.browse(service).unwrap();
     let timeout = Duration::from_secs(2);
     let mut resolved = false;
@@ -1658,7 +1620,7 @@ fn test_cache_flush_remove_one_addr() {
 #[test]
 fn test_cache_flush_srv() {
     // Create a daemon
-    let server = ServiceDaemon::new().expect("Failed to create server");
+    let server = common::new_daemon().expect("Failed to create server");
     let service = "_test_cache_srv._udp.local.";
     let old_host_name = "old_srv_host.local.";
     let new_host_name = "new_srv_host.local.";
@@ -1685,7 +1647,7 @@ fn test_cache_flush_srv() {
     assert!(result.is_ok());
 
     // Browse for the service
-    let client = ServiceDaemon::new().expect("Failed to create client");
+    let client = common::new_daemon().expect("Failed to create client");
     let browse_chan = client.browse(service).unwrap();
     let timeout = Duration::from_secs(2);
     let mut resolved = false;
@@ -1776,7 +1738,7 @@ fn test_cache_flush_srv() {
 #[test]
 fn test_known_answer_suppression() {
     // Create a daemon
-    let mdns_server = ServiceDaemon::new().expect("Failed to create mdns server");
+    let mdns_server = common::new_daemon().expect("Failed to create mdns server");
 
     // Register a service
     let ty_domain = "_known-answer._udp.local.";
@@ -1803,7 +1765,7 @@ fn test_known_answer_suppression() {
         .expect("Failed to register my service");
 
     // Browse the service
-    let client = ServiceDaemon::new().expect("Failed to create mdns client");
+    let client = common::new_daemon().expect("Failed to create mdns client");
     let browse_chan = client.browse(ty_domain).unwrap();
     let timeout = Duration::from_secs(2);
     let mut resolved = false;
@@ -1847,7 +1809,7 @@ fn test_known_answer_suppression() {
 
 #[test]
 fn test_domain_suffix_in_browse() {
-    let mdns_client = ServiceDaemon::new().expect("failed to create mDNS client");
+    let mdns_client = common::new_daemon().expect("failed to create mDNS client");
     assert!(mdns_client.browse("_service-name._tcp.local").is_err());
     assert!(mdns_client.browse("_service-name._tcp.local.").is_ok());
     mdns_client.shutdown().unwrap();
@@ -1865,7 +1827,7 @@ fn test_name_conflict_resolution() {
     let port = 5200;
 
     // Register the first service.
-    let server1 = ServiceDaemon::new().expect("failed to start server1");
+    let server1 = common::new_daemon().expect("failed to start server1");
 
     // Get a single IPv4 address
     let ip_addr1 = my_ip_interfaces()
@@ -1885,7 +1847,7 @@ fn test_name_conflict_resolution() {
     sleep(Duration::from_secs(1));
 
     // Register the second service.
-    let server2 = ServiceDaemon::new().expect("failed to start server2");
+    let server2 = common::new_daemon().expect("failed to start server2");
 
     // Modify the IPv4 address for the service.
     let IpAddr::V4(ipv4) = ip_addr1 else {
@@ -1917,7 +1879,7 @@ fn test_name_conflict_resolution() {
     assert!(name_changed);
 
     // Verify both services are resolved.
-    let client = ServiceDaemon::new().expect("failed to create mdns client");
+    let client = common::new_daemon().expect("failed to create mdns client");
     let receiver = client.browse(ty_domain).unwrap();
 
     let timeout = Duration::from_secs(3);
@@ -1965,7 +1927,7 @@ fn test_name_tiebreaking() {
     let port = 5200;
 
     // Register the first service.
-    let server1 = ServiceDaemon::new().expect("failed to start server1");
+    let server1 = common::new_daemon().expect("failed to start server1");
 
     // Get a single IPv4 address
     let ip_addr1 = my_ip_interfaces()
@@ -1982,7 +1944,7 @@ fn test_name_tiebreaking() {
         .expect("Failed to register service1");
 
     // Register the second service immediately to trigger tiebreaking.
-    let server2 = ServiceDaemon::new().expect("failed to start server2");
+    let server2 = common::new_daemon().expect("failed to start server2");
 
     // Modify the IPv4 address for the service.
     let IpAddr::V4(ipv4_2) = ip_addr1 else {
@@ -2020,7 +1982,7 @@ fn test_name_tiebreaking() {
     assert!(name_changed);
 
     // Verify both services are resolved.
-    let client = ServiceDaemon::new().expect("failed to create mdns client");
+    let client = common::new_daemon().expect("failed to create mdns client");
     let receiver = client.browse(ty_domain).unwrap();
 
     let timeout = Duration::from_secs(3);
@@ -2067,7 +2029,7 @@ fn test_name_conflict_3() {
     let port = 5200;
 
     // Register the first service.
-    let server1 = ServiceDaemon::new().expect("failed to start server1");
+    let server1 = common::new_daemon().expect("failed to start server1");
 
     // Get a single IPv4 address
     let ip_addr1 = my_ip_interfaces()
@@ -2087,7 +2049,7 @@ fn test_name_conflict_3() {
     sleep(Duration::from_secs(1));
 
     // Register the second service.
-    let server2 = ServiceDaemon::new().expect("failed to start server2");
+    let server2 = common::new_daemon().expect("failed to start server2");
 
     // Modify the IPv4 address for the service.
     let IpAddr::V4(ipv4) = ip_addr1 else {
@@ -2118,7 +2080,7 @@ fn test_name_conflict_3() {
     assert!(name_changed);
 
     // Register the third service
-    let server3 = ServiceDaemon::new().expect("failed to start server2");
+    let server3 = common::new_daemon().expect("failed to start server2");
 
     // Modify the IPv4 address for the service.
     let ip_addr3 = IpAddr::V4(Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3] + 2));
@@ -2146,7 +2108,7 @@ fn test_name_conflict_3() {
     assert!(name_changed);
 
     // Verify all services are resolved.
-    let client = ServiceDaemon::new().expect("failed to create mdns client");
+    let client = common::new_daemon().expect("failed to create mdns client");
     let receiver = client.browse(ty_domain).unwrap();
 
     let timeout = Duration::from_secs(3);
@@ -2195,7 +2157,7 @@ fn test_verify_srv() {
         .expect("valid service info");
     let fullname = service1.get_fullname().to_string();
 
-    let server1 = ServiceDaemon::new().expect("failed to start server");
+    let server1 = common::new_daemon().expect("failed to start server");
     server1
         .register(service1)
         .expect("Failed to register service1");
@@ -2204,7 +2166,7 @@ fn test_verify_srv() {
     sleep(Duration::from_secs(1));
 
     // start a client
-    let client = ServiceDaemon::new().expect("failed to start client");
+    let client = common::new_daemon().expect("failed to start client");
     let receiver = client.browse(ty_domain).unwrap();
     let timeout = Duration::from_secs(2);
 
@@ -2246,7 +2208,7 @@ fn test_multicast_loop_v4() {
     let port = 5200;
 
     // Register the first service.
-    let server = ServiceDaemon::new().expect("failed to start server");
+    let server = common::new_daemon().expect("failed to start server");
     server.set_multicast_loop_v4(false).unwrap();
 
     // Get a single IPv4 address
@@ -2271,7 +2233,7 @@ fn test_multicast_loop_v4() {
 
     // start a client i.e. querier.
     let mut resolved = false;
-    let client = ServiceDaemon::new().expect("failed to create mdns client");
+    let client = common::new_daemon().expect("failed to create mdns client");
     client.disable_interface(IfKind::All).unwrap();
     client.enable_interface(selection).unwrap();
 
@@ -2330,7 +2292,7 @@ fn test_multicast_loop_v6() {
     let port = 5200;
 
     // Register the first service.
-    let server = ServiceDaemon::new().expect("failed to start server");
+    let server = common::new_daemon().expect("failed to start server");
     server.set_multicast_loop_v6(false).unwrap();
 
     // Get a single IPv6 address
@@ -2355,7 +2317,7 @@ fn test_multicast_loop_v6() {
 
     // start a client i.e. querier.
     let mut resolved = false;
-    let client = ServiceDaemon::new().expect("failed to create mdns client");
+    let client = common::new_daemon().expect("failed to create mdns client");
     client.disable_interface(IfKind::All).unwrap();
     client.enable_interface(selection).unwrap();
 
@@ -2407,7 +2369,7 @@ fn test_multicast_loop_v6() {
 #[test]
 fn test_set_ip_check_interval() {
     // Create a daemon
-    let server = ServiceDaemon::new().expect("Failed to create server");
+    let server = common::new_daemon().expect("Failed to create server");
     let service = "_ip_check._udp.local.";
     let host_name = "test_ip_check_host.local.";
 
@@ -2513,7 +2475,7 @@ fn test_rfc6763_utf8_network_integration() {
     // This service will be registered and browsed to verify full functionality
 
     // Create a daemon
-    let d = ServiceDaemon::new().expect("Failed to create daemon");
+    let d = common::new_daemon().expect("Failed to create daemon");
 
     // Register a service with UTF-8, dots, and backslashes
     let ty_domain = "_utf8-network._tcp.local.";
@@ -2632,7 +2594,7 @@ fn test_goodbye_uses_conflict_resolved_name() {
     let port = 5200;
 
     // Register the first service.
-    let server1 = ServiceDaemon::new().expect("failed to start server1");
+    let server1 = common::new_daemon().expect("failed to start server1");
 
     // Get a single IPv4 address
     let ip_addr1 = my_ip_interfaces()
@@ -2651,7 +2613,7 @@ fn test_goodbye_uses_conflict_resolved_name() {
     sleep(Duration::from_secs(1));
 
     // Register the second service with the same names to force a conflict.
-    let server2 = ServiceDaemon::new().expect("failed to start server2");
+    let server2 = common::new_daemon().expect("failed to start server2");
     let server2_monitor = server2.monitor().unwrap();
 
     let IpAddr::V4(ipv4) = ip_addr1 else {
@@ -2690,7 +2652,7 @@ fn test_goodbye_uses_conflict_resolved_name() {
     let renamed_instance = renamed_instance.expect("service2 was not renamed");
 
     // Browse until the renamed instance is resolved.
-    let client = ServiceDaemon::new().expect("failed to create mdns client");
+    let client = common::new_daemon().expect("failed to create mdns client");
     let receiver = client.browse(ty_domain).unwrap();
 
     let timeout = Duration::from_secs(3);

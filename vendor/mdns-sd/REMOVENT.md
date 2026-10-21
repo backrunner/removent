@@ -28,8 +28,13 @@ Local changes:
   interface, so it does not race the initial announcement's multicast rate limit.
 - Custom-port daemons use their configured port to identify mDNS queries, keeping
   normal multicast and legacy unicast response paths distinct.
-- Integration fixtures count operational interfaces, isolate IPv4/IPv6 multicast
-  loop settings to their respective family, and wait for asynchronous SRV updates
+- Network fixtures use real IPv4/IPv6 loopback multicast, retaining link-local
+  IPv6 addresses, so hosted-runner LAN routing cannot disable the transport.
+  Missing loopback support fails the fixture instead of skipping its assertions.
+  Unit packet sockets explicitly select the outgoing multicast interface.
+  The disabled-interface test requires initial cache population, eviction after
+  interface removal, and recovery after reenabling the interface.
+  Integration fixtures isolate IPv4/IPv6 multicast loop settings to their respective family, and wait for asynchronous SRV updates
   before asserting the converged cache. Hostname scope checks select one interface.
   The parser and changelog have whitespace-only normalization.
 

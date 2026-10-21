@@ -52,6 +52,18 @@ jobs:
           name: website-browser-failures
           path: apps/website/test-results/
           retention-days: 7
+  mdns:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Show loopback transport
+        run: ifconfig lo0
+      - name: Check mDNS library, integration, and memory regressions
+        run: cargo test --manifest-path vendor/mdns-sd/Cargo.toml --locked -- --test-threads=1
+      - name: Check mDNS memory over loopback UDP
+        run: cargo run --manifest-path vendor/mdns-sd/Cargo.toml --locked --example memory_probe
   check:
     runs-on: macos-26
     timeout-minutes: 60
@@ -72,10 +84,6 @@ jobs:
       - run: python3 scripts/check_layout.py
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace -- --test-threads=1
-      - name: Check mDNS library, integration, and memory regressions
-        run: cargo test --manifest-path vendor/mdns-sd/Cargo.toml --locked -- --test-threads=1
-      - name: Check mDNS memory over loopback UDP
-        run: cargo run --manifest-path vendor/mdns-sd/Cargo.toml --locked --example memory_probe
       - run: python3 scripts/release/gen_latest.py --self-test
       - run: bash scripts/check.sh
       - run: xcrun swift test --package-path apps/tray
@@ -86,7 +94,7 @@ jobs:
       - name: Check installer
         run: xcrun swiftc -typecheck -target arm64-apple-macosx26.0 apps/installer/main.swift
   build:
-    needs: check
+    needs: [check, mdns]
     runs-on: macos-26
     timeout-minutes: 60
     steps:

@@ -58,9 +58,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Show loopback transport
-        run: ifconfig lo0
+      - name: Prepare IPv6 loopback multicast route
+        run: |
+          ifconfig lo0
+          netstat -rn -f inet6
+          python3 - <<'PY'
+          import subprocess
+          result = subprocess.run(
+              ["sudo", "route", "-n", "add", "-inet6", "-host", "ff02::fb%lo0", "-interface", "lo0"],
+              capture_output=True, text=True,
+          )
+          print(result.stdout, result.stderr)
+          if result.returncode and "File exists" not in result.stderr:
+              raise SystemExit(result.returncode)
+          PY
+          route -n get -inet6 ff02::fb%lo0
+          python3 scripts/qa/check_mdns_transport.py
       - name: Check mDNS library, integration, and memory regressions
+        env:
+          RUST_LOG: mdns_sd=trace
         run: cargo test --manifest-path vendor/mdns-sd/Cargo.toml --locked -- --test-threads=1
       - name: Check mDNS memory over loopback UDP
         run: cargo run --manifest-path vendor/mdns-sd/Cargo.toml --locked --example memory_probe

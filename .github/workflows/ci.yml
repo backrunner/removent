@@ -72,6 +72,10 @@ jobs:
       - run: python3 scripts/check_layout.py
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace -- --test-threads=1
+      - name: Check mDNS library, integration, and memory regressions
+        run: cargo test --manifest-path vendor/mdns-sd/Cargo.toml --locked -- --test-threads=1
+      - name: Check mDNS memory over loopback UDP
+        run: cargo run --manifest-path vendor/mdns-sd/Cargo.toml --locked --example memory_probe
       - run: python3 scripts/release/gen_latest.py --self-test
       - run: bash scripts/check.sh
       - run: xcrun swift test --package-path apps/tray

@@ -1,5 +1,6 @@
 [workspace]
 resolver = "3"
+exclude = ["vendor/mdns-sd"]
 members = [
     "apps/cli",
     "apps/daemon",
@@ -50,7 +51,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"]
 quinn = "0.11"
 rustls = { version = "0.23", default-features = false, features = ["std", "aws_lc_rs"] }
 rcgen = "0.14"
-mdns-sd = "0.21"
+# Keep the cache-lifetime patch active until an upstream release includes it.
+mdns-sd = "=0.21.5"
 spake2 = "0.4"
 ed25519-dalek = { version = "2", features = ["pem"] }
 rand = "0.10"
@@ -92,6 +94,9 @@ unwrap_used = "allow"
 [patch.crates-io]
 apple-cf = { path = "vendor/apple-cf" }
 videotoolbox = { path = "vendor/videotoolbox" }
+# Keep publisher-only mDNS listeners from retaining unrelated LAN records,
+# and expire orphaned discovery records independently of PTR associations.
+mdns-sd = { path = "vendor/mdns-sd" }
 
 # Chinese punctuation must stay attached when GPUI wraps text.
 gpui-pre = { path = "vendor/gpui" }

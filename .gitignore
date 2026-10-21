@@ -1,5 +1,6 @@
 # Rust build artifacts
 /target/
+/vendor/mdns-sd/target/
 
 # Swift build artifacts
 /apps/tray/.build/

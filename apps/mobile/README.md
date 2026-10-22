@@ -8,7 +8,13 @@ The controller supports native Removent/RVP, VNC / Apple Remote Desktop, and
 RDP connection forms. Native sessions follow the desktop host authentication policy: system account (default), pairing code,
 access password, authenticator OTP, or no authentication. System account authentication
 uses the username and login password of the account running Removent on the Mac;
-the controller first verifies the host certificate and never saves the login password. Policy and OTP setup live in
+the controller first verifies the host certificate. System account and access password prompts
+offer an opt-in Keychain switch. Credentials are saved only after a successful session and
+reused automatically for the same local identity, verified host certificate and authentication
+method. Edit a saved connection to update or remove them; cancelling the form does not save.
+Failed authentication preserves the stored credentials and asks you to edit the connection.
+OTP and pairing codes are never remembered. Native credentials stay separate from relay access
+passwords, bookmarks and iCloud data. Policy and OTP setup live in
 desktop Settings → Security; the mobile app prompts only for the required credential.
 Desktop Security settings also choose whether paired controllers must pair each connection.
 Enter a host-generated 12-digit connection code in the address field to connect by Bonjour on

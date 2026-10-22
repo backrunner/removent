@@ -147,7 +147,7 @@ test('download stays usable when the release lookup fails', async ({ page }, tes
   await ready(page, '/download');
   await expect(page.locator('.rv-release-meta')).toContainText('Live version lookup is unavailable.');
   await expect(page.locator('.rv-release .rv-primary')).toHaveAttribute('href', 'https://github.com/backrunner/removent/releases');
-  await expect(page.getByRole('link', { name: /v0.1.6/ })).toHaveAttribute('href', /v0\.1\.6$/);
+  await expect(page.getByRole('link', { name: /v0.1.9/ })).toHaveAttribute('href', /v0\.1\.9$/);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: testInfo.outputPath('download-mobile.png'), fullPage: true });
 });

@@ -13,7 +13,9 @@ description: "为 Apple 芯片 Mac 获取 Removent，免费开源，采用 Apach
 
 ## Stable 正式版
 
-[下载 v0.1.6 并查看版本说明](https://github.com/backrunner/removent/releases/tag/v0.1.6)。此版本改进远程画面的启动与恢复，提供每连接画质上限，并支持跨设备、跨协议的独立会话。独立 relay 的安装方式见[中继文档](/docs/relay)。
+[下载 v0.1.9 并查看版本说明](https://github.com/backrunner/removent/releases/tag/v0.1.9)。此版本会自动使用已存入钥匙串的凭据连接，可在连接表单中编辑凭据，并在设置中管理后台服务自启。独立 relay 的安装方式见[中继文档](/docs/relay)。
+
+登录窗口远程访问需要管理员授权安装。真实注销或重启、登录前画面与输入、进入用户会话后的交接仍未完成实机验收。此功能不包含 FileVault 启动前解锁。
 
 Stable 和 Beta 更新渠道均可将此前的版本升级到本次正式版。桌面 App 要求 Apple Silicon 和 macOS 26 或更新版本。CloudKit Production 记录交换已在同一台 Mac 的独立数据目录之间验证；Mac 与 iPhone 真机之间的同步仍待验收。
 

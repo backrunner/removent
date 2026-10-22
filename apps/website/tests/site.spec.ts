@@ -128,7 +128,7 @@ test('grouped documentation and mobile contents keep bilingual guides reachable'
   await page.locator('.rv-doc-shortcuts a[href="/docs/relay/"]').click();
   await expect(page.locator('.rv-docs-sidebar a[aria-current="page"]')).toHaveText('Private relay');
   await expect(page.locator('.rv-prose, .sd-prose').first()).toContainText('check_interval_secs = 86400');
-  await expect(page.locator('.rv-sidebar-release')).toHaveAttribute('href', /v0\.1\.8$/);
+  await expect(page.locator('.rv-sidebar-release')).toHaveAttribute('href', /v0\.1\.9$/);
   await page.screenshot({ path: testInfo.outputPath('relay-light.png'), fullPage: false });
   await page.locator('.sd-theme-toggle').click();
   await page.screenshot({ path: testInfo.outputPath('relay-dark.png'), fullPage: false });

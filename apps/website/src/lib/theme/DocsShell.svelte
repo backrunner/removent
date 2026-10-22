@@ -21,9 +21,9 @@
     <ScrollArea currentPath={page.routePath}>
       <nav><DocsNavigation items={navigationTree} currentPath={page.routePath} {context} /></nav>
     </ScrollArea>
-    <a class="rv-sidebar-release" href="https://github.com/backrunner/removent/releases/tag/v0.1.8">
+    <a class="rv-sidebar-release" href="https://github.com/backrunner/removent/releases/tag/v0.1.9">
       <span class="rv-release-label">{context.t('docs.release')}</span>
-      <strong>0.1.8</strong>
+      <strong>0.1.9</strong>
       <Icon name="arrow" size={14} />
     </a>
   </aside>

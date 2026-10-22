@@ -84,6 +84,7 @@ fn authentication_input_is_validated_by_host_mode_and_stale_generations_cannot_c
         engine
             .command(Command::Pin {
                 generation: 99,
+                remember: false,
                 pin: "correct-password".into()
             })
             .is_err()
@@ -92,6 +93,7 @@ fn authentication_input_is_validated_by_host_mode_and_stale_generations_cannot_c
         engine
             .command(Command::Pin {
                 generation: 0,
+                remember: false,
                 pin: "".into()
             })
             .is_err()
@@ -99,10 +101,11 @@ fn authentication_input_is_validated_by_host_mode_and_stale_generations_cannot_c
     engine
         .command(Command::Pin {
             generation: 0,
+            remember: false,
             pin: "correct-password".into(),
         })
         .unwrap();
-    assert_eq!(rx.try_recv().unwrap(), "correct-password");
+    assert_eq!(rx.try_recv().unwrap().value, "correct-password");
     let (tx, mut rx) = oneshot::channel();
     {
         let mut state = engine.shared.state.lock().unwrap();
@@ -113,6 +116,7 @@ fn authentication_input_is_validated_by_host_mode_and_stale_generations_cannot_c
         engine
             .command(Command::Pin {
                 generation: 0,
+                remember: false,
                 pin: "password".into()
             })
             .is_err()
@@ -120,10 +124,11 @@ fn authentication_input_is_validated_by_host_mode_and_stale_generations_cannot_c
     engine
         .command(Command::Pin {
             generation: 0,
+            remember: false,
             pin: "123456".into(),
         })
         .unwrap();
-    assert_eq!(rx.try_recv().unwrap(), "123456");
+    assert_eq!(rx.try_recv().unwrap().value, "123456");
 }
 
 #[test]

@@ -47,6 +47,8 @@ pub enum Command {
     Pin {
         generation: u64,
         pin: String,
+        #[serde(default)]
+        remember: bool,
     },
     Input {
         generation: u64,
@@ -100,7 +102,7 @@ pub struct State {
     recovery: removent_client::recovery::Recovery,
     input: Option<InputChannel>,
     control: Option<mpsc::Sender<ControlMsg>>,
-    pin: Option<oneshot::Sender<String>>,
+    pin: Option<oneshot::Sender<credentials::Answer>>,
     certificate: Option<oneshot::Sender<bool>>,
     auth_mode: removent_core::AuthenticationMode,
     #[cfg(target_os = "ios")]
@@ -435,7 +437,11 @@ impl Engine {
                     .map_err(|_| anyhow::anyhow!("Certificate confirmation expired"))?;
                 Ok(Value::Null)
             }
-            Command::Pin { generation, pin } => {
+            Command::Pin {
+                generation,
+                pin,
+                remember,
+            } => {
                 let mut s = self.shared.state.lock().unwrap();
                 ensure!(
                     s.auth_mode.valid_input(&pin),
@@ -445,7 +451,10 @@ impl Engine {
                 s.pin
                     .take()
                     .context("No pairing request is pending")?
-                    .send(pin)
+                    .send(credentials::Answer {
+                        value: pin,
+                        remember,
+                    })
                     .map_err(|_| anyhow::anyhow!("Pairing expired"))?;
                 Ok(Value::Null)
             }
@@ -526,6 +535,7 @@ impl Drop for Engine {
 mod tests;
 
 mod compatibility;
+pub(crate) mod credentials;
 mod native;
 use compatibility::{addresses, run};
 use native::run_native;

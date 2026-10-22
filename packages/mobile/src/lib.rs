@@ -4,6 +4,7 @@
 //! Swift. Returned buffers have explicit ownership and survive session teardown.
 //! The caller must free each result once and must not use a destroyed handle.
 
+mod credential_store;
 mod engine;
 mod request;
 
@@ -68,6 +69,31 @@ pub unsafe extern "C" fn rm_sync(path: *const c_char, command: *const c_char) ->
         Ok(Ok(value)) => json!({"ok":true,"value":value}),
         Ok(Err(error)) => json!({"ok":false,"error":error.to_string()}),
         Err(_) => json!({"ok":false,"error":"Sync storage failed"}),
+    })
+}
+
+/// Handle-independent credential storage; call on a background queue. Secrets
+/// are returned only to the transient editor, never to sync or bookmark data.
+/// # Safety
+/// Both arguments are valid NUL-terminated strings for the duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rm_native_credentials(
+    path: *const c_char,
+    command: *const c_char,
+) -> *mut c_char {
+    let result = std::panic::catch_unwind(|| -> anyhow::Result<_> {
+        let path = unsafe { input(path)? };
+        let command = unsafe { input(command)? };
+        anyhow::ensure!(command.len() <= 32 * 1024, "Command too large");
+        credential_store::dispatch(
+            &removent_core::DataPaths { root: path.into() },
+            serde_json::from_str(command)?,
+        )
+    });
+    string(match result {
+        Ok(Ok(value)) => json!({"ok":true,"value":value}),
+        Ok(Err(error)) => json!({"ok":false,"error":error.to_string()}),
+        Err(_) => json!({"ok":false,"error":"Credential storage failed"}),
     })
 }
 

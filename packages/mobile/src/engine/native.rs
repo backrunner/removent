@@ -146,7 +146,7 @@ pub(super) async fn run_native(
         },
         local_clip: if clipboard { Some(clip.clone()) } else { None },
     };
-    let pin_attempt = attempt.clone();
+    let pending: credentials::Pending = Default::default();
     attempt.progress("Negotiating");
     let destination = if let Some(route) = &request.relay {
         format!(
@@ -176,23 +176,31 @@ pub(super) async fn run_native(
             config(),
             None,
             None,
-            Some(Box::new(move |mode, pin| {
-                pin_attempt.update(|s| {
-                    s.pin = Some(pin);
-                    s.auth_mode = mode;
-                    s.event(
-                        json!({"type":"pin", "mode":mode, "generation":pin_attempt.generation}),
-                    );
-                });
-            })),
+            Some(credentials::prompt(
+                attempt.clone(),
+                expected.filter(|_| !trust.needs_confirmation && request.pairing_code.is_none()),
+                pending.clone(),
+            )),
             confirmation,
         )
-        .await?
+        .await
+        .map_err(|error| credentials::authentication_failure(error, &pending))?
     };
     let peer_pin = session
         .conn
         .peer_fingerprint()
         .context("Host certificate missing")?;
+    let authentication = pending.lock().unwrap().take();
+    if let Some(authentication) = authentication {
+        let notice = attempt.clone();
+        let local = identity.fingerprint_hex();
+        // Keychain latency must not delay decoded frames or audio.
+        tokio::spawn(async move {
+            if authentication.commit(local, peer_pin).await.is_err() {
+                notice.event(json!({"type":"notice", "code":"keychain_write_failed"}));
+            }
+        });
+    }
     *attempt.recovery.native.lock().unwrap() = Some(removent_client::recovery::NativeResume {
         token: session.resume_token.clone(),
         negotiated: session.negotiated.clone(),

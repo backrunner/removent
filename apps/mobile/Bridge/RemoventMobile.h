@@ -24,6 +24,8 @@ RMEngine *rm_create(const char *path, const char *name, char **error);
 char *rm_call(RMEngine *, const char *command);
 // Handle-independent, serialized by the Rust storage lock.
 char *rm_sync(const char *path, const char *command);
+// Handle-independent Keychain access; run off MainActor.
+char *rm_native_credentials(const char *path, const char *command);
 // Numeric Bonjour hosts only; shared local-interface filter. Null means hidden.
 char *rm_discovery_host(const char *addresses);
 char *rm_poll_event(RMEngine *);

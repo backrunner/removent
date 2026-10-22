@@ -6,6 +6,7 @@ struct SessionView: View {
     @State private var stats = false
     @State private var pin = ""
     @State private var systemUsername = ""
+    @State private var rememberCredentials = false
     @State private var certificateAlertPresented = false
     @State private var certificateAlert: CertificatePrompt?
     @State private var modifiers = 0
@@ -170,6 +171,7 @@ struct SessionView: View {
         .task(id: "\(model.needsPIN)-\(model.authenticationMode)") {
             pin = ""
             systemUsername = ""
+            rememberCredentials = false
             pinFocused = model.needsPIN && model.authenticationMode != "system_account"
             systemUsernameFocused = model.needsPIN && model.authenticationMode == "system_account"
         }
@@ -296,12 +298,16 @@ struct SessionView: View {
                                 .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
                                 .accessibilityIdentifier("otpAutofillHint")
                         }
+                        if model.authenticationMode == "system_account" || model.authenticationMode == "password" {
+                            Toggle(L("Remember credentials in Keychain", "记住凭据并存入钥匙串"), isOn: $rememberCredentials)
+                                .accessibilityIdentifier("rememberNativeCredentials")
+                        }
                         Button {
                             pinFocused = false
                             if model.authenticationMode == "system_account" {
-                                model.submitSystemAccount(username: systemUsername, password: pin)
-                            } else { model.submitPIN(pin) }
-                            pin = ""
+                                model.submitSystemAccount(username: systemUsername, password: pin, remember: rememberCredentials)
+                            } else { model.submitPIN(pin, remember: rememberCredentials) }
+                            pin = ""; systemUsername = ""; rememberCredentials = false
                         } label: {
                             Text(L("Connect", "连接")).frame(maxWidth: .infinity)
                         }

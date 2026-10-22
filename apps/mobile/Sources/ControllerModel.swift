@@ -53,6 +53,7 @@ final class ControllerModel: ObservableObject {
     var onFrame: ((CGImage) -> Void)?
     private var servicesStarted = false
     private var handle: OpaquePointer?
+    var credentialStoragePath: String?
     private var generation: UInt64 = 0
     private var displayLink: CADisplayLink?
     private var retryCommand: [String: Any]?
@@ -81,6 +82,7 @@ final class ControllerModel: ObservableObject {
             handle = rm_create(directory.path, UIDevice.current.name, &failure)
             if let failure { defer { rm_string_free(failure) }; throw MobileError.message(String(cString:failure)) }
             guard handle != nil else { throw MobileError.message("Controller unavailable") }
+            credentialStoragePath = directory.path
             try reload()
             let storagePath = directory.path
             cloudSync = ConnectionSyncService { command in
@@ -206,16 +208,16 @@ final class ControllerModel: ObservableObject {
             } else { disconnect(dismiss:false) }
         } catch { self.error = error.localizedDescription; certificatePrompt = nil }
     }
-    func submitSystemAccount(username: String, password: String) {
+    func submitSystemAccount(username: String, password: String, remember: Bool = false) {
         do {
             let data = try JSONEncoder().encode(["username": username.trimmingCharacters(in: .whitespacesAndNewlines), "password": password])
             guard let payload = String(data: data, encoding: .utf8) else { return }
-            submitPIN(payload)
+            submitPIN(payload, remember: remember)
         } catch { self.error = L("Check the username and password and try again.", "请检查用户名和密码后重试。") }
     }
-    func submitPIN(_ pin: String) {
+    func submitPIN(_ pin: String, remember: Bool = false) {
         do {
-            try call(["op":"pin", "generation":generation, "pin":pin]); needsPIN = false
+            try call(["op":"pin", "generation":generation, "pin":pin, "remember":remember]); needsPIN = false
             isConnecting = true; error = nil
             status = authenticationMode == "pairing_code" ? L("Waiting for the computer…", "正在等待电脑确认…") : L("Authenticating…", "正在验证身份…")
         } catch { self.error = error.localizedDescription }
@@ -353,7 +355,7 @@ final class ControllerModel: ObservableObject {
             let stages = ["Resolving":L("Finding computer…", "正在查找电脑…"),
                 "Connecting":L("Connecting…", "正在连接…"), "Negotiating":L("Negotiating session…", "正在协商会话…"),
                 "Authenticating":L("Authenticating…", "正在验证身份…"), "PreparingDesktop":L("Preparing desktop…", "正在准备桌面…"),
-                "Reconnecting":L("Reconnecting…", "正在重新连接…")]
+                "Reconnecting":L("Reconnecting…", "正在重新连接…"), "Pairing":L("Pairing…", "正在配对…")]
             status = stages[stage] ?? stage
             isConnecting = true
         case "ready":
@@ -386,10 +388,17 @@ final class ControllerModel: ObservableObject {
                     }
                 }
             }
+        case "notice":
+            error = event["code"] as? String == "keychain_read_failed"
+                ? L("Could not read Keychain. Enter the credentials again.", "无法读取钥匙串，请重新输入凭据。")
+                : L("Could not save credentials. Check Keychain access.", "无法保存凭据，请检查钥匙串权限。")
         case "closed":
             recovering = false; networkOverlay = false; networkOffline = false
             ready = false; needsPIN = false; certificatePrompt = nil; isConnecting = false; audio.stop(); UIApplication.shared.isIdleTimerDisabled = false
             status = L("Disconnected", "连接已断开"); error = event["error"] as? String
+            if error?.contains("saved_native_credentials_failed") == true {
+                error = L("Saved credentials were rejected. Close this session and edit the connection to update them.", "已保存的凭据未通过验证，请关闭会话并编辑连接以更新凭据。")
+            }
         default: break
         }
     }

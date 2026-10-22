@@ -205,6 +205,7 @@ struct ConnectionForm: View {
     @State private var failure: String?
     @State private var saveConnection = true
     @State private var connecting = false
+    @State private var loadingCredentials = false
     private enum Field: Hashable { case name, host, port, relayEndpoint, relayServerName, username, password, domain }
     @FocusState private var focused: Field?
 
@@ -307,6 +308,7 @@ struct ConnectionForm: View {
                             : (draft.useRelay ? L("Provided by the relay administrator, if required.", "仅在中继要求时填写，由管理员提供。") : L("Saved credentials are stored in Keychain.", "保存的凭据存放在系统钥匙串中。")))
                     }
                 }
+                NativeCredentialFields(credentials: $draft.nativeCredentials)
                 Section {
                     Toggle(draft.isPairingCode ? L("Remember this computer", "记住此电脑") : L("Save connection", "保存连接"), isOn: $saveConnection)
                         .accessibilityIdentifier("saveConnection")
@@ -326,7 +328,7 @@ struct ConnectionForm: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(PrimaryActionStyle()).controlSize(.large)
-                    .disabled(connecting || !hasHost).accessibilityIdentifier("connectButton")
+                    .disabled(connecting || loadingCredentials || !hasHost).accessibilityIdentifier("connectButton")
                 }
                 .padding(.horizontal, 20).padding(.vertical, 12)
                 .frame(maxWidth: 720).frame(maxWidth: .infinity)
@@ -344,8 +346,16 @@ struct ConnectionForm: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L("Save", "保存"), systemImage: "checkmark") {
-                        do { try model.save(draft); dismiss() } catch { failure = error.localizedDescription }
-                    }.labelStyle(.iconOnly).disabled(!hasHost || connecting || draft.isPairingCode)
+                        connecting = true; focused = nil
+                        Task { @MainActor in
+                            do {
+                                try model.validate(draft)
+                                try await model.saveNativeCredentials(draft)
+                                try model.save(draft); dismiss()
+                            } catch { failure = error.localizedDescription; connecting = false }
+                        }
+                    }.labelStyle(.iconOnly).disabled(!hasHost || connecting || loadingCredentials || draft.isPairingCode)
+                        .accessibilityIdentifier("saveConnectionButton")
                 }
             }
             .onChange(of: draft.protocol) { _, proto in
@@ -357,6 +367,25 @@ struct ConnectionForm: View {
             .onChange(of: draft.relayTransport) { _, _ in draft.relayFingerprint = "" }
             .onChange(of: draft.relayServerName) { _, _ in draft.relayFingerprint = "" }
             .onChange(of: draft.replaceSavedPassword) { _, _ in draft.password = "" }
+            .task(id: draft.nativeCredentialScope) {
+                draft.nativeCredentials = []; draft.nativeCredentialRequest = nil
+                guard draft.bookmarkID != nil, draft.protocol == .removent, !draft.isPairingCode, hasHost else {
+                    loadingCredentials = false; return
+                }
+                loadingCredentials = true
+                let snapshot = draft
+                do {
+                    let credentials = try await model.loadNativeCredentials(snapshot)
+                    guard !Task.isCancelled, draft.nativeCredentialScope == snapshot.nativeCredentialScope else { return }
+                    draft.nativeCredentials = credentials
+                    draft.nativeCredentialRequest = try snapshot.request(audio:false, clipboard:false)
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    failure = error.localizedDescription
+                }
+                loadingCredentials = false
+            }
+            .disabled(connecting)
         }
         .interactiveDismissDisabled(connecting)
     }
@@ -366,14 +395,17 @@ struct ConnectionForm: View {
         }.disabled(draft.bookmarkID != nil)
     }
     private func connect() {
-        do {
-            try model.validate(draft)
-            if saveConnection && !draft.isPairingCode { try model.save(draft) }
-            connecting = true; focused = nil
-            var submitted = draft; submitted.rememberAfterPairing = saveConnection
-            onConnect(submitted)
-            dismiss()
-        } catch { failure = error.localizedDescription }
+        connecting = true; focused = nil
+        Task { @MainActor in
+            do {
+                try model.validate(draft)
+                try await model.saveNativeCredentials(draft)
+                if saveConnection && !draft.isPairingCode { try model.save(draft) }
+                var submitted = draft; submitted.rememberAfterPairing = saveConnection
+                onConnect(submitted)
+                dismiss()
+            } catch { failure = error.localizedDescription; connecting = false }
+        }
     }
 }
 

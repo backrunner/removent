@@ -118,6 +118,12 @@ struct ConnectionDraft: Identifiable {
     var hostFingerprint = ""
     var replaceSavedPassword = false
     var rememberAfterPairing = false
+    var nativeCredentials: [NativeCredential] = []
+    var nativeCredentialRequest: [String: Any]?
+    var nativeCredentialScope: [String] {
+        [`protocol`.rawValue, host, port, String(useRelay), relayEndpoint, relayTransport,
+         relayServerName, String(verifyRelayCertificate), relayFingerprint, hostFingerprint]
+    }
     private var original: Bookmark?
 
     init() {}

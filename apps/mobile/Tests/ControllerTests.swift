@@ -3,6 +3,32 @@ import XCTest
 
 @MainActor
 final class ControllerTests: XCTestCase {
+    func testNativeCredentialEditingAndScopeNeverEnterConnectionPayload() throws {
+        var credential = NativeCredential(host:Array(repeating:1, count:32), mode:"system_account",
+            value:#"{"username":"owner","password":"old"}"#, remember:true)
+        XCTAssertEqual(credential.username, "owner")
+        credential.password = "new"; credential.username = "other"
+        XCTAssertEqual(credential.password, "new"); XCTAssertEqual(credential.username, "other")
+        var draft = ConnectionDraft(); draft.host = "mac.local"; draft.nativeCredentials = [credential]
+        let scope = draft.nativeCredentialScope
+        draft.videoQuality = .ultra
+        XCTAssertEqual(draft.nativeCredentialScope, scope)
+        let data = try JSONSerialization.data(withJSONObject:draft.request(audio:true, clipboard:true))
+        let text = String(decoding:data, as:UTF8.self)
+        XCTAssertFalse(text.contains("other")); XCTAssertFalse(text.contains("new"))
+        draft.port = "48689"
+        XCTAssertNotEqual(draft.nativeCredentialScope, scope)
+    }
+
+    func testSavedNativeAuthenticationFailureProvidesEditingRecovery() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let model = ControllerModel(storageDirectory:directory, startServices:false)
+        defer { model.disconnect(); try? FileManager.default.removeItem(at:directory) }
+        model.accept(["type":"closed", "generation":0, "error":"pairing failed: saved_native_credentials_failed"])
+        XCTAssertEqual(model.error, L("Saved credentials were rejected. Close this session and edit the connection to update them.", "已保存的凭据未通过验证，请关闭会话并编辑连接以更新凭据。"))
+        XCTAssertFalse(model.needsPIN)
+    }
+
     func testBonjourUsesSharedLocalAddressFilterAndKeepsRemoteAliases() {
         for address in ["127.0.0.1", "127.42.0.1", "::1", "::ffff:127.0.0.1", "0.0.0.0", "::"] {
             XCTAssertNil(BonjourDiscovery.remoteHost([address]))

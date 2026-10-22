@@ -26,7 +26,7 @@ fn main() -> anyhow::Result<()> {
 
 fn start(paths: DataPaths) -> anyhow::Result<()> {
     paths.ensure_layout().context(t!("error.init_data_dir"))?;
-    if std::env::args().any(|arg| arg == "--background")
+    if std::env::args().any(|arg| matches!(arg.as_str(), "--background" | "--login-window"))
         && removent_core::service_intent::is_stopped(&paths)?
     {
         return Ok(());

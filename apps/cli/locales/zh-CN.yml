@@ -53,6 +53,10 @@ help.daemon: |
     login-on        立即启动并开启登录时启动
     login-off       关闭登录时启动，保留当前服务
     service-status  查询登录启动、进程管理和连接状态（--json 可输出 JSON）
+    system-status   查询登录前自启及已授权控制端
+    system-enable   从当前配置安装或更新登录前服务（需要管理员权限）
+    system-update   更新授权设备和程序，保留自启状态（需要管理员权限）
+    system-disable  关闭登录前访问（需要管理员权限）
 
   status 只查询状态；后台服务不可用时会提示启动命令。
   终端默认显示易读结果，管道保持 JSON，--json 强制输出 JSON。

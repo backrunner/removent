@@ -4,6 +4,7 @@ mod appearance;
 mod otp;
 mod power;
 mod security;
+mod startup;
 
 impl HomeView {
     pub(super) fn render_settings_sidebar(&self, _window: &Window, cx: &mut Context<Self>) -> Div {
@@ -41,6 +42,8 @@ impl HomeView {
                         this.reset_authentication_form(window, cx);
                     }
                     this.settings_section = index;
+                    #[cfg(target_os = "macos")]
+                    this.engine.refresh_startup_settings();
                     cx.notify();
                 }));
             #[cfg(test)]
@@ -111,6 +114,7 @@ impl HomeView {
                         "settings.general",
                         "settings.general_description",
                     ))
+                    .children(self.render_startup_settings(cx))
                     .child(
                         form_group(cx).child(
                             row()

@@ -36,10 +36,25 @@ async fn main() -> std::process::ExitCode {
             Err(error) => output::report(error, false),
         };
     }
-    let settings = removent_core::Settings::load_strict(&paths).unwrap_or_default();
-    rust_i18n::set_locale(removent_core::resolve_locale(settings.language));
     let raw: Vec<String> = std::env::args().skip(1).collect();
-    let options = match args::parse(&raw) {
+    // Determine privileged management before reading any user-controlled file.
+    // A settings path may be a symlink or FIFO; root commands need only the
+    // bounded snapshot reader in system_service, not the ordinary settings loader.
+    let parsed = args::parse(&raw);
+    let system_management = matches!(&parsed,
+        Ok(options) if matches!(&options.command, args::Command::Daemon(action) if action.starts_with("system-")));
+    let settings = if system_management {
+        removent_core::Settings::default()
+    } else {
+        removent_core::Settings::load_strict(&paths).unwrap_or_default()
+    };
+    rust_i18n::set_locale(removent_core::resolve_locale(settings.language));
+    // Normal command errors must use the selected locale, not the preflight one.
+    let options = match if system_management {
+        parsed
+    } else {
+        args::parse(&raw)
+    } {
         Ok(options) => options,
         Err(error) => return output::report(error, false),
     };
@@ -55,8 +70,12 @@ async fn main() -> std::process::ExitCode {
         }
         _ => {}
     }
-    removent_core::logging::init_component_logging(&paths, "removent-cli", options.verbose);
-    removent_core::logging::install_panic_hook(&paths);
+    // Administrator service commands must not create root-owned logs through a
+    // user-writable data path (including symlinks). They report through stderr.
+    if !system_management {
+        removent_core::logging::init_component_logging(&paths, "removent-cli", options.verbose);
+        removent_core::logging::install_panic_hook(&paths);
+    }
     match run(
         options.command,
         &paths,

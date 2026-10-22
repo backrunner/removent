@@ -102,6 +102,9 @@ impl ConnectionDialog {
             relay_choices: Vec::new(),
             relay_secret_scope: None,
             relay_secret_task: None,
+            native_credentials: Vec::new(),
+            native_credential_scope: None,
+            native_credential_task: None,
             connecting: false,
             stage: ConnectionStage::Resolving,
             started: None,
@@ -126,6 +129,7 @@ impl ConnectionDialog {
             return;
         }
         self.step = Step::Details(protocol);
+        self.clear_native_credentials();
         self.via_relay = false;
         self.relay_secret_task = None;
         self.host.update(cx, |s, cx| {
@@ -156,6 +160,7 @@ impl ConnectionDialog {
             cx.emit(ConnectionDialogEvent::Close);
         } else {
             self.step = Step::Protocol;
+            self.clear_native_credentials();
             self.error = None;
             self.password
                 .update(cx, |s, cx| s.set_value("", window, cx));
@@ -237,7 +242,11 @@ impl ConnectionDialog {
                 &self.relay_server_name,
             ]
             .into_iter()
-            .any(|input| input.focus_handle(cx).is_focused(window));
+            .any(|input| input.focus_handle(cx).is_focused(window))
+                || self.native_credentials.iter().any(|fields| {
+                    fields.username.focus_handle(cx).is_focused(window)
+                        || fields.password.focus_handle(cx).is_focused(window)
+                });
             if self.focus.contains_focused(window, cx) || field_focused {
                 self.restore_focus = window.focused(cx);
                 window.focus(fallback, cx);
@@ -255,6 +264,7 @@ impl ConnectionDialog {
     }
 
     pub fn request(&self, cx: &gpui::App) -> Result<ConnectionRequest, String> {
+        self.native_credential_edits(cx)?;
         let Step::Details(protocol) = self.step else {
             return Err(String::new());
         };
@@ -395,6 +405,7 @@ impl ConnectionDialog {
             return;
         }
         self.saved_id = Some(saved.id.clone());
+        self.clear_native_credentials();
         self.video_quality = saved.video_quality;
         self.via_relay = saved.relay.is_some();
         self.relay_secret_task = None;

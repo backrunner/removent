@@ -86,6 +86,34 @@ pub(super) async fn cmd_daemon(action: &str, format: Format) -> anyhow::Result<(
     #[cfg(target_os = "macos")]
     if matches!(
         action,
+        "system-status" | "system-enable" | "system-update" | "system-disable"
+    ) {
+        let action = action.to_owned();
+        let status = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+            use removent_core::system_service;
+            match action.as_str() {
+                "system-enable" | "system-update" => {
+                    let exe = std::env::current_exe()?.canonicalize()?;
+                    let bundle = system_service::installed_bundle(&exe)
+                        .context("Use the CLI inside an installed, signed Removent.app")?;
+                    if action == "system-enable" {
+                        system_service::enable(&bundle, &paths)?;
+                    } else {
+                        system_service::update(&bundle, &paths)?;
+                    }
+                }
+                "system-disable" => system_service::disable()?,
+                _ => {}
+            }
+            system_service::status()
+        })
+        .await??;
+        terminal::render("system-status", &serde_json::to_value(status)?, format)?;
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    if matches!(
+        action,
         "start"
             | "ensure"
             | "stop"

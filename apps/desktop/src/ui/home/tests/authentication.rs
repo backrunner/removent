@@ -2,9 +2,7 @@ use super::*;
 
 #[cfg(target_os = "macos")]
 #[gpui::test]
-fn remembered_credentials_can_be_reviewed_and_forgotten_without_leaking_between_modes(
-    cx: &mut TestAppContext,
-) {
+fn manual_credentials_can_be_remembered_without_leaking_between_modes(cx: &mut TestAppContext) {
     cx.update(gpui_component::init);
     let directory = tempfile::tempdir().unwrap();
     let (commands, _rx) = tokio::sync::mpsc::channel(1);
@@ -46,20 +44,21 @@ fn remembered_credentials_can_be_reviewed_and_forgotten_without_leaking_between_
                     generation: view.engine.client_generation(),
                     mode,
                     tx,
-                    prefill: Some(crate::engine::AuthenticationAnswer {
-                        value,
-                        remember: true,
-                    }),
                 },
                 window,
                 cx,
             );
             assert_eq!(view.connection_stage, ConnectionStage::Authenticating);
+            assert!(!view.remember_auth);
+            assert!(view.pin_input.read(cx).value().is_empty());
+            assert!(view.auth_username_input.read(cx).value().is_empty());
             if mode == removent_core::AuthenticationMode::Otp {
-                assert!(!view.remember_auth);
-                assert!(view.pin_input.read(cx).value().is_empty());
-                assert!(view.auth_username_input.read(cx).value().is_empty());
                 view.cancel_pin(window, cx);
+            } else {
+                view.auth_username_input
+                    .update(cx, |s, cx| s.set_value("owner", window, cx));
+                view.pin_input
+                    .update(cx, |s, cx| s.set_value("test-password", window, cx));
             }
         });
         cx.run_until_parked();
@@ -72,7 +71,7 @@ fn remembered_credentials_can_be_reviewed_and_forgotten_without_leaking_between_
         cx.simulate_click(toggle.center(), Default::default());
         cx.run_until_parked();
         view.update_in(cx, |view, window, cx| {
-            assert!(!view.remember_auth);
+            assert!(view.remember_auth);
             assert_eq!(view.authentication_input(cx), expected);
             view.submit_pin(window, cx);
             assert!(view.pin_input.read(cx).value().is_empty());
@@ -80,7 +79,7 @@ fn remembered_credentials_can_be_reviewed_and_forgotten_without_leaking_between_
         });
         let answer = answer.try_recv().unwrap();
         assert_eq!(answer.value, expected);
-        assert!(!answer.remember);
+        assert!(answer.remember);
     }
 }
 
@@ -121,7 +120,6 @@ fn system_account_prompt_validates_both_fields_and_clears_credentials(cx: &mut T
                     UiEvent::ClientNeedsPin {
                         generation: view.engine.client_generation(),
                         mode: removent_core::AuthenticationMode::SystemAccount,
-                        prefill: None,
                         tx,
                     },
                     window,

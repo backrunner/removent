@@ -199,6 +199,7 @@ impl Render for ConnectionDialog {
                 }
 
                 if protocol == ConnectionProtocol::Removent {
+                    body = body.child(self.render_native_credentials(cx));
                     body = body.child(self.render_quality(cx));
                 }
 
@@ -546,7 +547,7 @@ impl Render for ConnectionDialog {
                                         Button::new("save-connection")
                                             .outline()
                                             .label(t!("action.save").to_string())
-                                            .disabled(busy)
+                                            .disabled(busy || self.native_credential_task.is_some())
                                             .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
                                     )
                                 })
@@ -563,7 +564,7 @@ impl Render for ConnectionDialog {
                                             })
                                             .to_string(),
                                         )
-                                        .disabled(busy)
+                                        .disabled(busy || self.native_credential_task.is_some())
                                         .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
                                 ),
                         ),

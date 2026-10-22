@@ -107,6 +107,8 @@ pub struct HomeView {
     /// the first StatusReport arrives.
     daemon_perms: Option<(bool, bool)>,
     daemon_power: Option<(bool, bool, Option<String>)>,
+    #[cfg(target_os = "macos")]
+    startup_error: Option<String>,
     /// Controlling in progress: waiting for SessionReady to open the viewer (stores the peer name).
     connecting: Option<String>,
     connection_stage: ConnectionStage,

@@ -83,6 +83,8 @@ impl HomeView {
         let sub_activation = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
                 this.engine.refresh_host_status();
+                #[cfg(target_os = "macos")]
+                this.engine.refresh_startup_settings();
                 cx.notify();
             }
         });
@@ -208,6 +210,8 @@ impl HomeView {
             daemon_online: false,
             daemon_perms: None,
             daemon_power: None,
+            #[cfg(target_os = "macos")]
+            startup_error: None,
             connecting: None,
             connection_stage: ConnectionStage::Resolving,
             cancelled_generation: None,

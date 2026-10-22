@@ -27,6 +27,9 @@ der = { version = "0.8", features = ["alloc", "pem", "std"] }
 pkcs8 = { version = "0.11", features = ["pem", "std"] }
 totp-rs = { version = "6", features = ["otpauth", "gen_secret"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+rustls = { workspace = true }
+
 [dev-dependencies]
 tempfile = "3"
 pkcs8 = { version = "0.11", features = ["pem", "std"] }

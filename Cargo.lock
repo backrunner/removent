@@ -7746,6 +7746,7 @@ dependencies = [
  "rand 0.10.3",
  "rcgen",
  "removent-proto",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.11.0",

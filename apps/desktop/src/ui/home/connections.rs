@@ -19,6 +19,9 @@ impl HomeView {
         if let Some(saved) = prefill {
             let password = self.engine.saved_password(saved);
             dialog.update(cx, |form, cx| form.prefill(saved, password, window, cx));
+            dialog.update(cx, |form, cx| {
+                form.load_native_credentials(self.engine.clone(), saved.to_request(), window, cx)
+            });
         }
         self.connection_subscription = Some(cx.subscribe_in(
             &dialog,
@@ -74,6 +77,10 @@ impl HomeView {
                             return;
                         }
                         let memo = dialog.read(cx).memo_name(cx);
+                        let Ok(credential_edits) = dialog.read(cx).native_credential_edits(cx)
+                        else {
+                            return;
+                        };
                         let id = dialog.read(cx).saved_id().map(str::to_owned);
                         let save_only = *event == ConnectionDialogEvent::Save;
                         let engine = this.engine.clone();
@@ -85,14 +92,23 @@ impl HomeView {
                         });
                         // Keychain and cross-process file locks must never park GPUI.
                         let save = cx.background_executor().spawn(async move {
-                            let result =
-                                engine.save_connection(&save_request, save_name, id.as_deref());
-                            (result, engine.saved_connections(), save_request)
+                            let credentials =
+                                engine.save_native_credentials(&save_request, &credential_edits);
+                            let credentials_failed = credentials.is_err();
+                            let result = credentials.and_then(|()| {
+                                engine.save_connection(&save_request, save_name, id.as_deref())
+                            });
+                            (
+                                result,
+                                engine.saved_connections(),
+                                save_request,
+                                credentials_failed,
+                            )
                         });
                         let dialog = dialog.clone();
                         this.connection_save_task =
                             Some(cx.spawn_in(window, async move |this, cx| {
-                                let (result, saved, request) = save.await;
+                                let (result, saved, request, credentials_failed) = save.await;
                                 let _ = this.update_in(cx, |this, window, cx| {
                                     this.connection_save_task = None;
                                     if this.connection_dialog.as_ref() != Some(&dialog) {
@@ -120,6 +136,13 @@ impl HomeView {
                                     dialog.update(cx, |form, cx| {
                                         form.set_save_warning(this.save_warning.clone(), cx)
                                     });
+                                    if credentials_failed {
+                                        dialog.update(cx, |form, cx| {
+                                            form.set_connecting(false, None, cx)
+                                        });
+                                        cx.notify();
+                                        return;
+                                    }
                                     if save_only {
                                         dialog.update(cx, |form, cx| {
                                             form.set_connecting(false, None, cx)

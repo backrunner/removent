@@ -67,25 +67,23 @@ impl Engine {
     /// Start IPC/hosting from the saved settings without changing the service
     /// switch. Explicit stop intent survives reopening the desktop.
     pub fn start_background_daemon(&self) {
-        let Some(bin) = Self::daemon_binary() else {
-            return;
-        };
         if std::env::var("REMOVENT_DEV_SUPERVISED").as_deref() == Ok("1") {
             return;
         }
-        let engine = self.clone();
-        self.rt.spawn_blocking(move || {
-            #[cfg(target_os = "macos")]
-            let result = removent_core::service::Service::new(engine.paths.clone(), bin)
-                .and_then(|service| service.ensure_running());
-            #[cfg(not(target_os = "macos"))]
-            let result = engine.spawn_daemon_process();
-            if let Err(e) = result {
-                let _ = engine.events_tx.send(UiEvent::Notice(
-                    t!("notice.daemon_spawn_failed", err = format!("{e:#}")).to_string(),
-                ));
-            }
-        });
+        #[cfg(target_os = "macos")]
+        self.start_managed_daemon();
+        #[cfg(not(target_os = "macos"))]
+        {
+            let engine = self.clone();
+            self.rt.spawn_blocking(move || {
+                let result = engine.spawn_daemon_process();
+                if let Err(e) = result {
+                    let _ = engine.events_tx.send(UiEvent::Notice(
+                        t!("notice.daemon_spawn_failed", err = format!("{e:#}")).to_string(),
+                    ));
+                }
+            });
+        }
     }
 
     /// Admission decision reply (forwarded to the daemon).

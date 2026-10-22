@@ -68,6 +68,10 @@ pub fn restrict(settings: &mut Settings) {
     settings.vnc_enabled = false;
     settings.audio_enabled_default = false;
     settings.update_check_enabled = false;
+    settings.authentication = removent_core::authentication::AuthenticationSettings {
+        mode: removent_core::AuthenticationMode::SystemAccount,
+        ..Default::default()
+    };
 }
 
 /// Check every ancestor; a safe leaf inside a replaceable directory is unsafe.
@@ -95,6 +99,10 @@ mod tests {
         };
         restrict(&mut settings);
         assert!(settings.paired_only && settings.window_server_capture);
+        assert_eq!(
+            settings.authentication.mode,
+            removent_core::AuthenticationMode::SystemAccount
+        );
         assert!(
             !settings.vnc_enabled
                 && !settings.audio_enabled_default

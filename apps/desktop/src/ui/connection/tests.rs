@@ -22,7 +22,9 @@ impl Render for TestSurface {
     }
 }
 
-fn setup(cx: &mut TestAppContext) -> (Entity<ConnectionDialog>, &mut gpui::VisualTestContext) {
+pub(super) fn setup(
+    cx: &mut TestAppContext,
+) -> (Entity<ConnectionDialog>, &mut gpui::VisualTestContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
         cx.bind_keys([

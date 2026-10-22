@@ -70,6 +70,9 @@ impl Cli {
                     Err(error) => panic!("CLI did not connect: {error}"),
                 }
             };
+            // macOS may inherit the listener's nonblocking flag. The fixture
+            // uses blocking I/O with a timeout after accept, just like its reader.
+            socket.set_nonblocking(false).unwrap();
             socket
                 .set_read_timeout(Some(Duration::from_secs(3)))
                 .unwrap();
@@ -308,6 +311,38 @@ fn service_status_remains_parseable_by_the_tray_without_starting_a_daemon() {
         assert_eq!(status[key], false, "{status}");
     }
     assert!(!cli.root.path().join("run/removentd.sock").exists());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn system_management_does_not_write_to_the_users_log_or_accept_development_code() {
+    let cli = Cli::new("En");
+    // Management must not block on the ordinary unbounded user settings reader.
+    let settings = cli.root.path().join("settings.toml");
+    std::fs::remove_file(&settings).unwrap();
+    let path = std::ffi::CString::new(settings.to_str().unwrap()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+    let output = cli.run(&["daemon", "system-status", "--json"]);
+    if output.status.success() {
+        let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(status["installed"].is_boolean());
+        assert!(status["enabled"].is_boolean());
+        assert!(status["approved_devices"].is_array());
+    }
+    for action in ["system-enable", "system-update"] {
+        let output = cli.run(&["daemon", action, "--json"]);
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(stderr(&output).contains("signed Removent.app"));
+    }
+    if unsafe { libc::geteuid() } != 0 {
+        let output = cli.run(&["daemon", "system-disable", "--json"]);
+        assert!(!output.status.success());
+        assert!(stderr(&output).contains("Administrator authorization"));
+    }
+    assert!(!cli.root.path().join("logs").exists());
+    assert!(!cli.root.path().join("panics").exists());
+    assert!(!cli.root.path().join("run").exists());
 }
 
 #[test]

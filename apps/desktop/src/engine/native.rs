@@ -111,7 +111,7 @@ pub(super) async fn run_client(
     let pin_request = credentials::prompt(
         attempt.clone(),
         local_identity.clone(),
-        // Invitations may replace the host identity; never prefill its old credential.
+        // Invitations may replace the host identity; never reuse its old credential.
         expected_host.filter(|_| pairing_code.is_none()),
         pending_auth.clone(),
     );
@@ -140,6 +140,7 @@ pub(super) async fn run_client(
         )
         .await
         .map_err(|error| {
+            let error = credentials::authentication_failure(error, &pending_auth);
             if direct {
                 connection_failure(error, addr)
             } else {

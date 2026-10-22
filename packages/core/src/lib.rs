@@ -17,6 +17,8 @@ pub mod removent_uri;
 pub mod service;
 pub mod service_intent;
 pub mod settings;
+#[cfg(target_os = "macos")]
+pub mod system_service;
 
 pub use adapt::{AdaptationController, QualityState, Sample};
 pub use clip::{

@@ -53,7 +53,6 @@ pub enum UiEvent {
     ClientNeedsPin {
         generation: usize,
         mode: removent_core::AuthenticationMode,
-        prefill: Option<AuthenticationAnswer>,
         tx: tokio::sync::oneshot::Sender<AuthenticationAnswer>,
     },
     ConfirmCertificate {
@@ -105,6 +104,8 @@ pub enum UiEvent {
     HostStateChanged(bool),
     /// daemon IPC connection state.
     DaemonOnline(bool),
+    #[cfg(target_os = "macos")]
+    StartupChanged,
     DaemonPower {
         enabled: bool,
         active: bool,
@@ -354,6 +355,8 @@ pub struct Engine {
     host_running: Arc<AtomicBool>,
     /// Last daemon-reported TCC permission snapshot (None until the first StatusReport).
     daemon_perms: Arc<Mutex<Option<(bool, bool)>>>,
+    #[cfg(target_os = "macos")]
+    startup: Arc<Mutex<StartupSettings>>,
     /// Auto-update shared state (status + manifest + staged bundle).
     update: Arc<Mutex<UpdateShared>>,
     /// Live controlled-side sessions (daemon IpcEvent SessionStarted/Ended,
@@ -379,6 +382,8 @@ impl Clone for Engine {
             daemon_online: self.daemon_online.clone(),
             host_running: self.host_running.clone(),
             daemon_perms: self.daemon_perms.clone(),
+            #[cfg(target_os = "macos")]
+            startup: self.startup.clone(),
             update: self.update.clone(),
             host_sessions: self.host_sessions.clone(),
         }
@@ -444,6 +449,8 @@ impl Engine {
             daemon_online: Arc::new(AtomicBool::new(false)),
             host_running: Arc::new(AtomicBool::new(false)),
             daemon_perms: Arc::new(Mutex::new(None)),
+            #[cfg(target_os = "macos")]
+            startup: Default::default(),
             update,
             host_sessions: Arc::new(AtomicUsize::new(0)),
         }
@@ -507,9 +514,13 @@ mod connection;
 mod credentials;
 mod daemon;
 mod daemon_events;
+#[cfg(target_os = "macos")]
+mod startup;
+#[cfg(target_os = "macos")]
+pub use startup::StartupSettings;
 mod input;
 mod native;
-pub use credentials::{AuthenticationAnswer, can_remember};
+pub use credentials::{AuthenticationAnswer, NativeCredential, NativeCredentialEdit, can_remember};
 /// daemon message dispatch: responses update state, events become UiEvent.
 /// Audio forwarding must stop even when the UI aborts the connection task.
 /// Translate common VNC failures while keeping uncommon protocol details available.

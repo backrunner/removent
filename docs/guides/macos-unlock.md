@@ -1,5 +1,11 @@
 # macOS remote unlock investigation (2026-09-20)
 
+Update (2026-10-22): the desktop now provides system-service installation,
+disable and authorization refresh in **Settings → General**. See
+[macOS startup](macos-startup.md) for the packaged CLI and current management
+workflow. The historical Python installer below is retained for reference;
+signed-install and real login-screen acceptance remain separate requirements.
+
 Remote-control authentication and macOS account unlock are different operations.
 The account password must be entered into the operating system's login UI (or
 Apple's supported SSH FileVault flow), after the remote transport is authorized.

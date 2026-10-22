@@ -204,7 +204,10 @@ impl Service {
             let previous = std::fs::read(&self.login_file).ok();
             crate::settings::atomic_write(&self.login_file, plist.as_bytes())?;
             crate::service_intent::set_stopped(&self.paths, false)?;
-            if let Err(error) = self.start_locked() {
+            if let Err(error) = self
+                .checked(&["enable", &self.target()])
+                .and_then(|_| self.start_locked())
+            {
                 if let Some(previous) = previous {
                     crate::settings::atomic_write(&self.login_file, &previous)?;
                 } else {

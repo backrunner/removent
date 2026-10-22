@@ -47,6 +47,8 @@ impl Render for HomeView {
                 {
                     this.reset_authentication_form(window, cx);
                     this.settings_open = !this.settings_open;
+                    #[cfg(target_os = "macos")]
+                    this.engine.refresh_startup_settings();
                     window.focus(&this.focus, cx);
                     cx.notify();
                 }

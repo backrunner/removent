@@ -141,6 +141,10 @@ See the [macOS unlock investigation](macos-unlock.md) for login-window service
 requirements and Apple's macOS 26+ Apple-silicon SSH FileVault unlock path. That
 system feature does not make this user-session RVP daemon available at preboot.
 
+The separate [pre-login startup setting](macos-startup.md) manages the
+administrator-installed LoginWindow agent. Its signed-install capture/input
+acceptance is independent of the user-session lifecycle checks in this guide.
+
 ## Server-only operation
 
 The desktop clears its permission snapshot while

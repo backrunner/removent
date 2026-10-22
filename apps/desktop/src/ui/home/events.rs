@@ -159,9 +159,7 @@ impl HomeView {
                 self.set_status(t!("trust.waiting").to_string(), StatusTone::Info);
                 window.focus(&self.focus, cx);
             }
-            UiEvent::ClientNeedsPin {
-                tx, mode, prefill, ..
-            } => {
+            UiEvent::ClientNeedsPin { tx, mode, .. } => {
                 self.set_connection_stage(
                     if mode == removent_core::AuthenticationMode::PairingCode {
                         ConnectionStage::Pairing
@@ -198,25 +196,6 @@ impl HomeView {
                 self.pin_dialog = Some(PinDialog::Entry(tx));
                 // Start from an empty field and hand it the keyboard focus.
                 self.clear_pin_input(window, cx);
-                if crate::engine::can_remember(mode)
-                    && let Some(prefill) = prefill
-                    && mode.valid_input(&prefill.value)
-                {
-                    self.remember_auth = prefill.remember;
-                    if mode == removent_core::AuthenticationMode::SystemAccount {
-                        if let Some(credentials) =
-                            removent_proto::SystemCredentials::decode(&prefill.value)
-                        {
-                            self.auth_username_input
-                                .update(cx, |s, cx| s.set_value(credentials.username, window, cx));
-                            self.pin_input
-                                .update(cx, |s, cx| s.set_value(credentials.password, window, cx));
-                        }
-                    } else {
-                        self.pin_input
-                            .update(cx, |s, cx| s.set_value(prefill.value, window, cx));
-                    }
-                }
                 let focus = if mode == removent_core::AuthenticationMode::SystemAccount {
                     self.auth_username_input.focus_handle(cx)
                 } else {
@@ -383,6 +362,23 @@ impl HomeView {
                     // drop it so the dialog does not hang forever.
                     self.admission = None;
                     self.set_status(t!("status.daemon_offline").to_string(), StatusTone::Warn);
+                }
+            }
+            #[cfg(target_os = "macos")]
+            UiEvent::StartupChanged => {
+                let state = self.engine.startup_settings();
+                if let Some(error) = &state.error {
+                    self.set_status(error.clone(), StatusTone::Warn);
+                } else if !state.busy
+                    && self
+                        .startup_error
+                        .as_ref()
+                        .is_some_and(|error| self.status == *error)
+                {
+                    self.set_status(t!("status.ready").to_string(), StatusTone::Info);
+                }
+                if !state.busy {
+                    self.startup_error = state.error;
                 }
             }
             UiEvent::DaemonPower {

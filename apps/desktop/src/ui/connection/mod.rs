@@ -58,6 +58,9 @@ pub struct ConnectionDialog {
     relay_choices: Vec<SavedConnection>,
     relay_secret_scope: Option<(String, String, String, RelayTransport, String, bool)>,
     relay_secret_task: Option<gpui::Task<()>>,
+    native_credentials: Vec<credentials::CredentialFields>,
+    native_credential_scope: Option<credentials::CredentialScope>,
+    native_credential_task: Option<gpui::Task<()>>,
     connecting: bool,
     stage: ConnectionStage,
     started: Option<Instant>,
@@ -91,6 +94,7 @@ pub fn stage_label(stage: ConnectionStage) -> String {
     .to_string()
 }
 
+mod credentials;
 mod form;
 mod quality;
 mod render;

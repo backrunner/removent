@@ -53,6 +53,10 @@ help.daemon: |
     login-on        Start now and enable launch at login
     login-off       Disable launch at login, keeping the current service running
     service-status  Inspect login, process management and connectivity (use --json for scripts)
+    system-status   Inspect pre-login startup and approved controllers
+    system-enable   Install/update pre-login access from this profile (administrator required)
+    system-update   Update approved devices and binaries, preserving the startup setting (administrator required)
+    system-disable  Disable pre-login access (administrator required)
 
   status only queries state; an unavailable service prints a startup command.
   Terminal results are readable; pipes retain JSON. --json forces JSON.

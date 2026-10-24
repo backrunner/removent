@@ -114,6 +114,9 @@ impl ViewerView {
         if self.engine.client_generation() != self.session_generation {
             return;
         }
+        if std::mem::take(&mut self.scrolling) {
+            self.engine.send_input_scroll(0, 0., 0., ScrollPhase::Ended);
+        }
         let modifiers = self.sent_modifiers;
         for vk_code in self.pressed_keys.drain() {
             self.engine

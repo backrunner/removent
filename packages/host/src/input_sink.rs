@@ -76,6 +76,13 @@ pub struct RealInputSink {
     /// scale/origin conversion. None = wire coords are physical pixels.
     capture_dims: std::sync::Mutex<Option<(u32, u32)>>,
     capture_display: std::sync::atomic::AtomicU64,
+    injection: std::sync::Mutex<SessionInjection>,
+}
+
+#[derive(Default)]
+struct SessionInjection {
+    mouse: removent_input::mouse::MouseInjector,
+    keyboard: removent_input::keyboard::KeyboardInjector,
 }
 
 impl RealInputSink {
@@ -83,6 +90,7 @@ impl RealInputSink {
         Self {
             capture_dims: std::sync::Mutex::new(None),
             capture_display: std::sync::atomic::AtomicU64::new(0),
+            injection: Default::default(),
         }
     }
 }
@@ -123,7 +131,9 @@ impl InputSink for RealInputSink {
             },
             None => (x_px as f64, y_px as f64),
         };
-        removent_input::inject_mouse(kind, x_pt, y_pt)
+        let mut injection = self.injection.lock().unwrap();
+        let modifiers = injection.keyboard.modifiers;
+        injection.mouse.inject(kind, x_pt, y_pt, modifiers)
     }
     fn key(
         &self,
@@ -132,7 +142,11 @@ impl InputSink for RealInputSink {
         kind: KeyKind,
         unicode: Option<char>,
     ) -> Result<(), String> {
-        removent_input::inject_key(vk_code, modifiers, kind, unicode)
+        self.injection
+            .lock()
+            .unwrap()
+            .keyboard
+            .inject(vk_code, modifiers, kind, unicode)
     }
     fn scroll(
         &self,
@@ -151,10 +165,11 @@ impl InputSink for RealInputSink {
             .map(|g| g.dpi())
             .unwrap_or(96.0);
         let px_per_mm = dpi / 25.4;
-        removent_input::inject_scroll_pixels(
+        removent_input::keyboard::inject_scroll_with_modifiers(
             dx_mm as f64 * px_per_mm,
             dy_mm as f64 * px_per_mm,
             phase,
+            self.injection.lock().unwrap().keyboard.modifiers,
         )
     }
 
@@ -178,9 +193,13 @@ pub struct InputReleaseTracker {
     mod_keys: std::collections::HashSet<u16>,
     buttons: u8,
     last_pos: Option<(u64, f32, f32)>,
+    scrolling: Option<u64>,
 }
 
 impl InputReleaseTracker {
+    pub fn note_scroll(&mut self, display_id: u64, phase: ScrollPhase) {
+        self.scrolling = (phase != ScrollPhase::Ended).then_some(display_id);
+    }
     pub fn note_key(&mut self, vk_code: u16, modifiers: KeyModifiers, kind: KeyKind) {
         match kind {
             KeyKind::Down => {
@@ -232,6 +251,9 @@ impl InputReleaseTracker {
     /// Injects key-up / button-up for everything currently held, then clears
     /// the tracked state. Injection errors are ignored (teardown path).
     pub fn release_all(&mut self, sink: &dyn InputSink) {
+        if let Some(display_id) = self.scrolling.take() {
+            let _ = sink.scroll(display_id, 0., 0., ScrollPhase::Ended);
+        }
         let keys: Vec<u16> = self.keys.drain().collect();
         for vk in keys {
             let _ = sink.key(vk, KeyModifiers::empty(), KeyKind::Up, None);

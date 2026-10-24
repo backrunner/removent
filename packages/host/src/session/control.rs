@@ -118,6 +118,9 @@ pub fn spawn_control_pump(
         let work = async {
             let mut last_kf: Option<std::time::Instant> = None;
             let mut input_bucket = TokenBucket::new(INPUT_RATE_LIMIT_PER_SEC);
+            // Motion must not consume the budget needed for clicks/typing.
+            // Excess transitions terminate explicitly rather than losing a down.
+            let mut transition_bucket = TokenBucket::new(INPUT_RATE_LIMIT_PER_SEC);
             let mut remote_sample: Option<(std::time::Instant, Sample)> = None;
             let mut input_geometry: Option<(u32, u32)> = None;
             let mut sample_tick = tokio::time::interval(Duration::from_millis(250));
@@ -196,9 +199,15 @@ pub fn spawn_control_pump(
                                         kind,
                                         MouseKind::LeftUp | MouseKind::RightUp | MouseKind::MiddleUp
                                     );
-                                    if !bypass && !input_bucket.try_take() {
-                                        tracing::warn!("input rate limit exceeded, dropping mouse event");
-                                        continue;
+                                    if !bypass {
+                                        if matches!(kind, MouseKind::LeftDown | MouseKind::RightDown | MouseKind::MiddleDown) {
+                                            if !transition_bucket.try_take() {
+                                                tracing::warn!("input transition rate limit exceeded, closing session");
+                                                break;
+                                            }
+                                        } else if !input_bucket.try_take() {
+                                            continue;
+                                        }
                                     }
                                     cleanup.tracker.note_mouse(display_id, x_px, y_px, kind);
                                     if let Some(input) = deps.input.as_ref()
@@ -215,9 +224,9 @@ pub fn spawn_control_pump(
                                     // Key releases and modifier state changes bypass
                                     // the rate limiter (stuck keys otherwise).
                                     let bypass = matches!(kind, KeyKind::Up | KeyKind::FlagsChanged);
-                                    if !bypass && !input_bucket.try_take() {
-                                        tracing::warn!("input rate limit exceeded, dropping key event");
-                                        continue;
+                                    if !bypass && !transition_bucket.try_take() {
+                                        tracing::warn!("input transition rate limit exceeded, closing session");
+                                        break;
                                     }
                                     cleanup.tracker.note_key(vk_code, modifiers, kind);
                                     if let Some(input) = deps.input.as_ref()
@@ -237,6 +246,7 @@ pub fn spawn_control_pump(
                                         tracing::warn!("input rate limit exceeded, dropping scroll event");
                                         continue;
                                     }
+                                    cleanup.tracker.note_scroll(display_id, phase);
                                     if let Some(input) = deps.input.as_ref()
                                         && let Err(e) = input.scroll(display_id, dx_mm, dy_mm, phase)
                                     {

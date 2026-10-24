@@ -1,5 +1,6 @@
 use super::*;
 mod capture;
+mod interactions;
 mod resolution;
 
 #[tokio::test]

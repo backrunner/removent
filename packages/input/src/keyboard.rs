@@ -27,7 +27,7 @@ fn source() -> Result<core_graphics::event_source::CGEventSource, String> {
         .map_err(|_| "event source create failed".to_string())
 }
 
-fn flags_of(mods: KeyModifiers) -> CGEventFlags {
+pub(crate) fn flags_of(mods: KeyModifiers) -> CGEventFlags {
     let mut f = CGEventFlags::CGEventFlagNull;
     if mods.contains(KeyModifiers::SHIFT) {
         f |= CGEventFlags::CGEventFlagShift;
@@ -105,60 +105,110 @@ pub fn inject_key(
     kind: KeyKind,
     unicode: Option<char>,
 ) -> Result<(), String> {
-    let unicode = key_text(vk_code, modifiers, unicode);
-    if vk_code == UNICODE_ONLY_VK && unicode.is_none() {
-        return Ok(());
+    if let Some(event) = make_key_event(vk_code, modifiers, kind, unicode, false)? {
+        event.post(CGEventTapLocation::HID);
     }
-    match kind {
-        KeyKind::FlagsChanged => {
-            // Modifier key's own state change: macOS FlagsChanged does not
-            // distinguish down/up; infer the direction from whether the event's
-            // flags have this modifier set.
-            let flags = flags_of_flags_changed(modifiers);
-            let down = modifier_flag_of_vk(vk_code)
-                .map(|f| flags.intersects(f))
-                .unwrap_or(true);
-            let event = CGEvent::new_keyboard_event(source()?, vk_code, down)
-                .map_err(|_| "flags event create failed".to_string())?;
-            event.set_flags(flags);
+    Ok(())
+}
+
+/// Per-session repeat and modifier state, also used for mouse/scroll flags.
+#[derive(Default)]
+pub struct KeyboardInjector {
+    pressed: std::collections::HashSet<u16>,
+    pub modifiers: KeyModifiers,
+}
+
+impl KeyboardInjector {
+    pub fn inject(
+        &mut self,
+        vk: u16,
+        mods: KeyModifiers,
+        kind: KeyKind,
+        text: Option<char>,
+    ) -> Result<(), String> {
+        if let Some(event) = self.build(vk, mods, kind, text)? {
             event.post(CGEventTapLocation::HID);
-            Ok(())
         }
-        KeyKind::Down | KeyKind::Up => {
-            let down = kind == KeyKind::Down;
-            // UNICODE_ONLY_VK carries no physical key; CGEvent cannot express a
-            // keycode-less event, so post with vk 0 and let the unicode string
-            // carry the character (same injection as the old vk-0 fallback).
-            let vk = if vk_code == UNICODE_ONLY_VK {
-                0
-            } else {
-                vk_code
-            };
-            let event = CGEvent::new_keyboard_event(source()?, vk, down)
-                .map_err(|_| "keyboard event create failed".to_string())?;
-            event.set_flags(flags_of(modifiers));
-            if let Some(c) = unicode {
-                let mut buf = [0u16; 2];
-                event.set_string_from_utf16_unchecked(c.encode_utf16(&mut buf));
+        Ok(())
+    }
+
+    fn build(
+        &mut self,
+        vk: u16,
+        mods: KeyModifiers,
+        kind: KeyKind,
+        text: Option<char>,
+    ) -> Result<Option<CGEvent>, String> {
+        let repeat = kind == KeyKind::Down && self.pressed.contains(&vk);
+        let event = make_key_event(vk, mods, kind, text, repeat)?;
+        if event.is_some() {
+            self.modifiers = mods;
+            match kind {
+                KeyKind::Down => {
+                    self.pressed.insert(vk);
+                }
+                KeyKind::Up => {
+                    self.pressed.remove(&vk);
+                }
+                KeyKind::FlagsChanged => {}
             }
-            event.post(CGEventTapLocation::HID);
-            Ok(())
         }
+        Ok(event)
     }
 }
 
-/// Construction check (not posted): verifies the event can be created.
-pub fn build_key(vk_code: u16, modifiers: KeyModifiers, kind: KeyKind) -> Result<(), String> {
-    let src = source()?;
-    let down = matches!(kind, KeyKind::Down);
-    let ev = CGEvent::new_keyboard_event(src, vk_code, down)
+fn make_key_event(
+    vk_code: u16,
+    modifiers: KeyModifiers,
+    kind: KeyKind,
+    unicode: Option<char>,
+    repeat: bool,
+) -> Result<Option<CGEvent>, String> {
+    let unicode = key_text(vk_code, modifiers, unicode);
+    if vk_code == UNICODE_ONLY_VK && unicode.is_none() {
+        return Ok(None);
+    }
+    let flags = if kind == KeyKind::FlagsChanged {
+        flags_of_flags_changed(modifiers)
+    } else {
+        flags_of(modifiers)
+    };
+    let down = if kind == KeyKind::FlagsChanged {
+        modifier_flag_of_vk(vk_code).is_some_and(|f| flags.intersects(f))
+    } else {
+        kind == KeyKind::Down
+    };
+    let vk = if vk_code == UNICODE_ONLY_VK {
+        0
+    } else {
+        vk_code
+    };
+    let event = CGEvent::new_keyboard_event(source()?, vk, down)
         .map_err(|_| "keyboard event create failed".to_string())?;
-    ev.set_flags(flags_of(modifiers));
-    Ok(())
+    if kind == KeyKind::FlagsChanged {
+        event.set_type(core_graphics::event::CGEventType::FlagsChanged);
+    }
+    event.set_flags(flags);
+    event.set_integer_value_field(
+        core_graphics::event::EventField::KEYBOARD_EVENT_AUTOREPEAT,
+        i64::from(repeat),
+    );
+    if let Some(c) = unicode {
+        let mut buf = [0u16; 2];
+        event.set_string_from_utf16_unchecked(c.encode_utf16(&mut buf));
+    }
+    Ok(Some(event))
+}
+
+/// Construction check (not posted), using the same path as injection.
+pub fn build_key(vk_code: u16, modifiers: KeyModifiers, kind: KeyKind) -> Result<(), String> {
+    make_key_event(vk_code, modifiers, kind, None, false).map(|_| ())
 }
 
 /// `kCGScrollWheelEventScrollPhase` (not exported by core-graphics).
 const SCROLL_WHEEL_EVENT_SCROLL_PHASE: core_graphics::event::CGEventField = 99;
+const SCROLL_WHEEL_EVENT_FIXED_PT_DELTA_AXIS_1: core_graphics::event::CGEventField = 93;
+const SCROLL_WHEEL_EVENT_FIXED_PT_DELTA_AXIS_2: core_graphics::event::CGEventField = 94;
 
 fn cg_scroll_phase(phase: ScrollPhase) -> i64 {
     // CGScrollPhase: None=0, Began=1, Changed=2, Ended=4 (IOHID phase semantics).
@@ -171,34 +221,31 @@ fn cg_scroll_phase(phase: ScrollPhase) -> i64 {
 
 /// Injects a pixel-level scroll wheel event. The protocol-level millimeter
 /// amount is converted by the host engine using the target display's DPI before
-/// being passed in. PIXEL units + double-precision pointDelta preserve
-/// sub-pixel precision; `phase` passes the scroll phase through so the receiver
-/// can synthesize momentum/elastic scrolling.
+/// being passed in. PIXEL units and fixed-point deltas retain fractional input;
+/// `phase` preserves gesture boundaries for the receiving application.
 pub fn inject_scroll_pixels(dx_px: f64, dy_px: f64, phase: ScrollPhase) -> Result<(), String> {
-    let src = source()?;
-    let event = CGEvent::new_scroll_event(
-        src,
-        core_graphics::event::ScrollEventUnit::PIXEL,
-        2,
-        -(dy_px.round() as i32),
-        -(dx_px.round() as i32),
-        0,
-    )
-    .map_err(|_| "scroll event create failed".to_string())?;
-    use core_graphics::event::EventField;
-    event.set_double_value_field(EventField::SCROLL_WHEEL_EVENT_POINT_DELTA_AXIS_1, -dy_px);
-    event.set_double_value_field(EventField::SCROLL_WHEEL_EVENT_POINT_DELTA_AXIS_2, -dx_px);
-    event.set_integer_value_field(EventField::SCROLL_WHEEL_EVENT_IS_CONTINUOUS, 1);
-    event.set_integer_value_field(SCROLL_WHEEL_EVENT_SCROLL_PHASE, cg_scroll_phase(phase));
+    inject_scroll_with_modifiers(dx_px, dy_px, phase, KeyModifiers::empty())
+}
+
+pub fn inject_scroll_with_modifiers(
+    dx_px: f64,
+    dy_px: f64,
+    phase: ScrollPhase,
+    modifiers: KeyModifiers,
+) -> Result<(), String> {
+    let event = make_scroll_event(dx_px, dy_px, phase, modifiers)?;
     event.post(CGEventTapLocation::HID);
     Ok(())
 }
 
-/// Construction check (not posted).
-pub fn build_scroll(dx_px: f64, dy_px: f64, phase: ScrollPhase) -> Result<(), String> {
-    let src = source()?;
-    let ev = CGEvent::new_scroll_event(
-        src,
+fn make_scroll_event(
+    dx_px: f64,
+    dy_px: f64,
+    phase: ScrollPhase,
+    modifiers: KeyModifiers,
+) -> Result<CGEvent, String> {
+    let event = CGEvent::new_scroll_event(
+        source()?,
         core_graphics::event::ScrollEventUnit::PIXEL,
         2,
         -(dy_px.round() as i32),
@@ -207,16 +254,122 @@ pub fn build_scroll(dx_px: f64, dy_px: f64, phase: ScrollPhase) -> Result<(), St
     )
     .map_err(|_| "scroll event create failed".to_string())?;
     use core_graphics::event::EventField;
-    ev.set_double_value_field(EventField::SCROLL_WHEEL_EVENT_POINT_DELTA_AXIS_1, -dy_px);
-    ev.set_double_value_field(EventField::SCROLL_WHEEL_EVENT_POINT_DELTA_AXIS_2, -dx_px);
-    ev.set_integer_value_field(EventField::SCROLL_WHEEL_EVENT_IS_CONTINUOUS, 1);
-    ev.set_integer_value_field(SCROLL_WHEEL_EVENT_SCROLL_PHASE, cg_scroll_phase(phase));
-    Ok(())
+    event.set_flags(flags_of(modifiers));
+    // Point-delta fields are integers; writing doubles silently truncates them.
+    // Fractional values belong in the documented 16.16 fixed-point fields.
+    event.set_integer_value_field(
+        EventField::SCROLL_WHEEL_EVENT_POINT_DELTA_AXIS_1,
+        -(dy_px.round() as i64),
+    );
+    event.set_integer_value_field(
+        EventField::SCROLL_WHEEL_EVENT_POINT_DELTA_AXIS_2,
+        -(dx_px.round() as i64),
+    );
+    event.set_double_value_field(SCROLL_WHEEL_EVENT_FIXED_PT_DELTA_AXIS_1, -dy_px);
+    event.set_double_value_field(SCROLL_WHEEL_EVENT_FIXED_PT_DELTA_AXIS_2, -dx_px);
+    event.set_integer_value_field(EventField::SCROLL_WHEEL_EVENT_IS_CONTINUOUS, 1);
+    event.set_integer_value_field(SCROLL_WHEEL_EVENT_SCROLL_PHASE, cg_scroll_phase(phase));
+    Ok(event)
+}
+
+/// Construction check (not posted), using the same path as injection.
+pub fn build_scroll(dx_px: f64, dy_px: f64, phase: ScrollPhase) -> Result<(), String> {
+    make_scroll_event(dx_px, dy_px, phase, KeyModifiers::empty()).map(|_| ())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn modifiers_are_flags_changed_and_repeat_resets_after_release() {
+        use core_graphics::event::{CGEventType, EventField};
+        let mut keyboard = KeyboardInjector::default();
+        for (vk, mods, flag) in [
+            (
+                0x37,
+                KeyModifiers::COMMAND,
+                CGEventFlags::CGEventFlagCommand,
+            ),
+            (0x38, KeyModifiers::SHIFT, CGEventFlags::CGEventFlagShift),
+            (
+                0x3b,
+                KeyModifiers::CONTROL,
+                CGEventFlags::CGEventFlagControl,
+            ),
+            (
+                0x3a,
+                KeyModifiers::OPTION,
+                CGEventFlags::CGEventFlagAlternate,
+            ),
+            (
+                0x39,
+                KeyModifiers::CAPS_LOCK,
+                CGEventFlags::CGEventFlagAlphaShift,
+            ),
+            (
+                0x3f,
+                KeyModifiers::FUNCTION,
+                CGEventFlags::CGEventFlagSecondaryFn,
+            ),
+        ] {
+            let down = keyboard
+                .build(vk, mods, KeyKind::FlagsChanged, None)
+                .unwrap()
+                .unwrap();
+            assert_eq!(down.get_type() as u32, CGEventType::FlagsChanged as u32);
+            assert!(down.get_flags().contains(flag));
+            assert_eq!(keyboard.modifiers, mods);
+            let up = keyboard
+                .build(vk, KeyModifiers::empty(), KeyKind::FlagsChanged, None)
+                .unwrap()
+                .unwrap();
+            assert_eq!(up.get_type() as u32, CGEventType::FlagsChanged as u32);
+            assert!(!up.get_flags().contains(flag));
+        }
+        for (kind, repeat) in [
+            (KeyKind::Down, 0),
+            (KeyKind::Down, 1),
+            (KeyKind::Up, 0),
+            (KeyKind::Down, 0),
+        ] {
+            let event = keyboard
+                .build(0, KeyModifiers::SHIFT, kind, Some('A'))
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                event.get_integer_value_field(EventField::KEYBOARD_EVENT_AUTOREPEAT),
+                repeat
+            );
+            assert!(event.get_flags().contains(CGEventFlags::CGEventFlagShift));
+        }
+    }
+
+    #[test]
+    fn scroll_preserves_fractional_deltas_direction_phases_and_flags() {
+        use core_graphics::event::CGEventType;
+        for (phase, value) in [
+            (ScrollPhase::Began, 1),
+            (ScrollPhase::Changed, 2),
+            (ScrollPhase::Ended, 4),
+        ] {
+            let event = make_scroll_event(1.25, -2.5, phase, KeyModifiers::CONTROL).unwrap();
+            assert_eq!(event.get_type() as u32, CGEventType::ScrollWheel as u32);
+            assert_eq!(
+                event.get_double_value_field(SCROLL_WHEEL_EVENT_FIXED_PT_DELTA_AXIS_1),
+                2.5
+            );
+            assert_eq!(
+                event.get_double_value_field(SCROLL_WHEEL_EVENT_FIXED_PT_DELTA_AXIS_2),
+                -1.25
+            );
+            assert_eq!(
+                event.get_integer_value_field(SCROLL_WHEEL_EVENT_SCROLL_PHASE),
+                value
+            );
+            assert!(event.get_flags().contains(CGEventFlags::CGEventFlagControl));
+        }
+    }
 
     #[test]
     fn control_keys_keep_physical_semantics_and_text_keeps_client_layout() {

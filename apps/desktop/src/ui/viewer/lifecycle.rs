@@ -38,6 +38,7 @@ impl ViewerView {
                     this.clip_clear_task = None;
                     this.pressed_keys.clear();
                     this.buttons = 0;
+                    this.scrolling = false;
                     cx.notify();
                     window.refresh();
                 });
@@ -104,6 +105,7 @@ impl ViewerView {
                         if state != removent_client::recovery::State::Connected {
                             this.pressed_keys.clear();
                             this.buttons = 0;
+                            this.scrolling = false;
                             this.sent_modifiers = KeyModifiers::empty();
                             this.clip_clear_task = None;
                         }
@@ -151,6 +153,7 @@ impl ViewerView {
             ended: false,
             focus,
             buttons: 0,
+            scrolling: false,
             sent_modifiers: KeyModifiers::empty(),
             pressed_keys: HashSet::new(),
             last_mouse: None,

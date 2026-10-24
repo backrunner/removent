@@ -9,6 +9,91 @@ struct Fixture {
     _directory: tempfile::TempDir,
 }
 
+#[gpui::test]
+fn scroll_positions_the_pointer_and_focus_loss_ends_the_gesture(cx: &mut TestAppContext) {
+    let (mut fixture, cx) = setup(cx);
+    cx.simulate_resize(size(px(1000.), px(700.)));
+    cx.run_until_parked();
+    cx.simulate_event(gpui::ScrollWheelEvent {
+        position: point(px(600.), px(350.)),
+        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-10.))),
+        touch_phase: TouchPhase::Started,
+        modifiers: Default::default(),
+    });
+    assert!(matches!(
+        fixture.commands.try_recv().unwrap(),
+        ControlMsg::MouseEvent {
+            kind: MouseKind::Moved,
+            ..
+        }
+    ));
+    assert!(matches!(
+        fixture.commands.try_recv().unwrap(),
+        ControlMsg::ScrollEvent {
+            phase: ScrollPhase::Began,
+            ..
+        }
+    ));
+    cx.update(|_, cx| {
+        fixture
+            .viewer
+            .update(cx, |view, _| view.release_held_inputs())
+    });
+    assert!(matches!(
+        fixture.commands.try_recv().unwrap(),
+        ControlMsg::ScrollEvent {
+            phase: ScrollPhase::Ended,
+            dx_mm: 0.,
+            dy_mm: 0.,
+            ..
+        }
+    ));
+    cx.update(|_, cx| {
+        fixture
+            .viewer
+            .update(cx, |view, _| view.release_held_inputs())
+    });
+    assert!(fixture.commands.try_recv().is_err());
+}
+
+#[gpui::test]
+fn consecutive_clicks_are_forwarded_as_complete_pairs(cx: &mut TestAppContext) {
+    let (mut fixture, cx) = setup(cx);
+    cx.simulate_resize(size(px(1000.), px(700.)));
+    cx.run_until_parked();
+    for _ in 0..2 {
+        cx.simulate_mouse_down(
+            point(px(600.), px(350.)),
+            MouseButton::Left,
+            Default::default(),
+        );
+        cx.simulate_mouse_up(
+            point(px(600.), px(350.)),
+            MouseButton::Left,
+            Default::default(),
+        );
+    }
+    for _ in 0..2 {
+        assert!(matches!(
+            fixture.commands.try_recv().unwrap(),
+            ControlMsg::MouseEvent {
+                kind: MouseKind::LeftDown,
+                buttons: 1,
+                ..
+            }
+        ));
+        assert!(matches!(
+            fixture.commands.try_recv().unwrap(),
+            ControlMsg::MouseEvent {
+                kind: MouseKind::LeftUp,
+                buttons: 0,
+                ..
+            }
+        ));
+    }
+    assert!(fixture.commands.try_recv().is_err());
+}
+
 fn setup(cx: &mut TestAppContext) -> (Fixture, &mut VisualTestContext) {
     cx.update(|cx| {
         gpui_component::init(cx);

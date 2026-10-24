@@ -135,7 +135,12 @@ impl Render for ViewerView {
                     // Only scroll when the pointer is over the remote picture; the wire
                     // event carries no position (the host scrolls at its own cursor,
                     // which tracks our forwarded mouse moves).
+                    let ending =
+                        matches!(ev.touch_phase, TouchPhase::Ended | TouchPhase::Cancelled);
                     if this.frame_px(ev.position, window, false).is_none() {
+                        if ending && std::mem::take(&mut this.scrolling) {
+                            this.engine.send_input_scroll(0, 0., 0., ScrollPhase::Ended);
+                        }
                         return;
                     }
                     // The protocol carries millimetres; convert logical px at 96 dpi
@@ -152,6 +157,8 @@ impl Render for ViewerView {
                         TouchPhase::Moved => ScrollPhase::Changed,
                         TouchPhase::Ended | TouchPhase::Cancelled => ScrollPhase::Ended,
                     };
+                    this.forward_mouse(ev.position, MouseKind::Moved, window);
+                    this.scrolling = !ending;
                     this.engine.send_input_scroll(0, dx_mm, dy_mm, phase);
                 }),
             )

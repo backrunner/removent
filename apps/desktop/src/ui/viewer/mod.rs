@@ -72,6 +72,7 @@ pub struct ViewerView {
     /// Currently held remote mouse buttons (bit0 left, bit1 right, bit2 middle),
     /// mirrored into every outbound mouse event.
     buttons: u8,
+    scrolling: bool,
     /// Modifier state last forwarded to the host; ModifiersChanged events are diffed
     /// against it to derive per-modifier FlagsChanged key events.
     sent_modifiers: KeyModifiers,

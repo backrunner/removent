@@ -1,3 +1,4 @@
+mod clipboard;
 use super::*;
 use removent_net::{ControlCodec, PinState, make_client_endpoint, make_server_endpoint};
 use removent_proto::{AudioParams, CodecId, VideoParams};

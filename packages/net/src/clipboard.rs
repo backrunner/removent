@@ -9,7 +9,25 @@ use tokio::sync::{mpsc, watch};
 const MAGIC: &[u8; 4] = b"CLP1";
 const TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_WIRE: usize = removent_core::clip::MAX_CLIPBOARD_BYTES + 128;
-pub type ClipboardSender = watch::Sender<Option<ControlMsg>>;
+#[derive(Clone)]
+pub struct ClipboardSender {
+    snapshots: watch::Sender<Option<ControlMsg>>,
+    reliable: mpsc::Sender<ControlMsg>,
+}
+
+impl ClipboardSender {
+    /// Paste snapshots must survive replacement of the background sync slot.
+    /// The caller waits for the peer's ClipboardAck before sending the key.
+    pub async fn send_reliable(&self, message: ControlMsg) -> Result<()> {
+        if !valid_snapshot(&message) {
+            return Err(NetError::Rejected("invalid clipboard snapshot".into()));
+        }
+        self.reliable
+            .send(message)
+            .await
+            .map_err(|_| NetError::Rejected("clipboard sender closed".into()))
+    }
+}
 
 pub struct ClipboardReader {
     incoming: mpsc::Receiver<ControlMsg>,
@@ -28,13 +46,33 @@ impl ClipboardReader {
     /// The session must already have accepted its control/pairing streams.
     pub fn new(connection: RvpConnection) -> (Self, ClipboardSender) {
         let (outgoing, mut snapshots) = watch::channel(None::<ControlMsg>);
+        let (reliable, mut paste) = mpsc::channel::<ControlMsg>(1);
         let (incoming_tx, incoming) = mpsc::channel(1);
         let conn = connection.clone();
         let sender = tokio::spawn(async move {
-            while snapshots.changed().await.is_ok() {
-                let Some(message) = snapshots.borrow_and_update().clone() else {
+            let mut paste_seq: Option<u32> = None;
+            loop {
+                let (message, reliable) = tokio::select! {
+                    biased;
+                    Some(message) = paste.recv() => (message, true),
+                    result = snapshots.changed() => {
+                        if result.is_err() { break; }
+                        let Some(message) = snapshots.borrow_and_update().clone() else { continue };
+                        (message, false)
+                    }
+                };
+                let ControlMsg::ClipboardSync { seq, .. } = &message else {
                     continue;
                 };
+                // A poll snapshot can have been queued before a forced paste but
+                // reach this task later. Never let it overwrite the pasted text.
+                if !reliable && paste_seq.is_some_and(|last| (*seq).wrapping_sub(last) as i32 <= 0)
+                {
+                    continue;
+                }
+                if reliable {
+                    paste_seq = Some(*seq);
+                }
                 let Ok(wire) = encode_control(&message) else {
                     continue;
                 };
@@ -95,7 +133,10 @@ impl ClipboardReader {
                 incoming,
                 tasks: vec![sender, receiver],
             },
-            outgoing,
+            ClipboardSender {
+                snapshots: outgoing,
+                reliable,
+            },
         )
     }
 
@@ -112,7 +153,7 @@ pub fn enqueue(sender: &ClipboardSender, message: ControlMsg) -> Result<()> {
         return Err(NetError::Rejected("invalid clipboard snapshot".into()));
     }
     // Only the newest unsent snapshot matters; in-flight transfer stays bounded.
-    sender.send_replace(Some(message));
+    sender.snapshots.send_replace(Some(message));
     Ok(())
 }
 

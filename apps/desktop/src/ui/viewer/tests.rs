@@ -10,6 +10,36 @@ struct Fixture {
 }
 
 #[gpui::test]
+fn command_v_reaches_native_input_as_paired_paste_keys(cx: &mut TestAppContext) {
+    let (mut fixture, cx) = setup(cx);
+    cx.simulate_keystrokes("cmd-v");
+    // GPUI's keystroke helper emits key-down only; exercise the release too.
+    cx.simulate_event(gpui::KeyUpEvent {
+        keystroke: Keystroke::parse("cmd-v").unwrap(),
+    });
+    let events: Vec<_> = std::iter::from_fn(|| fixture.commands.try_recv().ok()).collect();
+    let paste_keys: Vec<_> = events
+        .iter()
+        .filter_map(|message| {
+            if let ControlMsg::KeyEvent {
+                vk_code: 9,
+                modifiers,
+                kind,
+                unicode,
+            } = message
+            {
+                assert!(modifiers.contains(KeyModifiers::COMMAND));
+                assert!(unicode.is_none(), "paste must remain a shortcut");
+                Some(*kind)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(paste_keys, [KeyKind::Down, KeyKind::Up]);
+}
+
+#[gpui::test]
 fn scroll_positions_the_pointer_and_focus_loss_ends_the_gesture(cx: &mut TestAppContext) {
     let (mut fixture, cx) = setup(cx);
     cx.simulate_resize(size(px(1000.), px(700.)));

@@ -14,15 +14,6 @@ pub(super) fn build_session(
     }
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<ControlMsg>(64);
     let (input_tx, mut input_rx) = crate::input_queue::channel();
-    let input_commands = cmd_tx.clone();
-    let input_forwarder = tokio::spawn(async move {
-        while let Some(event) = input_rx.recv().await {
-            if input_commands.send(event.message).await.is_err() {
-                break;
-            }
-            input_rx.record_sent(event.queued_at, true);
-        }
-    });
     let (decoded_bgra_tx, decoded_bgra_rx) = removent_core::latest::channel();
     let (decoded_pcm_tx, decoded_pcm_rx) = mpsc::channel(128);
 
@@ -62,6 +53,54 @@ pub(super) fn build_session(
         )
     });
 
+    let (mut clipboard, clipboard_tx) = removent_net::clipboard::ClipboardReader::new(conn.clone());
+    let paste_ack = Arc::new(Mutex::new(None::<(u32, oneshot::Sender<()>)>));
+    let input_commands = cmd_tx.clone();
+    let input_clip = cfg.local_clip.clone();
+    let input_state = clip_state.clone();
+    let input_clipboard = clipboard_tx.clone();
+    let input_paste_ack = paste_ack.clone();
+    let input_conn = conn.clone();
+    let input_forwarder = tokio::spawn(async move {
+        while let Some(event) = input_rx.recv().await {
+            if is_paste(&event.message)
+                && let (Some(clip), Some(state)) = (&input_clip, &input_state)
+            {
+                let snapshot = match state.snapshot(clip.as_ref(), true) {
+                    Ok(Some(snapshot)) => snapshot,
+                    // Unsupported/oversized content must not paste stale remote text.
+                    _ => {
+                        tracing::warn!("paste skipped: local text clipboard unavailable");
+                        input_rx.record_sent(event.queued_at, false);
+                        continue;
+                    }
+                };
+                let ControlMsg::ClipboardSync { seq, .. } = &snapshot else {
+                    unreachable!()
+                };
+                let (tx, rx) = oneshot::channel();
+                *input_paste_ack.lock().unwrap() = Some((*seq, tx));
+                let delivered = tokio::time::timeout(Duration::from_secs(5), async {
+                    input_clipboard.send_reliable(snapshot).await.ok()?;
+                    rx.await.ok()
+                })
+                .await;
+                if !matches!(delivered, Ok(Some(()))) {
+                    // Closing triggers the host's held-input cleanup. Never send
+                    // a paste after a failed/expired clipboard transfer.
+                    input_conn
+                        .inner()
+                        .close(0u32.into(), b"clipboard paste timed out");
+                    break;
+                }
+            }
+            if input_commands.send(event.message).await.is_err() {
+                break;
+            }
+            input_rx.record_sent(event.queued_at, true);
+        }
+    });
+
     let (closed_tx, closed) = oneshot::channel();
     let cleanup = PumpCleanup {
         conn: conn.clone(),
@@ -72,14 +111,11 @@ pub(super) fn build_session(
     };
     let clean_end = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let pump_clean_end = clean_end.clone();
-    let clipboard_conn = conn.clone();
     let pump = tokio::spawn(async move {
         let _cleanup = cleanup;
-        let (mut clipboard, clipboard_tx) =
-            removent_net::clipboard::ClipboardReader::new(clipboard_conn);
         let mut writer =
             removent_net::control_writer::ControlWriter::with_clipboard(sink, clipboard_tx);
-        let local_suppress = std::sync::atomic::AtomicU64::new(0);
+        let fallback_clip_state = ClipSyncState::new(&removent_core::MemoryClipboard::default());
         loop {
             tokio::select! {
                 result = writer.progress(), if writer.has_pending() => {
@@ -93,13 +129,13 @@ pub(super) fn build_session(
                             ControlMsg::ClipboardSync { seq, format, data } => {
                                 if format == removent_proto::ClipFormat::TextUtf8
                                     && let Some(clip) = local_clip.as_ref() {
-                                    let suppress: &std::sync::atomic::AtomicU64 = pump_clip_state
+                                    let state = pump_clip_state
                                         .as_ref()
-                                        .map(|s| &s.suppress_cc)
-                                        .unwrap_or(&local_suppress);
+                                        .map(Arc::as_ref)
+                                        .unwrap_or(&fallback_clip_state);
                                     if let Err(e) = removent_core::apply_incoming_clip(
                                         clip.as_ref(),
-                                        suppress,
+                                        state,
                                         &data,
                                     ) {
                                         tracing::warn!(err=%e, "clipboard apply failed");
@@ -111,6 +147,14 @@ pub(super) fn build_session(
                                 // is disabled or unavailable on this side.
                                 if writer.enqueue(ControlMsg::ClipboardAck { seq }).is_err() {
                                     break;
+                                }
+                            }
+                            ControlMsg::ClipboardAck { seq } => {
+                                let mut pending = paste_ack.lock().unwrap();
+                                if pending.as_ref().is_some_and(|(expected, _)| *expected == seq)
+                                    && let Some((_, tx)) = pending.take()
+                                {
+                                    let _ = tx.send(());
                                 }
                             }
                             ControlMsg::Ping { ts_us } => {
@@ -206,4 +250,12 @@ impl Drop for PumpCleanup {
             let _ = tx.send(());
         }
     }
+}
+
+/// Native hosts use macOS virtual keys. Include Paste and Match Style (Cmd+Opt+Shift+V),
+/// but preserve Ctrl+Cmd+V and other application-specific shortcuts.
+pub(super) fn is_paste(message: &ControlMsg) -> bool {
+    matches!(message, ControlMsg::KeyEvent { vk_code: 9, modifiers, kind: removent_proto::KeyKind::Down, .. }
+        if modifiers.contains(removent_proto::KeyModifiers::COMMAND)
+            && !modifiers.intersects(removent_proto::KeyModifiers::CONTROL | removent_proto::KeyModifiers::FUNCTION))
 }

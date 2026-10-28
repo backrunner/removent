@@ -2,11 +2,11 @@
 //!
 //! Each side holds a local [`TextClipboard`] (an NSPasteboard wrapper on real
 //! machines, an in-memory implementation in tests); remote writes are prevented
-//! from looping back via a suppress counter.
+//! from looping back via a suppressed change count and serialized access.
 
 use removent_proto::{ClipFormat, ControlMsg};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::Sender;
 
 /// Text clipboard abstraction.
@@ -51,6 +51,8 @@ pub const MAX_CLIPBOARD_BYTES: usize = 4 * 1024 * 1024;
 /// Session-level sync state.
 pub struct ClipSyncState {
     pub seq: AtomicU32,
+    /// Serialize snapshots and remote writes, including suppression registration.
+    access: Mutex<()>,
     /// Count of "from remote" writes to the local clipboard, skipped by the poller.
     pub suppress_cc: AtomicU64,
     /// Last seen local change count.
@@ -62,9 +64,47 @@ impl ClipSyncState {
         let cc = local.change_count().unwrap_or(0);
         Self {
             seq: AtomicU32::new(0),
+            access: Mutex::new(()),
             suppress_cc: AtomicU64::new(0),
             last_seen_cc: AtomicU64::new(cc),
         }
+    }
+    /// Capture a stable text snapshot. A paste forces a snapshot even if the
+    /// content predates this connection or was already received from the peer.
+    pub fn snapshot(
+        &self,
+        local: &dyn TextClipboard,
+        force: bool,
+    ) -> Result<Option<ControlMsg>, String> {
+        let _access = self.access.lock().unwrap();
+        for _ in 0..3 {
+            let cc = local.change_count()?;
+            if !force
+                && (cc == self.suppress_cc.load(Ordering::SeqCst)
+                    || cc == self.last_seen_cc.load(Ordering::SeqCst))
+            {
+                self.last_seen_cc.store(cc, Ordering::SeqCst);
+                return Ok(None);
+            }
+            let text = local.read();
+            if local.change_count()? != cc {
+                continue;
+            }
+            self.last_seen_cc.store(cc, Ordering::SeqCst);
+            let text = text?;
+            if !force && text.is_empty() {
+                return Ok(None);
+            }
+            if text.len() > MAX_CLIPBOARD_BYTES {
+                return Err("clipboard content exceeds cap".into());
+            }
+            return Ok(Some(ControlMsg::ClipboardSync {
+                seq: self.seq.fetch_add(1, Ordering::SeqCst),
+                format: ClipFormat::TextUtf8,
+                data: text.into_bytes(),
+            }));
+        }
+        Err("clipboard changed during snapshot".into())
     }
 }
 
@@ -80,30 +120,8 @@ pub fn spawn_clipboard_poller(
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tick.tick().await;
-            let cc = match local.change_count() {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-            if cc == state.suppress_cc.load(Ordering::SeqCst) {
-                state.last_seen_cc.store(cc, Ordering::SeqCst);
+            let Ok(Some(msg)) = state.snapshot(local.as_ref(), false) else {
                 continue;
-            }
-            if cc == state.last_seen_cc.swap(cc, Ordering::SeqCst) {
-                continue;
-            }
-            let Ok(text) = local.read() else { continue };
-            if text.is_empty() {
-                continue;
-            }
-            if text.len() > MAX_CLIPBOARD_BYTES {
-                tracing::warn!(len = text.len(), "clipboard content exceeds cap, dropping");
-                continue;
-            }
-            let seq = state.seq.fetch_add(1, Ordering::SeqCst);
-            let msg = ControlMsg::ClipboardSync {
-                seq,
-                format: ClipFormat::TextUtf8,
-                data: text.into_bytes(),
             };
             if cmd_tx.send(msg).await.is_err() {
                 return;
@@ -115,7 +133,7 @@ pub fn spawn_clipboard_poller(
 /// Inbound apply: write remote text into the local clipboard and register the suppress count.
 pub fn apply_incoming(
     local: &dyn TextClipboard,
-    suppress: &AtomicU64,
+    state: &ClipSyncState,
     text: &[u8],
 ) -> Result<(), String> {
     // Enforce the same cap as the outbound poller; inbound frames can otherwise
@@ -129,14 +147,14 @@ pub fn apply_incoming(
     let Ok(text) = std::str::from_utf8(text) else {
         return Err("non-utf8 clipboard".into());
     };
-    // Read change_count BEFORE the write and suppress cc_before+1 (macOS bumps
-    // changeCount by exactly 1 per write). Reading it after the write races with a
-    // local copy landing in between: the suppress value would then cover that local
-    // change too, swallowing it instead of syncing it back.
-    let cc_before = local.change_count().ok();
+    let _access = state.access.lock().unwrap();
     local.write(text)?;
-    if let Some(cc) = cc_before {
-        suppress.store(cc + 1, Ordering::SeqCst);
+    // Native bridges may increment changeCount more than once. Read the actual
+    // count under the poller's lock, and suppress only if this is still our text.
+    // A concurrent local copy of different content must remain observable.
+    let cc = local.change_count()?;
+    if local.read().is_ok_and(|value| value == text) && local.change_count()? == cc {
+        state.suppress_cc.store(cc, Ordering::SeqCst);
     }
     Ok(())
 }
@@ -169,25 +187,99 @@ mod tests {
     #[test]
     fn incoming_write_sets_suppress() {
         let local = MemoryClipboard::new();
-        let suppress = AtomicU64::new(0);
-        apply_incoming(local.as_ref(), &suppress, b"remote-text").unwrap();
+        let state = ClipSyncState::new(local.as_ref());
+        apply_incoming(local.as_ref(), &state, b"remote-text").unwrap();
         assert_eq!(local.read().unwrap(), "remote-text");
-        // Suppress = cc_before + 1 (the poller skips exactly our own write).
-        assert_eq!(suppress.load(Ordering::SeqCst), 1);
+        // The poller skips exactly our own write.
+        assert_eq!(state.suppress_cc.load(Ordering::SeqCst), 1);
         assert_eq!(local.change_count().unwrap(), 1);
         // After applying again with the correct suppress value, the poller will not echo it back.
-        apply_incoming(local.as_ref(), &suppress, b"second").unwrap();
+        apply_incoming(local.as_ref(), &state, b"second").unwrap();
         assert_eq!(local.read().unwrap(), "second");
-        assert_eq!(suppress.load(Ordering::SeqCst), 2);
+        assert_eq!(state.suppress_cc.load(Ordering::SeqCst), 2);
     }
 
     #[test]
     fn incoming_over_cap_is_rejected() {
         let local = MemoryClipboard::new();
-        let suppress = AtomicU64::new(0);
+        let state = ClipSyncState::new(local.as_ref());
         let big = vec![b'x'; MAX_CLIPBOARD_BYTES + 1];
-        assert!(apply_incoming(local.as_ref(), &suppress, &big).is_err());
+        assert!(apply_incoming(local.as_ref(), &state, &big).is_err());
         // The local clipboard is left untouched.
         assert_eq!(local.read().unwrap(), "");
+    }
+    #[test]
+    fn forced_snapshot_includes_existing_and_empty_text() {
+        let local = MemoryClipboard::new();
+        local.write("连接前复制\n中文 🚀").unwrap();
+        let state = ClipSyncState::new(local.as_ref());
+        assert!(state.snapshot(local.as_ref(), false).unwrap().is_none());
+        let Some(ControlMsg::ClipboardSync { data, .. }) =
+            state.snapshot(local.as_ref(), true).unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(String::from_utf8(data).unwrap(), "连接前复制\n中文 🚀");
+        local.write("").unwrap();
+        let Some(ControlMsg::ClipboardSync { data, .. }) =
+            state.snapshot(local.as_ref(), true).unwrap()
+        else {
+            panic!()
+        };
+        assert!(data.is_empty());
+    }
+
+    struct MultiChangeClipboard {
+        inner: Arc<MemoryClipboard>,
+        concurrent_copy: bool,
+    }
+    impl TextClipboard for MultiChangeClipboard {
+        fn change_count(&self) -> Result<u64, String> {
+            self.inner.change_count()
+        }
+        fn read(&self) -> Result<String, String> {
+            self.inner.read()
+        }
+        fn write(&self, text: &str) -> Result<(), String> {
+            self.inner.write("")?;
+            self.inner.write(text)?;
+            if self.concurrent_copy {
+                self.inner.write("local copy during remote write")?;
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn suppression_uses_actual_write_count_and_preserves_concurrent_local_copy() {
+        for concurrent_copy in [false, true] {
+            let local = MultiChangeClipboard {
+                inner: MemoryClipboard::new(),
+                concurrent_copy,
+            };
+            let state = ClipSyncState::new(&local);
+            apply_incoming(&local, &state, b"remote").unwrap();
+            let snapshot = state.snapshot(&local, false).unwrap();
+            if concurrent_copy {
+                let Some(ControlMsg::ClipboardSync { data, .. }) = snapshot else {
+                    panic!("local copy lost")
+                };
+                assert_eq!(data, b"local copy during remote write");
+            } else {
+                assert!(snapshot.is_none(), "remote text must not echo");
+                assert_eq!(state.suppress_cc.load(Ordering::SeqCst), 2);
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_or_oversized_text_never_changes_clipboard() {
+        let local = MemoryClipboard::new();
+        local.write("keep").unwrap();
+        let state = ClipSyncState::new(local.as_ref());
+        assert!(apply_incoming(local.as_ref(), &state, &[0xff]).is_err());
+        assert_eq!(local.read().unwrap(), "keep");
+        local.write(&"x".repeat(MAX_CLIPBOARD_BYTES + 1)).unwrap();
+        assert!(state.snapshot(local.as_ref(), true).is_err());
     }
 }

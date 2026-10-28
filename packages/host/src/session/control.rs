@@ -139,7 +139,8 @@ pub fn spawn_control_pump(
             let mut last_sample_at = std::time::Instant::now();
             // Fallback suppress when there is no shared clip_state (does not prevent echo
             // loops, only makes writes possible).
-            let local_suppress = std::sync::atomic::AtomicU64::new(0);
+            let fallback_clip_state =
+                ClipSyncState::new(&removent_core::MemoryClipboard::default());
             loop {
                 tokio::select! {
                     _ = cancel.cancelled() => break,
@@ -268,17 +269,20 @@ pub fn spawn_control_pump(
                                         && let Some(clip) = deps.local_clip.as_ref() {
                                         // Shares the suppress singleton with the poller: after writing remote
                                         // content, the poller skips echoing it back.
-                                        let suppress: &std::sync::atomic::AtomicU64 = deps
+                                        let state = deps
                                             .clip_state
                                             .as_ref()
-                                            .map(|s| &s.suppress_cc)
-                                            .unwrap_or(&local_suppress);
+                                            .map(Arc::as_ref)
+                                            .unwrap_or(&fallback_clip_state);
                                         if let Err(e) = removent_core::apply_incoming_clip(
                                             clip.as_ref(),
-                                            suppress,
+                                            state,
                                             &data,
                                         ) {
                                             tracing::warn!(err=%e, "clipboard apply failed");
+                                            // Do not acknowledge a failed text write then let
+                                            // the controller paste the host's previous text.
+                                            break;
                                         }
                                     }
                                     // Receipt is acknowledged independently of whether a local

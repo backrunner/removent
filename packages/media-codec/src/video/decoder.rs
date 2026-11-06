@@ -95,6 +95,7 @@ pub struct VideoDecoder {
 }
 
 pub struct DecodedBgra {
+    pub surface: Option<apple_cf::cv::CVPixelBuffer>,
     pub data: Vec<u8>,
     pub pts_us: i64,
 }
@@ -121,6 +122,19 @@ impl VideoDecoder {
         width: usize,
         height: usize,
         param_sets: &[Vec<u8>],
+        output: impl Fn(DecodedBgra) + Send + Sync + 'static,
+    ) -> Result<Self, VideoError> {
+        Self::with_surface_output(codec, width, height, param_sets, false, output)
+    }
+
+    /// Retain native BGRA buffers for GPU presentation, without a CPU readback.
+    /// CPU-only codecs continue through the ordinary byte-buffer fallback.
+    pub fn with_surface_output(
+        codec: removent_proto::CodecId,
+        width: usize,
+        height: usize,
+        param_sets: &[Vec<u8>],
+        native: bool,
         output: impl Fn(DecodedBgra) + Send + Sync + 'static,
     ) -> Result<Self, VideoError> {
         if codec != removent_proto::CodecId::Av1 && param_sets.is_empty() {
@@ -173,6 +187,13 @@ impl VideoDecoder {
         // SAFETY: the Create function returned a +1 retain, transferred to this wrapper.
         let format_desc = unsafe { apple_cf::cm::CMFormatDescription::from_raw(desc.cast()) }
             .expect("non-null format description");
+        let actual = format_desc.video_dimensions().unwrap_or((0, 0));
+        if usize::try_from(actual.0) != Ok(width) || usize::try_from(actual.1) != Ok(height) {
+            return Err(VideoError::GeometryMismatch {
+                expected: (width, height),
+                actual,
+            });
+        }
         let callback = output.clone();
         let session = CompatibleDecompressionSession::new(&format_desc, move |frame| {
             let Some(pb) = frame.image_buffer else { return };
@@ -180,13 +201,36 @@ impl VideoDecoder {
                 tracing::warn!(status = frame.status, "decode callback error");
                 return;
             }
+            // Native surfaces bypass the CPU byte-count check in the viewer.
+            // Keep pixels, rendering geometry and remote input coordinates in
+            // agreement even if a decoder outputs an unexpected surface.
+            if (pb.width(), pb.height()) != (width, height) {
+                tracing::warn!(
+                    width = pb.width(),
+                    height = pb.height(),
+                    expected_width = width,
+                    expected_height = height,
+                    "decoded surface geometry mismatch"
+                );
+                return;
+            }
             // presentation_time is (value, timescale); normalized to microseconds.
             let pts_us = scale_to_us((
                 frame.presentation_time.value,
                 frame.presentation_time.timescale,
             ));
-            if let Some(bgra) = pixel_buffer_to_bgra(&pb) {
-                callback(DecodedBgra { data: bgra, pts_us });
+            if native && pb.pixel_format() == BGRA_FOURCC {
+                callback(DecodedBgra {
+                    data: Vec::new(),
+                    surface: Some(pb),
+                    pts_us,
+                });
+            } else if let Some(bgra) = pixel_buffer_to_bgra(&pb) {
+                callback(DecodedBgra {
+                    data: bgra,
+                    surface: None,
+                    pts_us,
+                });
             }
         })?;
         Ok(Self {

@@ -152,6 +152,7 @@ async fn audio_disabled_session_uses_single_media_stream() {
         server_addr,
         &client_id,
         ClientConfig {
+            native_video: false,
             video_quality: Default::default(),
             host_identity_verified: false,
             pairing_code: None,

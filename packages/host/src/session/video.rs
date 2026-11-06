@@ -1,5 +1,7 @@
 use super::*;
+mod worker;
 use removent_media_capture::{CapturedPixels, CapturedVideoFrame};
+use worker::EncoderWorker;
 
 pub(super) fn mark_submitted_frame_sent(
     dedup: &mut FrameDeduplicator,
@@ -57,8 +59,8 @@ pub fn spawn_video_loop(
             }
             let mut dims = scaled_dims(source_dims, quality.scale);
             let mut encoder =
-                VideoEncoder::new(codec, dims.0, dims.1, quality.bitrate_kbps, quality.fps)
-                    .map_err(|e| e.to_string())?;
+                EncoderWorker::new(codec, dims.0, dims.1, quality.bitrate_kbps, quality.fps)
+                    .await?;
             let mut quality_open = true;
             let mut capture_open = true;
             let mut next_frame = tokio::time::Instant::now();
@@ -76,11 +78,30 @@ pub fn spawn_video_loop(
             let mut dedup = FrameDeduplicator::new();
             let mut submitted = HashMap::new();
             let mut capture_generation = None;
+            let mut diagnostics = tokio::time::interval(Duration::from_secs(5));
+            diagnostics.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut stats_started = std::time::Instant::now();
+            let mut captured_frames = 0u64;
+            let mut sent_frames = 0u64;
+            let mut encode_us = 0u64;
+            let mut write_us = 0u64;
             loop {
                 if !capture_open && !pending {
                     break;
                 }
                 tokio::select! {
+                    _ = diagnostics.tick() => {
+                        let seconds = stats_started.elapsed().as_secs_f64();
+                        if seconds >= 1. {
+                            tracing::debug!(seconds, captured_frames, sent_frames, encode_us, write_us,
+                                target_fps = quality.fps, "video pipeline delivery");
+                        }
+                        stats_started = std::time::Instant::now();
+                        captured_frames = 0;
+                        sent_frames = 0;
+                        encode_us = 0;
+                        write_us = 0;
+                    }
                     _ = tokio::time::sleep_until(last_sent + Duration::from_secs(1)), if quality != ceiling && last_raw.is_some() && !pending => {
                         // Probe only while degraded. Reuse temporal references:
                         // forcing a large I-frame every second can itself congest
@@ -97,13 +118,13 @@ pub fn spawn_video_loop(
                         if new_dims != dims || new.fps != quality.fps {
                             // Replace only after successful construction; the first
                             // packet of this configuration must be independently decodable.
-                            let replacement = VideoEncoder::new(codec, new_dims.0, new_dims.1, new.bitrate_kbps, new.fps)
-                                .map_err(|e| e.to_string())?;
+                            let replacement = EncoderWorker::new(codec, new_dims.0, new_dims.1, new.bitrate_kbps, new.fps).await?;
                             encoder = replacement;
                             dims = new_dims;
                             config_changed = true;
                         } else {
-                            encoder.set_bitrate_kbps(new.bitrate_kbps).map_err(|e| e.to_string())?;
+                            encoder.run(move |encoder| encoder.set_bitrate_kbps(new.bitrate_kbps))
+                                .await?.map_err(|e| e.to_string())?;
                         }
                         quality = new;
                         dedup.reset();
@@ -118,6 +139,7 @@ pub fn spawn_video_loop(
                     }
                     item = video_rx.recv(), if capture_open => {
                         let Some(frame) = item else { capture_open = false; continue };
+                        captured_frames += 1;
                         let new_dims = (frame.width, frame.height);
                         if frame.width == 0 || frame.height == 0 || frame.width.max(frame.height) > MAX_CAPTURE_W as usize || frame.width.min(frame.height) > MAX_CAPTURE_H as usize
                             || !frame.pixels.valid_for(frame.width, frame.height) {
@@ -134,8 +156,7 @@ pub fn spawn_video_loop(
                             source_dims = new_dims;
                             if let Some(health) = &delivery { health.set_capture_dims(new_dims.0 as u32, new_dims.1 as u32); }
                             dims = scaled_dims(source_dims, quality.scale);
-                            encoder = VideoEncoder::new(codec, dims.0, dims.1, quality.bitrate_kbps, quality.fps)
-                                .map_err(|e| e.to_string())?;
+                            encoder = EncoderWorker::new(codec, dims.0, dims.1, quality.bitrate_kbps, quality.fps).await?;
                             config_changed = true;
                             force = true;
                             dedup.reset();
@@ -153,8 +174,14 @@ pub fn spawn_video_loop(
                         let should_encode = if native {
                             force || refresh_unchanged || last_native_sent != Some((raw.generation, raw.pts_us))
                         } else {
-                            let pixels = cpu_pixels(raw, dims)?;
-                            let changed = dedup.should_encode(&pixels, force || refresh_unchanged);
+                            let raw = raw.clone();
+                            let previous = std::mem::take(&mut dedup);
+                            let (previous, pixels, changed) = encoder.run(move |_| {
+                                let pixels = cpu_pixels(&raw, dims)?;
+                                let changed = previous.should_encode(&pixels, force || refresh_unchanged);
+                                Ok::<_, String>((previous, pixels, changed))
+                            }).await??;
+                            dedup = previous;
                             cpu = Some(pixels);
                             changed
                         };
@@ -162,28 +189,28 @@ pub fn spawn_video_loop(
                             next_frame = tokio::time::Instant::now() + frame_interval(quality.fps);
                             continue;
                         }
-                        if force { encoder.request_keyframe(); }
                         let pts = last_pts.map_or(raw.pts_us, |last| raw.pts_us.max(last.saturating_add(1)));
                         last_pts = Some(pts);
-                        let result = if native {
-                            let CapturedPixels::Native(buffer) = &raw.pixels else { unreachable!() };
-                            match encoder.encode_native(buffer, pts) {
-                                Err(removent_media_codec::VideoError::Gpu(error)) => {
-                                    tracing::warn!(%error, "GPU frame processing unavailable; using CPU fallback");
-                                    native_available = false;
-                                    let pixels = cpu_pixels(raw, dims)?;
-                                    let result = encoder.encode_bgra(&pixels, pts);
-                                    submitted.insert(pts, pixels);
-                                    result
+                        let input = raw.clone();
+                        let (result, pixels, native_ok) = encoder.run(move |encoder| {
+                            if force { encoder.request_keyframe(); }
+                            if native {
+                                let CapturedPixels::Native(buffer) = &input.pixels else { unreachable!() };
+                                match encoder.encode_native(buffer, pts) {
+                                    Err(removent_media_codec::VideoError::Gpu(error)) => {
+                                        tracing::warn!(%error, "GPU frame processing unavailable; using CPU fallback");
+                                        let pixels = cpu_pixels(&input, dims)?;
+                                        Ok::<_, String>((encoder.encode_bgra(&pixels, pts), Some(pixels), false))
+                                    }
+                                    result => Ok((result, None, true)),
                                 }
-                                result => result,
+                            } else {
+                                let pixels = cpu.expect("CPU pixels prepared");
+                                Ok((encoder.encode_bgra(&pixels, pts), Some(pixels), native_available))
                             }
-                        } else {
-                            let pixels = cpu.expect("CPU pixels prepared");
-                            let result = encoder.encode_bgra(&pixels, pts);
-                            submitted.insert(pts, pixels);
-                            result
-                        };
+                        }).await??;
+                        native_available = native_ok;
+                        if let Some(pixels) = pixels { submitted.insert(pts, pixels); }
                         if submitted.len() > 8 && let Some(oldest) = submitted.keys().copied().min() {
                             submitted.remove(&oldest);
                         }
@@ -204,6 +231,7 @@ pub fn spawn_video_loop(
                         if let Some(health) = &delivery {
                             health.encoded(encode_started.elapsed(), frame_interval(quality.fps));
                         }
+                        encode_us += encode_started.elapsed().as_micros() as u64;
                         let mut sent = false;
                         for ef in frames {
                             frame_id += 1;
@@ -219,10 +247,13 @@ pub fn spawn_video_loop(
                             };
                             let wire = build_video_frame(&hdr, &ef.data);
                             if let Some(health) = &delivery { health.begin_write(); }
+                            let write_started = std::time::Instant::now();
                             let result = tokio::time::timeout(Duration::from_secs(10), removent_net::session::write_media(&mut stream, &wire)).await;
+                            write_us += write_started.elapsed().as_micros() as u64;
                             if let Some(health) = &delivery { health.end_write(); }
                             if !matches!(result, Ok(Ok(()))) { return Ok::<(), String>(()); }
                             sent = true;
+                            sent_frames += 1;
                             mark_submitted_frame_sent(&mut dedup, &mut submitted, ef.pts_us);
                         }
                         if sent {
@@ -297,18 +328,6 @@ pub(super) fn next_frame_deadline(
     fps: u8,
 ) -> tokio::time::Instant {
     (scheduled + frame_interval(fps)).max(completed)
-}
-
-/// Coalesce raw audio captures. Snapshot the queue length so a fast producer
-/// cannot keep this drain running indefinitely.
-pub(super) fn newest_queued<T>(mut newest: T, rx: &mut mpsc::Receiver<T>) -> T {
-    for _ in 0..rx.len() {
-        match rx.try_recv() {
-            Ok(frame) => newest = frame,
-            Err(_) => break,
-        }
-    }
-    newest
 }
 
 /// Absolute long/short-edge bounds; each connection selects its own ceiling.

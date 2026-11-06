@@ -23,6 +23,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 libc = { workspace = true }
+crossbeam-queue = "0.3"
 ironrdp = { version = "0.17", features = ["connector", "session", "graphics", "input"] }
 ironrdp-tokio = { version = "0.10", features = ["reqwest-native-tls"] }
 ironrdp-bulk = "0.1"

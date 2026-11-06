@@ -10,6 +10,7 @@ fn cancelled_attempt_cannot_publish_frames_pins_or_ready() {
     };
     engine.stop();
     old.frame(DecodedFrame {
+        surface: None,
         data: vec![0; 4],
         width: 1,
         height: 1,

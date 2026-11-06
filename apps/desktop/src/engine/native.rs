@@ -93,6 +93,7 @@ pub(super) async fn run_client(
     let audio_enabled = audio_player.is_some();
 
     let mk_cfg = || removent_client::ClientConfig {
+        native_video: true,
         video_quality,
         host_identity_verified: expected_host.is_some() || trust.needs_confirmation,
         pairing_code: pairing_code.clone(),
@@ -211,8 +212,13 @@ pub(super) async fn run_client(
         let pcm_rx = std::mem::replace(&mut session.decoded_pcm_rx, drop_rx);
         AudioForwardTask(tokio::spawn(async move {
             let mut pcm_rx = pcm_rx;
+            let mut last_log = std::time::Instant::now();
             while let Some(pcm) = pcm_rx.recv().await {
                 player.push(pcm);
+                if last_log.elapsed() >= std::time::Duration::from_secs(5) {
+                    tracing::debug!(stats = ?player.stats(), "audio output");
+                    last_log = std::time::Instant::now();
+                }
             }
         }))
     });

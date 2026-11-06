@@ -96,7 +96,7 @@ pub struct State {
     pub generation: u64,
     pub events: VecDeque<Value>,
     pub frame: Option<DecodedFrame>,
-    pub audio: VecDeque<Vec<i16>>,
+    pub audio: Arc<removent_client::audio::AudioQueue>,
     pub audio_rate: u32,
     pub audio_channels: u8,
     recovery: removent_client::recovery::Recovery,

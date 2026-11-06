@@ -51,6 +51,10 @@ final class ControllerModel: ObservableObject {
     }
     let discovery = BonjourDiscovery()
     var onFrame: ((CGImage) -> Void)?
+    var onSurface: ((CVPixelBuffer, Int64, UInt64) -> Void)?
+    private var lastPresentedPTS: Int64?
+    private var lastPresentedTime: CFTimeInterval?
+    private var presentationGaps: [Double] = []
     private var servicesStarted = false
     private var handle: OpaquePointer?
     var credentialStoragePath: String?
@@ -180,6 +184,7 @@ final class ControllerModel: ObservableObject {
         retryCommand = command; sessionTitle = title; error = nil
         recovering = false; networkOverlay = false; networkOffline = false
         ready = false; needsPIN = false; certificatePrompt = nil; isConnecting = true; frameSize = .zero; receivedFrames = 0; fps = 0
+        lastPresentedPTS = nil; lastPresentedTime = nil; presentationGaps.removeAll(keepingCapacity:true)
         sampleFrames = 0; sampleTime = CACurrentMediaTime()
         codec = ""; remoteClipboard = false; remoteAudio = false; canRefresh = false; audio.stop()
         status = L("Connecting…", "正在连接…"); presentingSession = true
@@ -287,7 +292,18 @@ final class ControllerModel: ObservableObject {
         }
         if let frame = rm_take_frame(handle) {
             let value = frame.pointee
-            if value.generation == generation, let pixels = value.data, value.len > 0 {
+            if value.generation == generation, let rawSurface = value.surface {
+                let surface = Unmanaged<CVPixelBuffer>.fromOpaque(rawSurface).takeUnretainedValue()
+                let size = CGSize(width:Int(value.width), height:Int(value.height))
+                if frameSize != size { frameSize = size }
+                onSurface?(surface, value.pts_us, value.generation)
+                #if targetEnvironment(simulator)
+                // Simulator FPS is delivery only; its Metal API has no actual
+                // presentation callback. Physical devices use didPresent.
+                sampleFrames += 1
+                #endif
+                rm_frame_free(frame)
+            } else if value.generation == generation, let pixels = value.data, value.len > 0 {
                 let provider = CGDataProvider(dataInfo:UnsafeMutableRawPointer(frame), data:pixels,
                     size:value.len) { info, _, _ in
                         if let info { rm_frame_free(info.assumingMemoryBound(to:RMFrame.self)) }
@@ -303,16 +319,27 @@ final class ControllerModel: ObservableObject {
                 } else if provider == nil { rm_frame_free(frame) }
             } else { rm_frame_free(frame) }
         }
-        for _ in 0..<12 {
-            guard let pcm = rm_take_audio(handle) else { break }
-            if pcm.pointee.generation == generation { audio.push(pcm.pointee) }
-            rm_audio_free(pcm)
-        }
         let now = CACurrentMediaTime()
         if now - sampleTime >= 1 {
             fps = Int(Double(sampleFrames) / (now - sampleTime)); receivedFrames += sampleFrames
+            if !presentationGaps.isEmpty {
+                presentationGaps.sort()
+                let p95 = presentationGaps[(presentationGaps.count * 95 + 99) / 100 - 1]
+                let p99 = presentationGaps[(presentationGaps.count * 99 + 99) / 100 - 1]
+                NSLog("Removent actual presentation: fps=%d gap_p95_ms=%g gap_p99_ms=%g", fps, p95, p99)
+                presentationGaps.removeAll(keepingCapacity:true)
+            }
             sampleFrames = 0; sampleTime = now
         }
+    }
+    func didPresent(pts: Int64, at: CFTimeInterval, generation: UInt64) {
+        guard ready, self.generation == generation, at > 0, at.isFinite,
+            lastPresentedPTS != pts, lastPresentedTime.map({ at > $0 }) ?? true else { return }
+        if let previous = lastPresentedTime {
+            if presentationGaps.count >= 1024 { presentationGaps.removeFirst() }
+            presentationGaps.append((at - previous) * 1000)
+        }
+        lastPresentedPTS = pts; lastPresentedTime = at; sampleFrames += 1
     }
     func accept(_ event: [String:Any]) {
         guard (event["generation"] as? NSNumber)?.uint64Value == generation else { return }
@@ -378,10 +405,10 @@ final class ControllerModel: ObservableObject {
             if event["audio"] as? Bool == true {
                 let current = generation
                 Task { @MainActor [weak self] in
-                    guard let self, self.ready, self.generation == current else { return }
+                    guard let self, self.ready, self.generation == current, let handle = self.handle else { return }
                     do {
                         try await self.audio.start(rate:event["sample_rate"] as? Double ?? 48000,
-                            channels:event["channels"] as? Int ?? 2)
+                            channels:event["channels"] as? Int ?? 2, handle:handle, generation:current)
                     } catch {
                         guard self.ready, self.generation == current else { return }
                         self.error = L("Audio unavailable: ", "音频不可用：") + error.localizedDescription

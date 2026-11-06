@@ -1,0 +1,9 @@
+{
+  "scope": "local release binaries, not packaged, installed, or remotely tested",
+  "command": "rtk proxy cargo build --release --locked -p removent-app -p removent-daemon -p removent-cli -j 4",
+  "sha256": {
+    "removent": "6ab47bae8c07e1eb19b2cf91931fa05397a6651fd377c1a29c4b468999a0f4f4",
+    "removentd": "39d0a449379ac2cef49c060f9c87937edbef0ddd24743b1d25aebf4f3eec66eb",
+    "removent-cli": "813f56e7203c715b0c193cc43fccb1b19d1c025d08efdbd3d75620ce9dde5733"
+  }
+}

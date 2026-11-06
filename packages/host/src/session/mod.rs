@@ -13,7 +13,6 @@ use removent_core::{
     AdmissionMode, ClipSyncState, DeviceIdentity, PeerRecord, PeersStore, TextClipboard,
     adapt::{AdaptationController, QualityState, Sample},
 };
-use removent_media_codec::VideoEncoder;
 use removent_net::{ControlItem, ControlSink, ControlSource, RvpConnection};
 use removent_proto::{
     AudioPacketHeader, Caps, CodecId, ControlMsg, HandshakeServer, KeyKind, MouseKind, Negotiate,
@@ -204,7 +203,6 @@ use resume::{
     invalidate_resume, now_unix, pairing_begin_limiter, remember_resume, remember_resume_policy,
     resume_policy_matches, validate_resume_full,
 };
-use video::newest_queued;
 pub use video::{MAX_CAPTURE_H, MAX_CAPTURE_W, fit_capture_dims, spawn_video_loop};
 #[cfg(test)]
 use video::{mark_submitted_frame_sent, scaled_dims};

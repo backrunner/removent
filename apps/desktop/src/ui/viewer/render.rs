@@ -199,8 +199,35 @@ impl Render for ViewerView {
                     .min_h_0()
                     .min_w_0()
                     .overflow_hidden()
-                    .child(match self.current.clone() {
-                        Some(image) => gpui::canvas(
+                    .child(match (self.surface.clone(), self.current.clone()) {
+                        (Some(surface), _) => {
+                            let telemetry = self.presentation.clone();
+                            let pts = self.surface_pts;
+                            let presented = gpui::SurfacePresented(Arc::new(move |at| {
+                                telemetry.presented(pts, at)
+                            }));
+                            gpui::canvas(
+                                move |bounds, _, _| canvas_bounds.set(Some(bounds)),
+                                move |bounds, _, window, _| {
+                                    let picture = ObjectFit::Contain.get_bounds(
+                                        bounds,
+                                        size(
+                                            surface.get_width().into(),
+                                            surface.get_height().into(),
+                                        ),
+                                    );
+                                    window.paint_surface_with_callback(
+                                        picture,
+                                        surface,
+                                        Some(presented),
+                                    );
+                                },
+                            )
+                            .absolute()
+                            .size_full()
+                            .into_any_element()
+                        }
+                        (None, Some(image)) => gpui::canvas(
                             move |bounds, _, _| canvas_bounds.set(Some(bounds)),
                             move |bounds, _, window, _| {
                                 // Img's intrinsic aspect ratio can expand its percentage
@@ -222,7 +249,7 @@ impl Render for ViewerView {
                         .absolute()
                         .size_full()
                         .into_any_element(),
-                        None => div()
+                        (None, None) => div()
                             .size_full()
                             .flex()
                             .items_center()

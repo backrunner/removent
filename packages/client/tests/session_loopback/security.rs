@@ -74,6 +74,7 @@ async fn session_accept_cannot_skip_confirmation_or_invitation_proof() {
                 addr,
                 &client_id,
                 ClientConfig {
+                    native_video: false,
                     video_quality: Default::default(),
                     host_identity_verified: false,
                     pairing_code: invitation.then(|| {

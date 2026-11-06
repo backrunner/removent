@@ -16,6 +16,85 @@ fn encoder_surface_satisfies_metal_row_alignment() {
     // encoder happens not to import this surface through Metal.
     assert_eq!(surface.bytes_per_row() % 16, 0);
 }
+
+#[test]
+fn native_decode_retains_bgra_surface_after_decoder_shutdown() {
+    for codec in [removent_proto::CodecId::H264, removent_proto::CodecId::Hevc] {
+        let (width, height) = (318, 242);
+        let mut encoder = VideoEncoder::new(codec, width, height, 4000, 60).unwrap();
+        let mut pixels = vec![0; width * height * 4];
+        for row in 0..height {
+            for col in 0..width {
+                let color = if col < width / 2 {
+                    [20, 40, 220, 255]
+                } else {
+                    [220, 40, 20, 255]
+                };
+                pixels[(row * width + col) * 4..][..4].copy_from_slice(&color);
+            }
+        }
+        let packets = encoder.encode_bgra(&pixels, 123_456).unwrap();
+        assert!(!packets.is_empty());
+        let (tx, rx) = mpsc::channel();
+        let decoder = VideoDecoder::with_surface_output(
+            codec,
+            width,
+            height,
+            encoder.parameter_sets().unwrap(),
+            true,
+            move |frame| {
+                let _ = tx.send(frame);
+            },
+        )
+        .unwrap();
+        for packet in packets {
+            decoder.decode_annexb(&packet.data, packet.pts_us).unwrap();
+        }
+        let output = rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap();
+        assert!(
+            output.data.is_empty(),
+            "native output must not copy CPU pixels"
+        );
+        assert_eq!(output.pts_us, 123_456);
+        drop(decoder);
+        drop(encoder);
+        let surface = output.surface.unwrap();
+        assert_eq!(surface.pixel_format(), BGRA_FOURCC);
+        assert_eq!((surface.width(), surface.height()), (width, height));
+        let readback = pixel_buffer_to_bgra(&surface).unwrap();
+        for (x, red) in [(width / 4, true), (width * 3 / 4, false)] {
+            let pixel = &readback[(height / 2 * width + x) * 4..][..4];
+            assert!(
+                pixel[if red { 2 } else { 0 }] > 180,
+                "color/lifetime: {pixel:?}"
+            );
+            assert!(pixel[if red { 0 } else { 2 }] < 60, "BGRA order: {pixel:?}");
+        }
+    }
+}
+
+#[test]
+fn decoder_rejects_parameter_sets_with_different_frame_geometry() {
+    for codec in [removent_proto::CodecId::H264, removent_proto::CodecId::Hevc] {
+        let (width, height) = (318, 242);
+        let mut encoder = VideoEncoder::new(codec, width, height, 4000, 60).unwrap();
+        encoder
+            .encode_bgra(&vec![128; width * height * 4], 0)
+            .unwrap();
+        for native in [false, true] {
+            // Same byte count but different shape must not bypass validation.
+            let decoder = VideoDecoder::with_surface_output(
+                codec,
+                height,
+                width,
+                encoder.parameter_sets().unwrap(),
+                native,
+                |_| {},
+            );
+            assert!(decoder.is_err(), "{codec:?}, native={native}");
+        }
+    }
+}
 /// A force-keyframe attempt that fails must be retried as a regular frame:
 /// the frame is encoded, not dropped.
 #[test]

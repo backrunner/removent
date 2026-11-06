@@ -62,6 +62,11 @@ pub enum VideoError {
     Surface(String),
     #[error("pixel data size mismatch: need {need}, got {got}")]
     PixelSizeMismatch { need: usize, got: usize },
+    #[error("video geometry mismatch: expected {expected:?}, got {actual:?}")]
+    GeometryMismatch {
+        expected: (usize, usize),
+        actual: (i32, i32),
+    },
     #[error("parameter sets unavailable before first encode")]
     NoParameterSets,
     #[error("core media status {0}")]

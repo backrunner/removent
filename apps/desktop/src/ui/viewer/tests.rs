@@ -150,6 +150,7 @@ fn setup(cx: &mut TestAppContext) -> (Fixture, &mut VisualTestContext) {
         viewer.update(cx, |view, _| {
             view.handle_frame(
                 VideoFrame {
+                    surface: None,
                     width: 640,
                     height: 360,
                     data: vec![0; 640 * 360 * 4],
@@ -183,6 +184,7 @@ fn decoded_picture_is_uploaded_for_painting(cx: &mut TestAppContext) {
             fixture.viewer.update(cx, |view, cx| {
                 view.handle_frame(
                     VideoFrame {
+                        surface: None,
                         width: 64,
                         height: 36,
                         data: [40, 80, 160, 255].repeat(64 * 36),
@@ -426,6 +428,7 @@ fn rendered_canvas_fits_window_and_clicks_follow_contained_pixels(cx: &mut TestA
             fixture.viewer.update(cx, |view, cx| {
                 view.handle_frame(
                     VideoFrame {
+                        surface: None,
                         width: fw,
                         height: fh,
                         data: vec![0; (fw * fh * 4) as usize],

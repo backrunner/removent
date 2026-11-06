@@ -70,6 +70,7 @@ async fn fixture(
         ControlSource::new(recv, ControlCodec),
         ack,
         ClientConfig {
+            native_video: false,
             video_quality: Default::default(),
             host_identity_verified: false,
             pairing_code: None,

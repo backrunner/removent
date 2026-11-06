@@ -9,8 +9,9 @@ use super::*;
 pub(super) fn spawn_media_loops(
     conn: RvpConnection,
     bgra_tx: removent_core::latest::Sender<DecodedFrame>,
-    pcm_tx: mpsc::Sender<Vec<i16>>,
+    pcm_tx: mpsc::Sender<crate::audio::DecodedAudio>,
     audio_enabled: bool,
+    native_video: bool,
     cmd_tx: mpsc::Sender<ControlMsg>,
     last_kf: Arc<Mutex<Option<Instant>>>,
 ) -> tokio::task::JoinHandle<()> {
@@ -19,6 +20,7 @@ pub(super) fn spawn_media_loops(
         bgra_tx,
         pcm_tx,
         audio_enabled,
+        native_video,
         cmd_tx,
         last_kf,
     ))
@@ -28,8 +30,9 @@ pub(super) fn spawn_media_loops(
 pub(super) async fn media_dispatch_loop(
     conn: RvpConnection,
     bgra_tx: removent_core::latest::Sender<DecodedFrame>,
-    pcm_tx: mpsc::Sender<Vec<i16>>,
+    pcm_tx: mpsc::Sender<crate::audio::DecodedAudio>,
     audio_enabled: bool,
+    native_video: bool,
     cmd_tx: mpsc::Sender<ControlMsg>,
     last_kf: Arc<Mutex<Option<Instant>>>,
 ) {
@@ -72,7 +75,7 @@ pub(super) async fn media_dispatch_loop(
                         let last_kf = last_kf.clone();
                         let feedback = feedback.clone();
                         media.spawn(async move {
-                            video_recv_loop(stream, tx, cmd_tx, last_kf, feedback).await;
+                            video_recv_loop(stream, tx, cmd_tx, last_kf, feedback, native_video).await;
                             STREAM_TYPE_VIDEO
                         });
                     }
@@ -107,6 +110,7 @@ pub(super) fn rebuild_decoder(
     payload: &[u8],
     tx: removent_core::latest::Sender<DecodedFrame>,
     feedback: Arc<VideoFeedback>,
+    native_video: bool,
 ) -> Option<VideoDecoder> {
     let ps = if hdr.codec == removent_proto::CodecId::Av1 {
         Vec::new()
@@ -114,14 +118,16 @@ pub(super) fn rebuild_decoder(
         extract_param_sets(payload, hdr.codec == removent_proto::CodecId::Hevc)
     };
     let (width, height) = (u32::from(hdr.width), u32::from(hdr.height));
-    match VideoDecoder::with_output(
+    match VideoDecoder::with_surface_output(
         hdr.codec,
         width as usize,
         height as usize,
         &ps,
+        native_video,
         move |frame| {
             feedback.decoded(frame.pts_us);
             let _ = tx.send(DecodedFrame {
+                surface: frame.surface,
                 data: frame.data,
                 width,
                 height,
@@ -201,6 +207,7 @@ pub(super) async fn video_recv_loop(
     cmd_tx: mpsc::Sender<ControlMsg>,
     last_kf: Arc<Mutex<Option<Instant>>>,
     feedback: Arc<VideoFeedback>,
+    native_video: bool,
 ) {
     use removent_proto::video_flags;
     feedback.begin_frame();
@@ -234,7 +241,13 @@ pub(super) async fn video_recv_loop(
     }
     feedback.received(hdr0.pts_us, first_payload.len() + 27);
     if hdr0.is_keyframe() {
-        match rebuild_decoder(&hdr0, &first_payload, bgra_tx.clone(), feedback.clone()) {
+        match rebuild_decoder(
+            &hdr0,
+            &first_payload,
+            bgra_tx.clone(),
+            feedback.clone(),
+            native_video,
+        ) {
             Some(d) => {
                 feedback.decoding(hdr0.pts_us);
                 if let Err(e) = d.decode_annexb(&first_payload, hdr0.pts_us) {
@@ -298,7 +311,13 @@ pub(super) async fn video_recv_loop(
                 request_keyframe(&cmd_tx, &last_kf);
                 continue;
             }
-            match rebuild_decoder(&hdr, &payload, bgra_tx.clone(), feedback.clone()) {
+            match rebuild_decoder(
+                &hdr,
+                &payload,
+                bgra_tx.clone(),
+                feedback.clone(),
+                native_video,
+            ) {
                 Some(d) => {
                     tracing::info!(
                         codec = ?hdr.codec, w = hdr.width, h = hdr.height,
@@ -335,15 +354,17 @@ pub(super) async fn video_recv_loop(
 
 pub(super) async fn audio_recv_loop(
     mut stream: removent_net::quinn::RecvStream,
-    pcm_tx: mpsc::Sender<Vec<i16>>,
+    pcm_tx: mpsc::Sender<crate::audio::DecodedAudio>,
 ) {
-    // Reading and playback are separated: a dedicated playback task holds the decoder
-    // and jitter buffer (emits packets on a 10ms cadence); the read loop only frames
-    // packets into the buffer, so playback pacing is unaffected by blocking network reads.
-    // Media runs over ordered reliable QUIC streams, so the buffer adds no reorder
-    // delay — in-order packets pass straight through.
+    // A blocked reliable read must not freeze the audio timeline. The playout
+    // task conceals short gaps and expires retransmitted packets that are late.
     let jb = Arc::new(Mutex::new(JitterBuffer::new(60)));
-    let _playout = AbortOnDrop(tokio::spawn(audio_playout_loop(jb.clone(), pcm_tx)));
+    let arrived = Arc::new(tokio::sync::Notify::new());
+    let _playout = AbortOnDrop(tokio::spawn(audio_playout_loop(
+        jb.clone(),
+        arrived.clone(),
+        pcm_tx,
+    )));
 
     // On the wire every packet is [14-byte header (incl. type byte)][payload] (same as
     // video frames); the first packet's type byte was already consumed by the media
@@ -351,6 +372,10 @@ pub(super) async fn audio_recv_loop(
     let mut head = [0u8; 14];
     head[0] = removent_proto::STREAM_TYPE_AUDIO;
     let mut first = true;
+    // Opt-in trace diagnostics are bounded per session and contain timing only.
+    // Keep real capture cadence available for deterministic regression replay.
+    let trace_started = Instant::now();
+    let mut trace_remaining = 2_000u32;
     loop {
         let r = if first {
             first = false;
@@ -374,55 +399,114 @@ pub(super) async fn audio_recv_loop(
         if !read_media_part(&mut stream, &mut payload).await {
             break;
         }
-        jb.lock().unwrap().push(AudioPacketIn {
-            seq: hdr.seq,
-            pts_us: hdr.pts_us,
-            flags: hdr.flags,
-            payload,
-        });
+        let now = Instant::now();
+        let mut buffer = jb.lock().unwrap();
+        if trace_remaining > 0 {
+            trace_remaining -= 1;
+            let source_offset_us = buffer.source_time(hdr.pts_us).map(|source| {
+                if now >= source {
+                    now.duration_since(source).as_micros() as i64
+                } else {
+                    -(source.duration_since(now).as_micros() as i64)
+                }
+            });
+            tracing::trace!(
+                seq = hdr.seq,
+                pts_us = hdr.pts_us,
+                arrival_us = now.duration_since(trace_started).as_micros() as u64,
+                source_offset_us,
+                "audio arrival timing"
+            );
+        }
+        buffer.push_at(
+            AudioPacketIn {
+                seq: hdr.seq,
+                pts_us: hdr.pts_us,
+                flags: hdr.flags,
+                payload,
+            },
+            now,
+        );
+        drop(buffer);
+        arrived.notify_one();
     }
 }
 
-/// Audio playback loop: emit packets on a 10ms cadence as they arrive (the transport
-/// is an ordered reliable QUIC stream, so no reorder buffering is needed); a missing
-/// playhead packet (only reachable after flood-cap eviction) goes through Opus PLC
-/// (conceal); DTX packets are skipped without feeding the decoder.
+/// Expire late media on source time; never block this clock behind a consumer.
+/// The device renderer owns its own small prebuffer and clock-drift correction.
 pub(super) async fn audio_playout_loop(
     jb: Arc<Mutex<JitterBuffer>>,
-    pcm_tx: mpsc::Sender<Vec<i16>>,
+    arrived: Arc<tokio::sync::Notify>,
+    pcm_tx: mpsc::Sender<crate::audio::DecodedAudio>,
 ) {
     let Ok(mut decoder) = AudioDecoder::new() else {
         tracing::warn!("audio decoder init failed");
         return;
     };
     let mut ticker = tokio::time::interval(Duration::from_millis(10));
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut dropped_output = 0u64;
+    let mut last_log = Instant::now();
     loop {
-        ticker.tick().await;
-        let outcome = jb.lock().unwrap().pop();
-        match outcome {
-            PopOutcome::Packet(p) => {
-                if p.flags & removent_proto::audio_flags::DTX != 0 {
-                    continue;
-                }
-                match decoder.decode_frame(&p.payload) {
-                    Ok(pcm) => {
-                        if pcm_tx.send(pcm).await.is_err() {
-                            return;
-                        }
-                    }
-                    Err(e) => tracing::warn!(err=%e, "opus decode"),
-                }
+        tokio::select! {
+            _ = pcm_tx.closed() => return,
+            _ = ticker.tick() => {},
+            // Decode arrivals immediately. The periodic tick only keeps loss
+            // concealment alive when a reliable stream is stalled.
+            _ = arrived.notified() => {},
+        }
+        // Decode a bounded capture batch together. Only the device callback
+        // meters sample consumption; a second one-block timer would spread a
+        // normal 40/60 ms capture batch and add another prebuffer of latency.
+        for _ in 0..6 {
+            let (outcome, timing) = {
+                let mut buffer = jb.lock().unwrap();
+                let outcome = buffer.pop();
+                (outcome, buffer.output_timing())
+            };
+            let Some((pts_us, source_at, discontinuity)) = timing else {
+                break;
+            };
+            if discontinuity {
+                let Ok(fresh) = AudioDecoder::new() else {
+                    return;
+                };
+                decoder = fresh;
             }
-            PopOutcome::Plc(_) => match decoder.conceal() {
-                Ok(pcm) => {
-                    if pcm_tx.send(pcm).await.is_err() {
-                        return;
+            let decoded = match outcome {
+                PopOutcome::Packet(p) if p.flags & removent_proto::audio_flags::DTX == 0 => {
+                    decoder.decode_frame(&p.payload)
+                }
+                PopOutcome::Packet(_) | PopOutcome::Plc(_) => decoder.conceal(),
+                PopOutcome::Wait => break,
+            };
+            match decoded {
+                Ok(samples) => {
+                    let frame = crate::audio::DecodedAudio {
+                        samples,
+                        pts_us,
+                        source_at,
+                        discontinuity,
+                    };
+                    match pcm_tx.try_send(frame) {
+                        Ok(()) => {}
+                        Err(mpsc::error::TrySendError::Closed(_)) => return,
+                        Err(mpsc::error::TrySendError::Full(_)) => dropped_output += 1,
                     }
                 }
-                Err(e) => tracing::warn!(err=%e, "opus plc"),
-            },
-            PopOutcome::Wait => {}
+                Err(error) => tracing::warn!(%error, "opus decode"),
+            }
+        }
+        if last_log.elapsed() >= Duration::from_secs(5) {
+            let buffer = jb.lock().unwrap();
+            tracing::debug!(
+                depth_ms = buffer.depth_ms(),
+                late_dropped = buffer.late_dropped,
+                plc_frames = buffer.concealed_frames,
+                dropped_output,
+                "audio delivery"
+            );
+            last_log = Instant::now();
         }
     }
 }

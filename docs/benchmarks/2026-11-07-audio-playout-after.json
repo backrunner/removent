@@ -1,0 +1,13 @@
+{
+  "scope": "production JitterBuffer with a simulated 10 ms playout clock",
+  "jitter_sha256": "35cead09537701e380139204701d28f3be7cf168ce0006883aa90734cb4f549b",
+  "observations": {
+    "age_at_recovery_ms": 20,
+    "age_after_100_normal_ticks_ms": 20,
+    "remaining_depth_ms": 20,
+    "configured_depth_ms": 60,
+    "depth_after_25_packet_burst_ms": 60,
+    "burst_evictions": 19,
+    "timestamp_gap_generated_plc": true
+  }
+}

@@ -1,65 +1,72 @@
 import AVFoundation
 
+// Retained by the render block, independently of the UI model and Rust engine.
+// Its only mutable access is the serial AVAudioSourceNode callback.
+private final class AudioRenderContext: @unchecked Sendable {
+    let handle: OpaquePointer
+    init(_ handle: OpaquePointer) { self.handle = handle }
+    deinit { rm_audio_renderer_free(handle) }
+}
+
 @MainActor
 final class RemoteAudio {
     private let engine = AVAudioEngine()
-    private let player = AVAudioPlayerNode()
-    private var format: AVAudioFormat?
-    private var queued = 0
+    private var source: AVAudioSourceNode?
     private var epoch = 0
     private let sessionQueue = DispatchQueue(label: "com.alkinum.removent.audio-session")
-    var muted = false { didSet { player.volume = muted ? 0 : 1 } }
+    var muted = false { didSet { engine.mainMixerNode.outputVolume = muted ? 0 : 1 } }
 
-    init() { engine.attach(player) }
-    func start(rate: Double, channels: Int) async throws {
+    func start(rate: Double, channels: Int, handle: OpaquePointer, generation: UInt64) async throws {
         stop()
         let current = epoch
-        guard (8000...96000).contains(rate), (1...2).contains(channels),
-            let format = AVAudioFormat(standardFormatWithSampleRate:rate, channels:AVAudioChannelCount(channels)) else {
-            throw MobileError.message("Unsupported audio format")
+        guard rate == 48000, channels == 2,
+            let format = AVAudioFormat(standardFormatWithSampleRate:rate, channels:2),
+            let renderer = rm_audio_renderer_create(handle, generation) else {
+            throw MobileError.message("Unsupported or expired audio session")
         }
-        // Audio-session activation can block on the system audio service. Keep it
-        // off the UI thread and serialize it with teardown during reconnects.
+        let context = AudioRenderContext(renderer)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             sessionQueue.async {
                 do {
                     let session = AVAudioSession.sharedInstance()
                     try session.setCategory(.playback, mode:.default)
-                    try session.setPreferredIOBufferDuration(0.01)
+                    try session.setPreferredIOBufferDuration(0.005)
                     try session.setActive(true)
                     continuation.resume()
                 } catch { continuation.resume(throwing: error) }
             }
         }
         guard current == epoch else { return }
-        engine.connect(player, to:engine.mainMixerNode, format:format)
-        self.format = format
-        try engine.start(); player.volume = muted ? 0 : 1; player.play()
-    }
-    func push(_ pcm: RMAudio) {
-        guard let format, engine.isRunning, pcm.channels == format.channelCount,
-            Double(pcm.sample_rate) == format.sampleRate, pcm.len > 0,
-            let source = pcm.data else { return }
-        // At most 120 ms of scheduled audio; discard old playback after a UI stall.
-        if queued >= 12 { player.stop(); epoch += 1; queued = 0; player.play() }
-        let channels = Int(pcm.channels)
-        let count = pcm.len / channels
-        guard let buffer = AVAudioPCMBuffer(pcmFormat:format, frameCapacity:AVAudioFrameCount(count)),
-            let output = buffer.floatChannelData else { return }
-        buffer.frameLength = AVAudioFrameCount(count)
-        for channel in 0..<channels {
-            for sample in 0..<count { output[channel][sample] = Float(source[sample * channels + channel]) / 32768 }
-        }
-        queued += 1
-        let current = epoch
-        player.scheduleBuffer(buffer, completionCallbackType:.dataPlayedBack) { [weak self] _ in
-            Task { @MainActor in
-                if let self, self.epoch == current { self.queued = max(0, self.queued - 1) }
+        let node = AVAudioSourceNode(format:format) { _, _, frameCount, buffers in
+            let output = UnsafeMutableAudioBufferListPointer(buffers)
+            guard output.count == 2,
+                output[0].mDataByteSize >= frameCount * 4,
+                output[1].mDataByteSize >= frameCount * 4,
+                let left = output[0].mData?.assumingMemoryBound(to:Float.self),
+                let right = output[1].mData?.assumingMemoryBound(to:Float.self) else {
+                for buffer in output {
+                    if let data = buffer.mData { memset(data, 0, Int(buffer.mDataByteSize)) }
+                }
+                return noErr
             }
+            rm_audio_render(context.handle, left, right, Int(frameCount), 48000)
+            return noErr
         }
+        engine.attach(node)
+        engine.connect(node, to:engine.mainMixerNode, format:format)
+        source = node
+        engine.mainMixerNode.outputVolume = muted ? 0 : 1
+        do { try engine.start() } catch { stop(); throw error }
+        let session = AVAudioSession.sharedInstance()
+        NSLog("Removent audio output: rate=%g buffer_ms=%g latency_ms=%g",
+            session.sampleRate, session.ioBufferDuration * 1000, session.outputLatency * 1000)
     }
+
     func stop() {
-        epoch += 1; queued = 0; player.stop(); engine.stop(); format = nil
+        epoch += 1
+        engine.stop()
+        if let source { engine.detach(source) }
+        source = nil
         sessionQueue.async {
             try? AVAudioSession.sharedInstance().setActive(false, options:.notifyOthersOnDeactivation)
         }

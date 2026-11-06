@@ -5019,6 +5019,13 @@ impl Window {
     /// This method should only be called as part of the paint phase of element drawing.
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub fn paint_surface(&mut self, bounds: Bounds<Pixels>, image_buffer: CVPixelBuffer) {
+        self.paint_surface_with_callback(bounds, image_buffer, None);
+    }
+
+    /// Paint a surface and optionally observe its actual drawable presentation.
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    pub fn paint_surface_with_callback(&mut self, bounds: Bounds<Pixels>, image_buffer: CVPixelBuffer,
+        presented: Option<crate::SurfacePresented>) {
         use crate::PaintSurface;
 
         self.invalidator.debug_assert_paint();
@@ -5030,6 +5037,7 @@ impl Window {
             bounds,
             content_mask,
             image_buffer,
+            presented,
         });
     }
 

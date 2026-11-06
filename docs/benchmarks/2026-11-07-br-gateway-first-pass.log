@@ -1,0 +1,344 @@
+2026-11-06T18:49:35.126657Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=10422 plc_frames=2297 dropped_output=0
+2026-11-06T18:49:35.603512Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 27.7849166886881, gap_max_ms: 27.7849166886881 }
+2026-11-06T18:49:35.603744Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.166920755559424 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:49:36.316942Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 8, underruns: 380, discontinuities: 1318, rendered_frames: 5571720, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:49:36.616593Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:49:36.616815Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.26453485757993 width=1920 height=1080 frame_age_ms=17
+2026-11-06T18:49:37.628873Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 27.78504160232842, gap_max_ms: 27.78504160232842 }
+2026-11-06T18:49:37.629097Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.3093648442618 width=1920 height=1080 frame_age_ms=15
+2026-11-06T18:49:38.629418Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 20.838916767388582, gap_max_ms: 20.838916767388582 }
+2026-11-06T18:49:38.629622Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.981788905795106 width=1920 height=1080 frame_age_ms=15
+2026-11-06T18:49:39.639034Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 27.784958365373313, gap_max_ms: 27.784958365373313 }
+2026-11-06T18:49:39.639385Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.468942517020906 width=1920 height=1080 frame_age_ms=12
+2026-11-06T18:49:40.137675Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=10690 plc_frames=2455 dropped_output=0
+2026-11-06T18:49:40.649105Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 59, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:49:40.649265Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=58.432378120728096 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:49:41.326261Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 960, dropped_blocks: 8, underruns: 393, discontinuities: 1447, rendered_frames: 5792600, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:49:41.661331Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 27.785000042058527, gap_max_ms: 27.785000042058527 }
+2026-11-06T18:49:41.661543Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.30887406265939 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:49:42.677668Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 20.838833414018154, gap_max_ms: 20.838833414018154 }
+2026-11-06T18:49:42.677846Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.079916889948294 width=1920 height=1080 frame_age_ms=16
+2026-11-06T18:49:43.684878Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 20.83879173733294, gap_max_ms: 20.83879173733294 }
+2026-11-06T18:49:43.685078Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.59536136969205 width=1920 height=1080 frame_age_ms=15
+2026-11-06T18:49:44.699044Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:49:44.699258Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.201530979252 width=1920 height=1080 frame_age_ms=16
+2026-11-06T18:49:45.147318Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=10975 plc_frames=2615 dropped_output=0
+2026-11-06T18:49:45.715176Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 27.785000042058527, gap_max_ms: 27.785000042058527 }
+2026-11-06T18:49:45.715395Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.09159423478254 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:49:46.337239Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 8, underruns: 406, discontinuities: 1572, rendered_frames: 6013700, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:49:46.730227Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 27.784958365373313, gap_max_ms: 27.784958365373313 }
+2026-11-06T18:49:46.730445Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.152689939389816 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:49:47.741048Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 27.784999925643206, gap_max_ms: 27.784999925643206 }
+2026-11-06T18:49:47.741246Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.40231409670369 width=1920 height=1080 frame_age_ms=13
+2026-11-06T18:49:48.746295Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 27.785000042058527, gap_max_ms: 27.785000042058527 }
+2026-11-06T18:49:48.746495Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.70896646847865 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:49:49.747155Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.83891665097326, gap_p99_ms: 27.785000042058527, gap_max_ms: 27.785000042058527 }
+2026-11-06T18:49:49.747349Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.96275347956855 width=1920 height=1080 frame_age_ms=17
+2026-11-06T18:49:50.157483Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=11257 plc_frames=2766 dropped_output=0
+2026-11-06T18:49:50.749242Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.83879162091762, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:49:50.749452Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.89268145750821 width=1920 height=1080 frame_age_ms=16
+2026-11-06T18:49:51.356430Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 8, underruns: 419, discontinuities: 1696, rendered_frames: 6235020, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:49:51.760743Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:49:51.761040Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.35282124450863 width=1920 height=1080 frame_age_ms=16
+2026-11-06T18:49:52.768450Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 27.784958365373313, gap_max_ms: 27.784958365373313 }
+2026-11-06T18:49:52.768633Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.57370031463739 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:49:53.783456Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838875090703368, gap_p99_ms: 27.785000042058527, gap_max_ms: 27.785000042058527 }
+2026-11-06T18:49:53.783650Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.15318508940842 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:49:54.795775Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 20.83879173733294, gap_max_ms: 20.83879173733294 }
+2026-11-06T18:49:54.795979Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.30554753585276 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:49:55.166717Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=11519 plc_frames=2926 dropped_output=0
+2026-11-06T18:49:55.797659Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 56, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 27.784958365373313, gap_max_ms: 27.784958365373313 }
+2026-11-06T18:49:55.797849Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=55.906389391194764 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:49:56.357327Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 8, underruns: 433, discontinuities: 1819, rendered_frames: 6455460, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:49:56.815132Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 60, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 27.785000042058527, gap_max_ms: 27.785000042058527 }
+2026-11-06T18:49:56.815345Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=58.98101688009277 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:49:57.824649Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879162091762, gap_p99_ms: 20.838833297602832, gap_max_ms: 20.838833297602832 }
+2026-11-06T18:49:57.824861Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.46572204605241 width=1920 height=1080 frame_age_ms=16
+2026-11-06T18:49:58.825916Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 27.785166632384062, gap_max_ms: 27.785166632384062 }
+2026-11-06T18:49:58.826115Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.94028148829733 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:49:59.831769Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 34.73120823036879, gap_max_ms: 34.73120823036879 }
+2026-11-06T18:49:59.832050Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.67426538073194 width=1920 height=1080 frame_age_ms=16
+2026-11-06T18:50:00.177732Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=11794 plc_frames=3085 dropped_output=0
+2026-11-06T18:50:00.846578Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 34.731208346784115, gap_max_ms: 34.731208346784115 }
+2026-11-06T18:50:00.846751Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.18414070999861 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:01.366299Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 8, underruns: 446, discontinuities: 1945, rendered_frames: 6676340, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:50:01.861989Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 20.83891665097326, gap_max_ms: 20.83891665097326 }
+2026-11-06T18:50:01.862174Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.12982000536085 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:02.874229Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.838875090703368, gap_max_ms: 20.838875090703368 }
+2026-11-06T18:50:02.874447Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.3094993335918 width=1920 height=1080 frame_age_ms=14
+2026-11-06T18:50:03.875039Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 56, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 20.839041681028903, gap_max_ms: 20.839041681028903 }
+2026-11-06T18:50:03.875358Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=55.96728946993098 width=1920 height=1080 frame_age_ms=13
+2026-11-06T18:50:04.880542Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 20.838833297602832, gap_max_ms: 20.838833297602832 }
+2026-11-06T18:50:04.880741Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.70640028754881 width=1920 height=1080 frame_age_ms=16
+2026-11-06T18:50:05.187351Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=12081 plc_frames=3242 dropped_output=0
+2026-11-06T18:50:05.882314Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 20.838958327658474, gap_max_ms: 20.838958327658474 }
+2026-11-06T18:50:05.882530Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.910832562827224 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:06.377851Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 8, underruns: 458, discontinuities: 2066, rendered_frames: 6897440, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:50:06.897525Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83900000434369, gap_p99_ms: 27.784958365373313, gap_max_ms: 27.784958365373313 }
+2026-11-06T18:50:06.897728Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.143509310750595 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:07.899577Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:50:07.899767Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.89515883565227 width=1920 height=1080 frame_age_ms=17
+2026-11-06T18:50:08.907855Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 27.78512507211417, gap_max_ms: 27.78512507211417 }
+2026-11-06T18:50:08.908046Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.53500685004352 width=1920 height=1080 frame_age_ms=16
+2026-11-06T18:50:09.920060Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879162091762, gap_p99_ms: 20.838833414018154, gap_max_ms: 20.838833414018154 }
+2026-11-06T18:50:09.920309Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.311851838096274 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:10.187755Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=12365 plc_frames=3396 dropped_output=0
+2026-11-06T18:50:10.924183Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838916767388582, gap_p99_ms: 27.78483333531767, gap_max_ms: 27.78483333531767 }
+2026-11-06T18:50:10.924356Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.78043007689265 width=1920 height=1080 frame_age_ms=15
+2026-11-06T18:50:11.387104Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 8, underruns: 472, discontinuities: 2191, rendered_frames: 7118320, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:50:11.925596Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.838875090703368, gap_max_ms: 20.838875090703368 }
+2026-11-06T18:50:11.925874Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.92924429415122 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:12.932638Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 27.785000042058527, gap_max_ms: 27.785000042058527 }
+2026-11-06T18:50:12.932803Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.617407866343186 width=1920 height=1080 frame_age_ms=15
+2026-11-06T18:50:13.933231Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.83879162091762, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:50:13.933537Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.97604869353046 width=1920 height=1080 frame_age_ms=18
+2026-11-06T18:50:14.940454Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838875090703368, gap_p99_ms: 27.784958365373313, gap_max_ms: 27.784958365373313 }
+2026-11-06T18:50:14.940675Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.60193937864244 width=1920 height=1080 frame_age_ms=12
+2026-11-06T18:50:15.197102Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=12623 plc_frames=3556 dropped_output=0
+2026-11-06T18:50:15.953229Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879162091762, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:50:15.953437Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.28129163386983 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:16.387629Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 8, underruns: 485, discontinuities: 2322, rendered_frames: 7338980, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:50:16.966373Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 27.784958365373313, gap_max_ms: 27.784958365373313 }
+2026-11-06T18:50:16.966587Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.259649452398136 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:17.983024Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879162091762, gap_p99_ms: 20.838833297602832, gap_max_ms: 20.838833297602832 }
+2026-11-06T18:50:17.983234Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.06246843683022 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:18.996541Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 27.78495824895799, gap_max_ms: 27.78495824895799 }
+2026-11-06T18:50:18.996886Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.23869196941072 width=1920 height=1080 frame_age_ms=17
+2026-11-06T18:50:20.006937Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 20.83900000434369, gap_max_ms: 20.83900000434369 }
+2026-11-06T18:50:20.007155Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.42318644649559 width=1920 height=1080 frame_age_ms=20
+2026-11-06T18:50:20.207919Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=12894 plc_frames=3714 dropped_output=0
+2026-11-06T18:50:21.011728Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.83879162091762, gap_p99_ms: 27.7849166886881, gap_max_ms: 27.7849166886881 }
+2026-11-06T18:50:21.011935Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.74086447195658 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:21.397264Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 8, underruns: 498, discontinuities: 2449, rendered_frames: 7559860, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:50:22.024347Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.83891665097326, gap_max_ms: 20.83891665097326 }
+2026-11-06T18:50:22.024534Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.28926462801588 width=1920 height=1080 frame_age_ms=12
+2026-11-06T18:50:23.027303Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 27.785083395428956, gap_max_ms: 27.785083395428956 }
+2026-11-06T18:50:23.027450Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.842971291806386 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:24.040132Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 27.784958365373313, gap_max_ms: 27.784958365373313 }
+2026-11-06T18:50:24.056449Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.274025495342855 width=1920 height=1080 frame_age_ms=36
+2026-11-06T18:50:25.070751Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 60, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 34.73125002346933, gap_max_ms: 34.73125002346933 }
+2026-11-06T18:50:25.070889Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=59.1543127312885 width=1920 height=1080 frame_age_ms=17
+2026-11-06T18:50:25.217154Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=13180 plc_frames=3872 dropped_output=0
+2026-11-06T18:50:26.079368Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 27.784999925643206, gap_max_ms: 27.784999925643206 }
+2026-11-06T18:50:26.079521Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.52109439331944 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:26.406876Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 8, underruns: 512, discontinuities: 2572, rendered_frames: 7780740, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:50:27.092108Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879162091762, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:50:27.092308Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.27943897752251 width=1920 height=1080 frame_age_ms=14
+2026-11-06T18:50:28.094508Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:50:28.094708Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.87527962120066 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:29.106057Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 20.838958327658474, gap_max_ms: 20.838958327658474 }
+2026-11-06T18:50:29.106222Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.34950373388084 width=1920 height=1080 frame_age_ms=19
+2026-11-06T18:50:30.119900Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838875090703368, gap_p99_ms: 27.78524998575449, gap_max_ms: 27.78524998575449 }
+2026-11-06T18:50:30.120093Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.21774050842156 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:30.226502Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=13466 plc_frames=4028 dropped_output=0
+2026-11-06T18:50:31.132935Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.838833297602832, gap_max_ms: 20.838833297602832 }
+2026-11-06T18:50:31.133130Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.26496364798387 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:31.408399Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 8, underruns: 525, discontinuities: 2701, rendered_frames: 8001180, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:50:32.136922Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:50:32.137121Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.781261810757655 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:33.138074Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.839041681028903, gap_max_ms: 20.839041681028903 }
+2026-11-06T18:50:33.138275Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.94610529481131 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:34.153419Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 27.784875012002885, gap_p99_ms: 27.785083395428956, gap_max_ms: 27.785083395428956 }
+2026-11-06T18:50:34.153644Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.13514997701537 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:35.154127Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:50:35.154310Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.97284765237444 width=1920 height=1080 frame_age_ms=12
+2026-11-06T18:50:35.237746Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=13726 plc_frames=4188 dropped_output=0
+2026-11-06T18:50:36.157518Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 27.784875012002885, gap_p99_ms: 27.785000042058527, gap_max_ms: 27.785000042058527 }
+2026-11-06T18:50:36.157678Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.81802606701387 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:36.418174Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 8, underruns: 538, discontinuities: 2832, rendered_frames: 8222280, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:50:37.161233Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 27.784958365373313, gap_max_ms: 27.784958365373313 }
+2026-11-06T18:50:37.161605Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.798420021808965 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:38.171417Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 27.784999925643206, gap_max_ms: 27.784999925643206 }
+2026-11-06T18:50:38.171608Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.43673704622114 width=1920 height=1080 frame_age_ms=12
+2026-11-06T18:50:39.191110Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:50:39.191329Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.890911676859616 width=1920 height=1080 frame_age_ms=20
+2026-11-06T18:50:40.202740Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 27.78470830526203, gap_max_ms: 27.78470830526203 }
+2026-11-06T18:50:40.202929Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.345952664839324 width=1920 height=1080 frame_age_ms=17
+2026-11-06T18:50:40.247729Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=14001 plc_frames=4349 dropped_output=0
+2026-11-06T18:50:41.218348Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838750060647726, gap_p99_ms: 20.838833297602832, gap_max_ms: 20.838833297602832 }
+2026-11-06T18:50:41.218632Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.11972556737248 width=1920 height=1080 frame_age_ms=17
+2026-11-06T18:50:41.587132Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 480, dropped_blocks: 8, underruns: 552, discontinuities: 2958, rendered_frames: 8450200, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:50:42.234623Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 27.784875012002885, gap_p99_ms: 27.78504160232842, gap_max_ms: 27.78504160232842 }
+2026-11-06T18:50:42.234876Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.0875506113371 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:43.247137Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838958327658474, gap_p99_ms: 20.839208271354437, gap_max_ms: 20.839208271354437 }
+2026-11-06T18:50:43.247402Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.29810061666794 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:44.262841Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 27.784958365373313, gap_p99_ms: 27.785416576080024, gap_max_ms: 27.785416576080024 }
+2026-11-06T18:50:44.263083Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.11854428276801 width=1920 height=1080 frame_age_ms=17
+2026-11-06T18:50:45.257667Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=14283 plc_frames=4510 dropped_output=0
+2026-11-06T18:50:45.264239Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 20.839041681028903, gap_max_ms: 20.839041681028903 }
+2026-11-06T18:50:45.264442Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.93344414755963 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:46.275087Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.839083357714117, gap_p99_ms: 20.839374978095293, gap_max_ms: 20.839374978095293 }
+2026-11-06T18:50:46.275392Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.40025145725585 width=1920 height=1080 frame_age_ms=17
+2026-11-06T18:50:46.596554Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 8, underruns: 564, discontinuities: 3090, rendered_frames: 8671080, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:50:47.284697Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838916767388582, gap_p99_ms: 27.7849166886881, gap_max_ms: 27.7849166886881 }
+2026-11-06T18:50:47.284996Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.4656033909113 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:48.285183Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.839416654780507, gap_p99_ms: 27.7849166886881, gap_max_ms: 27.7849166886881 }
+2026-11-06T18:50:48.285392Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.9896919894614 width=1920 height=1080 frame_age_ms=13
+2026-11-06T18:50:49.298762Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83891665097326, gap_p99_ms: 27.785000042058527, gap_max_ms: 27.785000042058527 }
+2026-11-06T18:50:49.298950Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.235157038226944 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:50.267704Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=14567 plc_frames=4667 dropped_output=0
+2026-11-06T18:50:50.313225Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83933330141008, gap_p99_ms: 20.83966659847647, gap_max_ms: 20.83966659847647 }
+2026-11-06T18:50:50.313390Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.18406679834113 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:51.320287Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 27.7849166886881, gap_p99_ms: 27.784958365373313, gap_max_ms: 27.784958365373313 }
+2026-11-06T18:50:51.320495Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.603066828593256 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:51.616502Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 8, underruns: 578, discontinuities: 3215, rendered_frames: 8892400, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:50:52.321029Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.839041681028903, gap_p99_ms: 27.784958365373313, gap_max_ms: 27.784958365373313 }
+2026-11-06T18:50:52.321271Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.96999817471124 width=1920 height=1080 frame_age_ms=12
+2026-11-06T18:50:53.337201Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83945833146572, gap_p99_ms: 27.785083279013634, gap_max_ms: 27.785083279013634 }
+2026-11-06T18:50:53.337438Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.090884751221544 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:54.352826Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 27.78504171874374, gap_p99_ms: 27.785500045865774, gap_max_ms: 27.785500045865774 }
+2026-11-06T18:50:54.353278Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.121621800080106 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:55.276518Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=14827 plc_frames=4827 dropped_output=0
+2026-11-06T18:50:55.367814Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 27.78504171874374, gap_p99_ms: 27.78512507211417, gap_max_ms: 27.78512507211417 }
+2026-11-06T18:50:55.368072Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.169327329953354 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:56.368883Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 27.784999925643206, gap_p99_ms: 34.73125002346933, gap_max_ms: 34.73125002346933 }
+2026-11-06T18:50:56.369101Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.95419931240154 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:50:56.617602Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 8, underruns: 591, discontinuities: 3346, rendered_frames: 9113060, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:50:57.384838Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 27.785208309069276, gap_p99_ms: 34.73170835059136, gap_max_ms: 34.73170835059136 }
+2026-11-06T18:50:57.385229Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.10202778653588 width=1920 height=1080 frame_age_ms=17
+2026-11-06T18:50:58.402037Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 27.78504160232842, gap_p99_ms: 34.73125002346933, gap_max_ms: 34.73125002346933 }
+2026-11-06T18:50:58.402414Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.04176491713184 width=1920 height=1080 frame_age_ms=17
+2026-11-06T18:50:59.417605Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 27.785000042058527, gap_p99_ms: 27.78545825276524, gap_max_ms: 27.78545825276524 }
+2026-11-06T18:50:59.417993Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.14754456488976 width=1920 height=1080 frame_age_ms=17
+2026-11-06T18:51:00.287715Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=15104 plc_frames=4984 dropped_output=0
+2026-11-06T18:51:00.431527Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 60, repeated: 0, gap_p95_ms: 27.785000042058527, gap_p99_ms: 27.785416692495346, gap_max_ms: 27.785416692495346 }
+2026-11-06T18:51:00.431941Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=59.19914899881467 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:01.493357Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 23, repeated: 0, gap_p95_ms: 159.7636666847393, gap_p99_ms: 194.49487491510808, gap_max_ms: 194.49487491510808 }
+2026-11-06T18:51:01.493571Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=21.669276204956024 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:01.627463Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 8, underruns: 605, discontinuities: 3469, rendered_frames: 9333940, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:51:02.630057Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 19, repeated: 0, gap_p95_ms: 173.65600005723536, gap_p99_ms: 173.65600005723536, gap_max_ms: 173.65600005723536 }
+2026-11-06T18:51:02.630235Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=16.718280692013632 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:03.749784Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 11, repeated: 0, gap_p95_ms: 159.76362500805408, gap_p99_ms: 159.76362500805408, gap_max_ms: 159.76362500805408 }
+2026-11-06T18:51:03.750109Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=9.825439894992845 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:04.752261Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 48.62362495623529, gap_p99_ms: 618.2160000316799, gap_max_ms: 618.2160000316799 }
+2026-11-06T18:51:04.752578Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.87801088615193 width=1920 height=1080 frame_age_ms=16
+2026-11-06T18:51:05.297079Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=15393 plc_frames=5147 dropped_output=0
+2026-11-06T18:51:05.766864Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.838875090703368, gap_max_ms: 20.838875090703368 }
+2026-11-06T18:51:05.767097Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.18387646140457 width=1920 height=1080 frame_age_ms=15
+2026-11-06T18:51:06.637595Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 28, underruns: 619, discontinuities: 3619, rendered_frames: 9554820, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:51:06.767764Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 27.785000042058527, gap_max_ms: 27.785000042058527 }
+2026-11-06T18:51:06.767980Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.962345497207835 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:07.781268Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879162091762, gap_p99_ms: 27.784999925643206, gap_max_ms: 27.784999925643206 }
+2026-11-06T18:51:07.781543Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.23977231088366 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:08.783639Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:51:08.783829Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.881187031577944 width=1920 height=1080 frame_age_ms=17
+2026-11-06T18:51:09.799977Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83891665097326, gap_p99_ms: 27.78512507211417, gap_max_ms: 27.78512507211417 }
+2026-11-06T18:51:09.800226Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.078683438479366 width=1920 height=1080 frame_age_ms=18
+2026-11-06T18:51:10.307093Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=15673 plc_frames=5304 dropped_output=0
+2026-11-06T18:51:10.809451Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 27.785000042058527, gap_p99_ms: 34.731208346784115, gap_max_ms: 34.731208346784115 }
+2026-11-06T18:51:10.809935Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.4703081238466 width=1920 height=1080 frame_age_ms=13
+2026-11-06T18:51:11.657631Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 28, underruns: 632, discontinuities: 3749, rendered_frames: 9776360, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:51:11.814134Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 27.785375015810132, gap_p99_ms: 34.73070834297687, gap_max_ms: 34.73070834297687 }
+2026-11-06T18:51:11.814473Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.76197812398741 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:12.826390Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 27.785208309069276, gap_p99_ms: 34.730666666291654, gap_max_ms: 34.730666666291654 }
+2026-11-06T18:51:12.826689Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.31736451793255 width=1920 height=1080 frame_age_ms=15
+2026-11-06T18:51:13.840032Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 27.785000042058527, gap_p99_ms: 34.7311666700989, gap_max_ms: 34.7311666700989 }
+2026-11-06T18:51:13.840425Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.23692447748177 width=1920 height=1080 frame_age_ms=15
+2026-11-06T18:51:14.842848Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 47, repeated: 0, gap_p95_ms: 27.78504171874374, gap_p99_ms: 208.38741667103022, gap_max_ms: 208.38741667103022 }
+2026-11-06T18:51:14.843237Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=46.88668660015906 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:15.308249Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=15931 plc_frames=5463 dropped_output=0
+2026-11-06T18:51:15.857000Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 53, repeated: 0, gap_p95_ms: 34.73054163623601, gap_p99_ms: 152.8175416169688, gap_max_ms: 152.8175416169688 }
+2026-11-06T18:51:15.857274Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=52.28081424483864 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:16.667246Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 28, underruns: 645, discontinuities: 3879, rendered_frames: 9997240, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:51:16.858145Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 27.785749989561737, gap_p99_ms: 34.731208346784115, gap_max_ms: 34.731208346784115 }
+2026-11-06T18:51:16.858550Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.95075183734865 width=1920 height=1080 frame_age_ms=15
+2026-11-06T18:51:17.859987Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 27.785000042058527, gap_p99_ms: 41.677458328194916, gap_max_ms: 41.677458328194916 }
+2026-11-06T18:51:17.860418Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.91718809319714 width=1920 height=1080 frame_age_ms=8
+2026-11-06T18:51:18.867684Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 27.784999925643206, gap_max_ms: 27.784999925643206 }
+2026-11-06T18:51:18.867903Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.58913228489113 width=1920 height=1080 frame_age_ms=14
+2026-11-06T18:51:19.879853Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 27.785000042058527, gap_p99_ms: 27.785083279013634, gap_max_ms: 27.785083279013634 }
+2026-11-06T18:51:19.880070Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.3154859656135 width=1920 height=1080 frame_age_ms=15
+2026-11-06T18:51:20.317836Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=16208 plc_frames=5626 dropped_output=0
+2026-11-06T18:51:20.882203Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.838958327658474, gap_max_ms: 20.838958327658474 }
+2026-11-06T18:51:20.882383Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.87907747021957 width=1920 height=1080 frame_age_ms=16
+2026-11-06T18:51:21.667999Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 28, underruns: 658, discontinuities: 4007, rendered_frames: 10217680, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:51:21.882711Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:51:21.882914Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.98170887145226 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:22.883782Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 27.785000042058527, gap_max_ms: 27.785000042058527 }
+2026-11-06T18:51:22.884006Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.950960496083155 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:23.897753Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 27.78495824895799, gap_max_ms: 27.78495824895799 }
+2026-11-06T18:51:23.897971Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.21379424342462 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:24.913337Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 20.83891665097326, gap_max_ms: 20.83891665097326 }
+2026-11-06T18:51:24.913559Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.12266020228562 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:25.326636Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=16497 plc_frames=5785 dropped_output=0
+2026-11-06T18:51:25.923071Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 27.78495824895799, gap_p99_ms: 34.73125002346933, gap_max_ms: 34.73125002346933 }
+2026-11-06T18:51:25.923280Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.45387699831815 width=1920 height=1080 frame_age_ms=14
+2026-11-06T18:51:26.676859Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 2400, dropped_blocks: 28, underruns: 670, discontinuities: 4132, rendered_frames: 10438560, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:51:26.934268Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:51:26.934464Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.370015045701884 width=1920 height=1080 frame_age_ms=15
+2026-11-06T18:51:27.940961Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.838833297602832, gap_max_ms: 20.838833297602832 }
+2026-11-06T18:51:27.941138Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.63241789069905 width=1920 height=1080 frame_age_ms=13
+2026-11-06T18:51:28.953708Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 27.785000042058527, gap_max_ms: 27.785000042058527 }
+2026-11-06T18:51:28.953916Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.280341701177484 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:29.968959Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:51:29.969134Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.14083047300785 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:30.326979Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=16781 plc_frames=5940 dropped_output=0
+2026-11-06T18:51:30.983224Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838875090703368, gap_p99_ms: 27.784958365373313, gap_max_ms: 27.784958365373313 }
+2026-11-06T18:51:30.983405Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.194524760650204 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:31.678040Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 28, underruns: 683, discontinuities: 4259, rendered_frames: 10659220, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:51:31.998086Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 27.785208425484598, gap_max_ms: 27.785208425484598 }
+2026-11-06T18:51:31.998328Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.16120222820279 width=1920 height=1080 frame_age_ms=16
+2026-11-06T18:51:33.013266Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 27.78483333531767, gap_max_ms: 27.78483333531767 }
+2026-11-06T18:51:33.013490Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.14674666867006 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:34.023880Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 20.838875090703368, gap_max_ms: 20.838875090703368 }
+2026-11-06T18:51:34.024145Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.403957942724965 width=1920 height=1080 frame_age_ms=11
+2026-11-06T18:51:35.026293Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 20.83891665097326, gap_max_ms: 20.83891665097326 }
+2026-11-06T18:51:35.026523Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.87816696635806 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:35.336680Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=17045 plc_frames=6102 dropped_output=0
+2026-11-06T18:51:36.040815Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 20.838875090703368, gap_max_ms: 20.838875090703368 }
+2026-11-06T18:51:36.041036Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.18311771970487 width=1920 height=1080 frame_age_ms=15
+2026-11-06T18:51:36.686671Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 28, underruns: 697, discontinuities: 4394, rendered_frames: 10880100, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:51:37.052219Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 20.83900000434369, gap_max_ms: 20.83900000434369 }
+2026-11-06T18:51:37.052450Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.35893974064811 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:38.064592Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 27.78495824895799, gap_max_ms: 27.78495824895799 }
+2026-11-06T18:51:38.064829Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.30461565213825 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:39.078983Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838875090703368, gap_p99_ms: 20.83891665097326, gap_max_ms: 20.83891665097326 }
+2026-11-06T18:51:39.079226Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.19085193118046 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:40.090494Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 27.784958365373313, gap_max_ms: 27.784958365373313 }
+2026-11-06T18:51:40.090760Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.354073662030096 width=1920 height=1080 frame_age_ms=13
+2026-11-06T18:51:40.338256Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=17321 plc_frames=6268 dropped_output=0
+2026-11-06T18:51:41.103083Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83891665097326, gap_p99_ms: 27.784958365373313, gap_max_ms: 27.784958365373313 }
+2026-11-06T18:51:41.103292Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.29428243157452 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:41.687100Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 28, underruns: 710, discontinuities: 4523, rendered_frames: 11100540, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:51:42.117375Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83891665097326, gap_p99_ms: 27.78504171874374, gap_max_ms: 27.78504171874374 }
+2026-11-06T18:51:42.117607Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.194935977724235 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:43.128922Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 27.785083279013634, gap_max_ms: 27.785083279013634 }
+2026-11-06T18:51:43.129153Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.351408108186234 width=1920 height=1080 frame_age_ms=16
+2026-11-06T18:51:44.140182Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.838833414018154, gap_max_ms: 20.838833414018154 }
+2026-11-06T18:51:44.140407Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.367686191832846 width=1920 height=1080 frame_age_ms=12
+2026-11-06T18:51:45.143819Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.83879162091762, gap_p99_ms: 27.785000042058527, gap_max_ms: 27.785000042058527 }
+2026-11-06T18:51:45.144005Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.80660192375059 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:45.347198Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=17606 plc_frames=6429 dropped_output=0
+2026-11-06T18:51:46.158937Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 27.784999925643206, gap_max_ms: 27.784999925643206 }
+2026-11-06T18:51:46.159110Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.147021161961675 width=1920 height=1080 frame_age_ms=14
+2026-11-06T18:51:46.696716Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 28, underruns: 723, discontinuities: 4652, rendered_frames: 11321420, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:51:47.171728Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 20.83891665097326, gap_max_ms: 20.83891665097326 }
+2026-11-06T18:51:47.171928Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.277591135839295 width=1920 height=1080 frame_age_ms=15
+2026-11-06T18:51:48.173453Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:51:48.173700Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.91359332730174 width=1920 height=1080 frame_age_ms=13
+2026-11-06T18:51:49.175725Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838875090703368, gap_p99_ms: 27.7849166886881, gap_max_ms: 27.7849166886881 }
+2026-11-06T18:51:49.175948Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.88518436600526 width=1920 height=1080 frame_age_ms=14
+2026-11-06T18:51:50.186391Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 20.838875090703368, gap_max_ms: 20.838875090703368 }
+2026-11-06T18:51:50.186597Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.40093281127686 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:50.356842Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=17885 plc_frames=6587 dropped_output=0
+2026-11-06T18:51:51.188051Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 27.78495824895799, gap_max_ms: 27.78495824895799 }
+2026-11-06T18:51:51.188269Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.91758095224275 width=1920 height=1080 frame_age_ms=14
+2026-11-06T18:51:51.698367Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 960, dropped_blocks: 28, underruns: 735, discontinuities: 4782, rendered_frames: 11542080, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:51:52.203621Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 27.78504171874374, gap_max_ms: 27.78504171874374 }
+2026-11-06T18:51:52.203835Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.12340091250634 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:53.204712Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 27.7849166886881, gap_max_ms: 27.7849166886881 }
+2026-11-06T18:51:53.204925Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.95040092767527 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:54.223413Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833414018154, gap_p99_ms: 20.83891665097326, gap_max_ms: 20.83891665097326 }
+2026-11-06T18:51:54.223618Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.94753601517065 width=1920 height=1080 frame_age_ms=19
+2026-11-06T18:51:55.237247Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838875090703368, gap_p99_ms: 27.785083395428956, gap_max_ms: 27.785083395428956 }
+2026-11-06T18:51:55.237733Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.22050181219895 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:55.367244Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=18153 plc_frames=6750 dropped_output=0
+2026-11-06T18:51:56.254465Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 59, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 27.784958365373313, gap_max_ms: 27.784958365373313 }
+2026-11-06T18:51:56.254686Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=58.0293479138804 width=1920 height=1080 frame_age_ms=17
+2026-11-06T18:51:56.706774Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 28, underruns: 749, discontinuities: 4911, rendered_frames: 11762960, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T18:51:57.268636Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 57, repeated: 0, gap_p95_ms: 20.838874974288046, gap_p99_ms: 27.784999925643206, gap_max_ms: 27.784999925643206 }
+2026-11-06T18:51:57.268856Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=56.21616857347981 width=1920 height=1080 frame_age_ms=16
+2026-11-06T18:51:58.281155Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.83879173733294, gap_p99_ms: 20.838874974288046, gap_max_ms: 20.838874974288046 }
+2026-11-06T18:51:58.281377Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.2957044703053 width=1920 height=1080 frame_age_ms=0
+2026-11-06T18:51:59.296470Z DEBUG removent::ui::viewer::lifecycle: viewer actual presentation presented=PresentationStats { frames: 58, repeated: 0, gap_p95_ms: 20.838833297602832, gap_p99_ms: 20.838833414018154, gap_max_ms: 20.838833414018154 }
+2026-11-06T18:51:59.296696Z DEBUG removent::ui::viewer::lifecycle: viewer frame delivery fps=57.13884385683016 width=1920 height=1080 frame_age_ms=0

@@ -108,6 +108,7 @@ fn multiple_viewers_survive_new_connections_and_old_events(cx: &mut TestAppConte
     assert!(clients[0].take_client_frames().is_none());
     frames[1]
         .send(crate::engine::VideoFrame {
+            surface: None,
             width: 2,
             height: 2,
             data: vec![80; 16],

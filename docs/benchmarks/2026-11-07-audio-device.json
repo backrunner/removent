@@ -1,0 +1,18 @@
+{
+  "scope": "five seconds of silence through the production macOS CPAL output callback",
+  "command": "rtk proxy cargo run --locked -p removent-app --example audio_output_probe -j 4",
+  "input_rate_hz": 48000,
+  "input_period_ms": 10,
+  "periods": 500,
+  "observations": {
+    "queued_source_frames": 960,
+    "dropped_blocks": 0,
+    "underruns": 0,
+    "discontinuities": 0,
+    "rendered_device_frames": 219560,
+    "last_callback_frames": 220,
+    "device_rate_hz": 44100,
+    "os_reported_device_delay_us": 7256
+  },
+  "limitations": "Silent output validates device callback consumption and timing only. No acoustic loopback, sound quality, capture, network, or source-to-ear latency measurement. OS timing is an estimate."
+}

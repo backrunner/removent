@@ -39,6 +39,8 @@ pub enum ConnectError {
 
 /// Connection configuration.
 pub struct ClientConfig {
+    /// Frontend can present a retained native pixel buffer.
+    pub native_video: bool,
     pub video_quality: removent_proto::VideoQuality,
     /// Caller pins the host certificate or supplies first-use certificate confirmation.
     /// System passwords must never be sent over a permissive, unconfirmed TLS session.
@@ -62,6 +64,7 @@ const KEYFRAME_MIN_INTERVAL: Duration = Duration::from_millis(500);
 /// resolution hot-switching).
 #[derive(Debug, Clone)]
 pub struct DecodedFrame {
+    pub surface: Option<removent_media_codec::NativePixelBuffer>,
     pub data: Vec<u8>,
     pub width: u32,
     pub height: u32,
@@ -82,7 +85,7 @@ pub struct ClientSession {
     /// Decoded BGRA frames (consumed by the renderer).
     pub decoded_bgra_rx: removent_core::latest::Receiver<DecodedFrame>,
     /// Decoded PCM (consumed by playback).
-    pub decoded_pcm_rx: mpsc::Receiver<Vec<i16>>,
+    pub decoded_pcm_rx: mpsc::Receiver<crate::audio::DecodedAudio>,
     /// Most recent host quality directive (bitrate_kbps, fps, scale).
     pub last_quality: Arc<Mutex<Option<(u32, u8, f32)>>>,
     /// Time of the last outbound KeyframeRequest (rate limiting).

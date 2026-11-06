@@ -128,6 +128,7 @@ pub(super) async fn read_frames(
             if changed && size.width > 0 && size.height > 0 {
                 let copy_started = Instant::now();
                 let frame = DecodedFrame {
+                    surface: None,
                     data: framebuffer.clone(),
                     width: size.width,
                     height: size.height,

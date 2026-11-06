@@ -19,7 +19,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.10"
+version = "0.1.11"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/backrunner/removent"
@@ -100,3 +100,4 @@ mdns-sd = { path = "vendor/mdns-sd" }
 
 # Chinese punctuation must stay attached when GPUI wraps text.
 gpui-pre = { path = "vendor/gpui" }
+gpui-pre-apple = { path = "vendor/gpui-apple" }

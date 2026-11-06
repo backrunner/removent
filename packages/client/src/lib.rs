@@ -1,9 +1,11 @@
 //! removent-client: controller-side session engine.
 
+pub mod audio;
 pub mod cloud_sync;
 pub mod connection;
 pub mod host_pins;
 mod input_queue;
+pub mod presentation;
 pub use input_queue::{InputSender, InputSnapshot};
 pub mod jitter;
 pub mod keychain;
@@ -16,6 +18,7 @@ pub mod vnc;
 pub mod wake_on_lan;
 
 pub use jitter::{AudioPacketIn, JitterBuffer, PopOutcome};
+pub use removent_media_codec::NativePixelBuffer;
 pub use session::{
     ClientConfig, ClientSession, ConnectError, DecodedFrame, PinRequest, connect_session,
     connect_session_with_confirmation, quick_resume,

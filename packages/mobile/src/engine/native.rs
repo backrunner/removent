@@ -133,6 +133,7 @@ pub(super) async fn run_native(
     expected = trust.expected;
     let clip = MemoryClipboard::new();
     let config = || removent_client::ClientConfig {
+        native_video: true,
         video_quality: request.video_quality,
         host_identity_verified: expected.is_some() || trust.needs_confirmation,
         pairing_code: request.pairing_code.clone(),
@@ -249,6 +250,7 @@ pub(super) async fn run_native(
             s.control = Some(session.cmd_tx.clone());
             s.pin = None;
             s.clipboard = clipboard.then(|| clip.clone());
+            s.audio = Arc::new(removent_client::audio::AudioQueue::default());
             s.audio_rate = params.sample_rate;
             s.audio_channels = params.channels;
         });
@@ -267,8 +269,7 @@ pub(super) async fn run_native(
                 pcm = session.decoded_pcm_rx.recv(), if pcm_open => {
                     match pcm {
                         Some(pcm) => attempt.update(|s| {
-                            if s.audio.len() >= 12 { s.audio.pop_front(); }
-                            s.audio.push_back(pcm);
+                            s.audio.push(pcm);
                         }),
                         None => pcm_open = false,
                     }

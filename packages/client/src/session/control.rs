@@ -15,7 +15,7 @@ pub(super) fn build_session(
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<ControlMsg>(64);
     let (input_tx, mut input_rx) = crate::input_queue::channel();
     let (decoded_bgra_tx, decoded_bgra_rx) = removent_core::latest::channel();
-    let (decoded_pcm_tx, decoded_pcm_rx) = mpsc::channel(128);
+    let (decoded_pcm_tx, decoded_pcm_rx) = mpsc::channel(6);
 
     let resume_token = Arc::new(Mutex::new(ack.resume_token));
     let last_kf = Arc::new(Mutex::new(None));
@@ -27,6 +27,7 @@ pub(super) fn build_session(
         decoded_bgra_tx,
         decoded_pcm_tx,
         ack.audio.enabled,
+        cfg.native_video,
         cmd_tx.clone(),
         last_kf.clone(),
     );

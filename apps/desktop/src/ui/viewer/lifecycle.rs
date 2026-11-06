@@ -17,21 +17,25 @@ impl ViewerView {
             window,
             async move |this: gpui::WeakEntity<ViewerView>, cx| {
                 while let Some(frame) = frames_rx.recv().await {
+                    let (painted, next_frame) = futures::channel::oneshot::channel();
                     if this
                         .update_in(&mut *cx, |this, window, cx| {
                             this.handle_frame(frame, window);
                             cx.notify();
+                            window.on_next_frame(move |_, _| {
+                                let _ = painted.send(());
+                            });
                         })
                         .is_err()
                     {
                         break;
                     }
-                    // Yield to input/layout without imposing a second frame
-                    // clock. The single slot coalesces frames if rendering is
-                    // slower than capture/send pacing.
-                    cx.background_executor()
-                        .timer(Duration::from_millis(1))
-                        .await;
+                    // Coalesce in the single slot until the display requests
+                    // another frame, instead of polling on a 1 ms UI timer.
+                    // A bounded fallback lets a hidden window observe session
+                    // closure even when its display link is suspended.
+                    let timeout = cx.background_executor().timer(Duration::from_millis(100));
+                    futures::future::select(next_frame, timeout).await;
                 }
                 let _ = this.update_in(&mut *cx, |this, window, cx| {
                     this.ended = true;
@@ -133,6 +137,9 @@ impl ViewerView {
             session_generation: engine.client_generation(),
             engine,
             current: None,
+            surface: None,
+            surface_pts: 0,
+            presentation: Arc::default(),
             width: 0,
             height: 0,
             fps_counter: 0,
@@ -168,7 +175,22 @@ impl ViewerView {
         if frame.width == 0 || frame.height == 0 {
             return;
         }
-        if let Some(buf) = image::RgbaImage::from_raw(frame.width, frame.height, frame.data) {
+        use core_foundation::base::TCFType;
+        let surface = frame.surface.map(|buffer| unsafe {
+            core_video::pixel_buffer::CVPixelBuffer::wrap_under_get_rule(buffer.as_ptr().cast())
+        });
+        let next = if surface.is_none() {
+            let Some(buf) = image::RgbaImage::from_raw(frame.width, frame.height, frame.data)
+            else {
+                return;
+            };
+            Some(Arc::new(RenderImage::new(vec![image::Frame::new(buf)])))
+        } else {
+            None
+        };
+        self.surface = surface;
+        self.surface_pts = frame.pts_us;
+        {
             let epoch = self.recovery.connection_epoch();
             if self.input_epoch != epoch {
                 // A fast reconnect can coalesce watch notifications. Never
@@ -179,8 +201,7 @@ impl ViewerView {
                 self.sent_modifiers = KeyModifiers::empty();
                 self.last_mouse = None;
             }
-            let next = Arc::new(RenderImage::new(vec![image::Frame::new(buf)]));
-            if let Some(previous) = self.current.replace(next) {
+            if let Some(previous) = std::mem::replace(&mut self.current, next) {
                 // RenderImage IDs are unique. GPUI's sprite atlas does not
                 // evict them when the Arc drops, so release each retired frame.
                 let _ = window.drop_image(previous);
@@ -203,7 +224,15 @@ impl ViewerView {
 
     pub(super) fn sample_diagnostics(&mut self) {
         let seconds = self.last_fps_tick.elapsed().as_secs_f64().max(0.001);
-        self.fps_shown = self.fps_counter as f64 / seconds;
+        let presented = self.presentation.sample();
+        self.fps_shown = if self.surface.is_some() {
+            presented.frames as f64 / seconds
+        } else {
+            self.fps_counter as f64 / seconds
+        };
+        if self.surface.is_some() {
+            tracing::debug!(?presented, "viewer actual presentation");
+        }
         self.fps_counter = 0;
         self.last_fps_tick = Instant::now();
         tracing::debug!(

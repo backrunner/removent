@@ -1,5 +1,8 @@
 import SwiftUI
 import UIKit
+import Metal
+import CoreVideo
+import CoreImage
 
 struct RemoteCanvas: UIViewRepresentable {
     let model: ControllerModel
@@ -28,6 +31,7 @@ struct RemoteCanvas: UIViewRepresentable {
         if view.keyboard.wantsKeyboard && !view.keyboard.isFirstResponder && view.window?.isKeyWindow != false { view.keyboard.becomeFirstResponder() }
         if !view.keyboard.wantsKeyboard && view.keyboard.isFirstResponder { _ = view.keyboard.resignFirstResponder() }
         model.onFrame = { [weak view] image in view?.show(image) }
+        model.onSurface = { [weak view] surface, pts, generation in view?.show(surface, pts:pts, generation:generation) }
     }
     static func dismantleUIView(_ uiView: CanvasView, coordinator: ()) {
         uiView.onInteraction = nil
@@ -35,6 +39,7 @@ struct RemoteCanvas: UIViewRepresentable {
         uiView.onKeyboardFrameChange = nil
         _ = uiView.keyboard.resignFirstResponder()
         uiView.model?.onFrame = nil
+        uiView.model?.onSurface = nil
     }
 }
 
@@ -151,7 +156,7 @@ final class CanvasView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegat
     }
     let keyboard = RemoteKeyboard()
     private let scroll = UIScrollView()
-    private let image = UIImageView()
+    private let image = RemoteVideoView()
     private var remoteSize = CGSize.zero
     private var dragging = false
     private var lastDragPoint: CGPoint?
@@ -244,6 +249,11 @@ final class CanvasView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegat
         let size = CGSize(width:frame.width, height:frame.height)
         if remoteSize != size { remoteSize = size; scroll.zoomScale = 1; fit() }
         image.image = UIImage(cgImage:frame)
+    }
+    func show(_ surface: CVPixelBuffer, pts: Int64, generation: UInt64) {
+        let size = CGSize(width:CVPixelBufferGetWidth(surface), height:CVPixelBufferGetHeight(surface))
+        if remoteSize != size { remoteSize = size; scroll.zoomScale = 1; fit() }
+        image.show(surface) { [weak model] at in model?.didPresent(pts:pts, at:at, generation:generation) }
     }
     private func fit() {
         guard remoteSize.width > 0, bounds.width > 0, bounds.height > 0 else { return }
@@ -412,5 +422,114 @@ final class RemoteKeyboard: UIView, UIKeyInput {
         if let index = shifted.firstIndex(of: Character(String(scalar))),
            let base = String(unshifted[index]).unicodeScalars.first, let code = macKey(for: base) { return (code, 2) }
         return macKey(for: scalar).map { ($0, 0) }
+    }
+}
+
+
+/// Direct BGRA video presentation, keeping decoder surfaces on the GPU path.
+// Immutable CoreVideo references may be retained/released on Metal's completion
+// queue; their contents are never mutated by the presentation layer.
+private final class VideoResources: @unchecked Sendable {
+    let buffer: CVPixelBuffer
+    let texture: CVMetalTexture
+    init(_ buffer: CVPixelBuffer, _ texture: CVMetalTexture) {
+        self.buffer = buffer; self.texture = texture
+    }
+}
+
+/// The UIImage child remains available for CPU codecs and VNC/RDP.
+@MainActor
+private final class RemoteVideoView: UIView {
+    private let fallback = UIImageView()
+    private let video = CAMetalLayer()
+    private let device = MTLCreateSystemDefaultDevice()
+    private var queue: MTLCommandQueue?
+    private var cache: CVMetalTextureCache?
+    private var pipeline: MTLRenderPipelineState?
+    private let inFlight = DispatchSemaphore(value:2)
+    private let fallbackContext = CIContext()
+    var image: UIImage? {
+        get { fallback.image }
+        set { fallback.image = newValue; fallback.isHidden = false; video.isHidden = true }
+    }
+    override init(frame: CGRect) {
+        super.init(frame:frame)
+        addSubview(fallback); layer.addSublayer(video)
+        fallback.contentMode = .scaleToFill
+        video.isHidden = true; video.pixelFormat = .bgra8Unorm
+        video.framebufferOnly = true; video.maximumDrawableCount = 3
+        guard let device else { return }
+        video.device = device; queue = device.makeCommandQueue()
+        guard CVMetalTextureCacheCreate(nil, nil, device, nil, &cache) == kCVReturnSuccess else { return }
+        let shader = """
+        #include <metal_stdlib>
+        using namespace metal;
+        struct V { float4 position [[position]]; float2 uv; };
+        vertex V video_vertex(uint id [[vertex_id]]) {
+            float2 p[4] = {float2(-1,1),float2(-1,-1),float2(1,1),float2(1,-1)};
+            float2 t[4] = {float2(0,0),float2(0,1),float2(1,0),float2(1,1)};
+            return {float4(p[id],0,1),t[id]};
+        }
+        fragment float4 video_fragment(V v [[stage_in]], texture2d<float> image [[texture(0)]]) {
+            constexpr sampler s(filter::linear); return float4(image.sample(s,v.uv).rgb,1);
+        }
+        """
+        do {
+            let library = try device.makeLibrary(source:shader, options:nil)
+            let descriptor = MTLRenderPipelineDescriptor()
+            descriptor.vertexFunction = library.makeFunction(name:"video_vertex")
+            descriptor.fragmentFunction = library.makeFunction(name:"video_fragment")
+            descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+            pipeline = try device.makeRenderPipelineState(descriptor:descriptor)
+        } catch { NSLog("Removent native video unavailable: %@", error.localizedDescription) }
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        fallback.frame = bounds
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        video.frame = bounds
+        let scale = window?.screen.scale ?? traitCollection.displayScale
+        video.drawableSize = CGSize(width:max(1,bounds.width * scale), height:max(1,bounds.height * scale))
+        CATransaction.commit()
+    }
+    func show(_ pixelBuffer: CVPixelBuffer, presented: @escaping @MainActor @Sendable (CFTimeInterval) -> Void) {
+        layoutIfNeeded()
+        guard let queue, let cache, let pipeline else { showFallback(pixelBuffer); return }
+        guard inFlight.wait(timeout:.now()) == .success else { return }
+        let permit = inFlight
+        var texture: CVMetalTexture?
+        let status = CVMetalTextureCacheCreateTextureFromImage(nil, cache, pixelBuffer, nil,
+            .bgra8Unorm, CVPixelBufferGetWidth(pixelBuffer), CVPixelBufferGetHeight(pixelBuffer), 0, &texture)
+        guard status == kCVReturnSuccess, let texture, let input = CVMetalTextureGetTexture(texture),
+            let drawable = video.nextDrawable(), let commands = queue.makeCommandBuffer() else {
+            permit.signal(); showFallback(pixelBuffer); return
+        }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = drawable.texture
+        pass.colorAttachments[0].loadAction = .dontCare
+        pass.colorAttachments[0].storeAction = .store
+        guard let encoder = commands.makeRenderCommandEncoder(descriptor:pass) else { permit.signal(); return }
+        encoder.setRenderPipelineState(pipeline); encoder.setFragmentTexture(input, index:0)
+        encoder.drawPrimitives(type:.triangleStrip, vertexStart:0, vertexCount:4)
+        encoder.endEncoding()
+        let resources = VideoResources(pixelBuffer, texture)
+        commands.addCompletedHandler { [resources] _ in
+            withExtendedLifetime(resources) { _ = permit.signal() }
+        }
+        // The simulator SDK omits presentation timing. Never substitute GPU
+        // command completion and report it as physical display completion.
+        #if !targetEnvironment(simulator)
+        drawable.addPresentedHandler { drawable in
+            let at = drawable.presentedTime
+            DispatchQueue.main.async { presented(at) }
+        }
+        #endif
+        fallback.isHidden = true; video.isHidden = false
+        commands.present(drawable); commands.commit()
+    }
+    private func showFallback(_ buffer: CVPixelBuffer) {
+        let input = CIImage(cvPixelBuffer:buffer)
+        if let cg = fallbackContext.createCGImage(input, from:input.extent) { image = UIImage(cgImage:cg) }
     }
 }

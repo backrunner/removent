@@ -771,6 +771,17 @@ pub struct PaintSurface {
     pub content_mask: ContentMask<ScaledPixels>,
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub image_buffer: core_video::pixel_buffer::CVPixelBuffer,
+    pub presented: Option<SurfacePresented>,
+}
+
+/// Receives the actual drawable presentation time (host seconds), not paint time.
+#[derive(Clone)]
+pub struct SurfacePresented(pub std::sync::Arc<dyn Fn(f64) + Send + Sync>);
+
+impl std::fmt::Debug for SurfacePresented {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SurfacePresented")
+    }
 }
 
 impl From<PaintSurface> for Primitive {

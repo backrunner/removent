@@ -28,7 +28,7 @@ targets:
         RemoventCloudKitEnvironment: "$(REMOVENT_CLOUDKIT_ENVIRONMENT)"
         UIBackgroundModes: [remote-notification]
         CFBundleDisplayName: Removent
-        CFBundleShortVersionString: "0.1.10"
+        CFBundleShortVersionString: "0.1.11"
         CFBundleVersion: "1"
         LSRequiresIPhoneOS: true
         UILaunchScreen: {}

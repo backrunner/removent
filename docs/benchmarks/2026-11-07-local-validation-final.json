@@ -1,0 +1,257 @@
+{
+  "scope": "Final local validation after recorded br-gateway audio timing fixes; not gaming-grade or remote acceptance",
+  "created_at_utc": "2026-11-06T19:28:16.682822+00:00",
+  "base_revision": "66182547530526541c7dbd99243297164f37e939",
+  "source_snapshot_sha256": "52e71314009357a898bedfff1aea473b6aa64fc9b36d9c422af93f07ae46dee6",
+  "source_file_count": 76,
+  "source_sha256": {
+    "Cargo.lock": "478c86a19e3419875772f30bce8f9a7631c10338cbabc354a92af6d64d51f75e",
+    "Cargo.toml": "1b16e087410bffe0c4fca069341efda286dc676b23cbca99e5d7d594af9b749e",
+    "apps/desktop/Cargo.toml": "7d919a868298d627b6c9864929398e3fed62937559ec25950050ef9e32b3f493",
+    "apps/desktop/examples/audio_output_probe.rs": "1e2cc4ea1d7e724e6fd88211e654ff67509eae0db5df4f27c218e5bae797259e",
+    "apps/desktop/examples/native_video_probe.rs": "0063a3972ee3dade04b2922e22614c53b4dea82a7dc0a691a2f906636965b324",
+    "apps/desktop/src/audio.rs": "ac7537fd087a54e0a3f5f4bc948ac87d3946c1113ed7bd8f358271609e1bf021",
+    "apps/desktop/src/engine/native.rs": "eaf5a00f323d85b3cab70c6aad2db7a3a508ea9b5a280dcd2690dd5ea8c20508",
+    "apps/desktop/src/engine/sessions/tests.rs": "f5b3dde34ec703dcdc8841adfcb99e53718331592c242e98b1c96454220be438",
+    "apps/desktop/src/engine/tests.rs": "db1f46a133f3c1f52cfd487c07b58ae63893541e318fb522a294a7a571d8f069",
+    "apps/desktop/src/ui/home/tests/sessions.rs": "a1a3d58dec2b272d7d5900b6e41bec15d3099bf012aebfd52ce947ba40177079",
+    "apps/desktop/src/ui/viewer/lifecycle.rs": "0d0b0d2de73f326b5b8f6192940c1998489d43fd87e38aca6834354e45544b20",
+    "apps/desktop/src/ui/viewer/mod.rs": "748e65dec64d03d8fa82dec266dfdbf30dbea2bea8f2d33b632f5146376fc66f",
+    "apps/desktop/src/ui/viewer/render.rs": "67bef9a0a086947aa227958dd8de4b967cedb2bb7a6f4dbfd3533606389d7618",
+    "apps/desktop/src/ui/viewer/tests.rs": "28b2cee14d0a51d51f69a563fe91ffd0a1fa04566498365b5f015403cf3cc7fc",
+    "apps/mobile/Bridge/RemoventMobile.h": "55795d039aa79a831c533f99d97a15e7e7cdb3b47e0cc00c90e235b8ff447381",
+    "apps/mobile/Sources/ControllerModel.swift": "ac017f0122c4336d336af1270afe32991a0b828a41c988c1d3b29e46c276ba61",
+    "apps/mobile/Sources/RemoteAudio.swift": "0a4fd8f7a2b3b848c5b2814c761321d21574900c09a2795644e5030333ac0ab0",
+    "apps/mobile/Sources/RemoteCanvas.swift": "18f8dff7f190482ad26e9e177105cfbccecc9ae91756955693b4608cb5382a55",
+    "packages/client/Cargo.toml": "d47a7032600e2d711e32589960b2f4ecb8bc99ab0e3590c9dff0b3c1523c3eaf",
+    "packages/client/src/audio.rs": "eeb70d8ffdcf0d09a8af95839966f8db25ea82cb547e10b3cfe2d4fc1872db04",
+    "packages/client/src/audio/tests.rs": "d1d24b7f357260fc02b2e1466380a93e6d6db7fe3474de5d884ebf7e330f2aaf",
+    "packages/client/src/jitter.rs": "35cead09537701e380139204701d28f3be7cf168ce0006883aa90734cb4f549b",
+    "packages/client/src/jitter/tests.rs": "07735ebbaed0ed64899ac678ca29f402c369474132d3cd8334dc1403a8562b4a",
+    "packages/client/src/lib.rs": "5a3057ae91c4c58a3dd2b187aaf9269742278e6b8550e52aa0a14a893eecd61e",
+    "packages/client/src/presentation.rs": "0a8ddeb5dca274a4709530014c65facf71c3555e4d74d87addd373fef3d9cf84",
+    "packages/client/src/rdp.rs": "fd8a89b7c190cac8f576b0a2cb29de767a16a32d40c075f194d3b95b13558aaa",
+    "packages/client/src/session/control.rs": "33a570338f677a8e3694d67e2e84cc544bcde5ec6b0206e6273022b77bdf328d",
+    "packages/client/src/session/media.rs": "e9b6052a1d366bffdc6559a9d453c348e90a44ef416a7e5f9e65ca6a530fd0f1",
+    "packages/client/src/session/mod.rs": "10f15e3f9cf2b1559d88c1841e56d45809bc54038999abf0e73e5ed126b40bd4",
+    "packages/client/src/session/tests.rs": "be82b9630a88e6b395f83846bf1558884bd54be80762b976d3e86d67cfbf31b7",
+    "packages/client/src/vnc/framebuffer/mod.rs": "b2637dbc1fdca444984c1de18b3e5a2135137581d46ce19a52f5b03be9b0116f",
+    "packages/client/tests/fixtures/br-gateway-audio-arrivals.csv": "2a2c252b64a018cf9b72798e9ac1e2cb702a1a0a05c6c21edba469233cd3d074",
+    "packages/client/tests/session_loopback/admission.rs": "6cbcfa523fccfbc670d4fcdff9965327f8297d43f681dfcdf5a919db7966fb46",
+    "packages/client/tests/session_loopback/audio.rs": "866587281d4b4f9264afb5e0edf2eafb2302ff784f3d3835538712ed66c8080c",
+    "packages/client/tests/session_loopback/authentication.rs": "7c41c7f7ccddfa90433ed4f3cb8c6851821cd7b66bf26766fe2466124a7f21a7",
+    "packages/client/tests/session_loopback/busy.rs": "3db73f682ef3cca685da5aa1a0c6537bed2d5e91926699e4a49d0cdbb1135929",
+    "packages/client/tests/session_loopback/cancellation.rs": "892649c46d9af7faa8ffaa2beb59d11fdd2e62018ea132b706bd1db2d401f743",
+    "packages/client/tests/session_loopback/invitations.rs": "2604b4e85577bf59b52eda365c0cbe6e33004006b028a2e4730a9774ad8146e5",
+    "packages/client/tests/session_loopback/media.rs": "6ed78d243b2e5f569a512c9b88eb0a3ea96ada584c4a4e744953c9eecd422032",
+    "packages/client/tests/session_loopback/pairing.rs": "94e2be04a85689edcf6b2dae0660ec8d29830705f337a287f9cf74ba207da340",
+    "packages/client/tests/session_loopback/recovery.rs": "098c4a6063d312fa0f43de9ddd9bd26fe1c5b81ed79af8209cccbe30587b6483",
+    "packages/client/tests/session_loopback/resume.rs": "ad483291a613bc9976aac0d3ee8a04b83b564ceebcddbce1f03c01b505bbf706",
+    "packages/client/tests/session_loopback/security.rs": "2c043bbdae2240799ae124392870071b5678bf685c5c7478cf19eb3479a6ef10",
+    "packages/host/src/session/audio.rs": "75c38023b8d47f0e8f6c1e405a6ce6dc50b048deb154549ce75f5478356366ed",
+    "packages/host/src/session/audio/tests.rs": "440aee9f462af55d2d5b547d3bf9ca2db2e8e5f33b21fd578891cb6a312057d5",
+    "packages/host/src/session/mod.rs": "517f338e4614a32ce0c70de55ec2b07a4e6e5996acaf20a3f2d1d15ec34765f4",
+    "packages/host/src/session/tests.rs": "fe434cf13c8c36157e13db3bd53ab03348a137604bc42d39eec478f295069b66",
+    "packages/host/src/session/video.rs": "9d3b31b580bc9da895bd152a3e056fcb9922642eb897011ae92e24dbefa5bef1",
+    "packages/host/src/session/video/worker.rs": "511d50067b4ec108b952519a1aa392ed83dd8ef5d4b34513f69bd40541ee25a1",
+    "packages/media-codec/src/av1.rs": "37c000d0a7571f38b2e75e8f733c6a7054c0d1e3d771cf040afe8a0b8366b688",
+    "packages/media-codec/src/compat_decompression.rs": "dd6e542d4b0e3fc2d00591bfb4b66f8066b3ac083927848a82883fd0f15075b6",
+    "packages/media-codec/src/lib.rs": "887fab86dd782ec200b18b9a38a94fdaa0e540482502037378d431a0e3ab00a7",
+    "packages/media-codec/src/video/decoder.rs": "5b56d0474e53b0b90509d7a843f83e41aa967140c7317add70ef835d808e97b6",
+    "packages/media-codec/src/video/tests.rs": "31cc978aaa3f9eabbb8050b00685a120e123257965c58177e556408c73ceca24",
+    "packages/mobile/src/engine/mod.rs": "8d81b065f48416dd0a66f225caf3c7678c32bd617d9529f72b8f0d5d5e2e77bf",
+    "packages/mobile/src/engine/native.rs": "29e8d9e7db238f6af6a8f5bbe7556ffe0414438f0cec91269c0432749371419b",
+    "packages/mobile/src/engine/tests.rs": "367d12190b4bd088470d0cc52df44c50e2d6c1e7fa180a478b3754b77b4495ae",
+    "packages/mobile/src/lib.rs": "993ffcbf55fec073595337239b3ae00478c6ec9888a1adcd2c4ff17bc7362d9c",
+    "scripts/fixtures/streaming_fixture.swift": "b7e955512213813e4621e86b29193d4b5ae466fd0e0035e433671c1cadf3673b",
+    "scripts/qa/probe_audio_playout.py": "4f4aeabbda40e8e4408f266ba9314ee9cdb2994e61bdecd4a093c65726eaf4bf",
+    "vendor/gpui-apple/Cargo.toml": "f51836fe394a658cf7e1122a1327b4b6dc1b177e99b7fb9463530845899ef66e",
+    "vendor/gpui-apple/LICENSE-APACHE": "752daf2fb234ca4a1fa372c073fe127f44b7b90fd2529ae44273a64f9d53da7a",
+    "vendor/gpui-apple/REMOVENT-PATCH.md": "3a2e476e5b0011b7cc1034d547b97b84db4611f9bbd5954116cd33fe35eeffb2",
+    "vendor/gpui-apple/build.rs": "e68855230185a01ad2355b2139a47b4285ecda44789b4f297356f6c957bd6bbf",
+    "vendor/gpui-apple/src/dispatcher.rs": "21ec54613d48cd3c419f2f694f75460d1019491c2406a7ed4dfa3374c84824cf",
+    "vendor/gpui-apple/src/gpui_apple.rs": "58aadb42d08b778b9e585cf38d16bc9ec425dd3cb50db255a148663097d69584",
+    "vendor/gpui-apple/src/metal_atlas.rs": "c414bf9caf88413b04fb6a3214c4f070686b454c82c28fa471af9d1bcc91ddba",
+    "vendor/gpui-apple/src/metal_renderer.rs": "ce5df87e75734c851813f8dc9653e639d56511cc797ec198a8fa99fe8041c697",
+    "vendor/gpui-apple/src/shaders.metal": "85736c74325ad348327b67c53d9529034cd3962688204505da4a9e083baa228a",
+    "vendor/gpui-apple/vendor/gpui/src/color.rs": "4292aa1a2bbc56b653aaef0702726325f8efb93f16226320519e257c3ba8a839",
+    "vendor/gpui-apple/vendor/gpui/src/geometry.rs": "900fc506a964cda44ed0cf1f97c01ff28d7268c87c9eeadbf7a4f1bb50e33edd",
+    "vendor/gpui-apple/vendor/gpui/src/platform.rs": "9802da203ccd0526c6ff6827f9c5b79334b3c27b711f69e7b28e828a15894960",
+    "vendor/gpui-apple/vendor/gpui/src/scene.rs": "c48da8a1e703faca710eda4e7ab4247b709af29fc1a072832945aac5ffa0595e",
+    "vendor/gpui-apple/vendor/gpui/src/window.rs": "2fe230dc311a9dc9b0475e2b5bbe3fbd6b4f54251e38c2b1a977d806fa3ae3e0",
+    "vendor/gpui/src/scene.rs": "3489dfe83e91236797a36204304b9ea5094a1367c06d10b093975dda1eae0d2d",
+    "vendor/gpui/src/window.rs": "a36d2a63440b922f83f644d537c57af5ee83e75a148ac1d1cbe4ca38a05fd616"
+  },
+  "checks": {
+    "regression": {
+      "command": "rtk proxy cargo test --locked -p removent-app --bin removent -p removent-client -p removent-host -p removent-media-codec -p removent-mobile --lib --tests -j 4",
+      "passed": 389,
+      "failed": 0,
+      "ignored": 9,
+      "groups": [
+        {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 126,
+          "failed": 0,
+          "ignored": 4
+        },
+        {
+          "passed": 126,
+          "failed": 0,
+          "ignored": 2
+        },
+        {
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 71,
+          "failed": 0,
+          "ignored": 2
+        },
+        {
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 17,
+          "failed": 0,
+          "ignored": 1
+        }
+      ]
+    },
+    "audio_arrival_replay": {
+      "packets": 2000,
+      "output_rates_hz": [
+        44100,
+        48000
+      ],
+      "device_callback_frames": [
+        220,
+        240
+      ],
+      "decode_phases_us": [
+        0,
+        3000,
+        7000,
+        9000
+      ],
+      "combinations": 8,
+      "late_drops": 0,
+      "plc_frames": 0,
+      "expired_blocks": 0,
+      "allowed_startup_underruns_per_case": 1,
+      "startup_window_seconds": 2,
+      "steady_state_underruns": 0
+    },
+    "audio_capture_batches": {
+      "periods_ms": [
+        20,
+        40,
+        60
+      ],
+      "output_rates_hz": [
+        44100,
+        48000
+      ],
+      "simulated_duration_seconds_per_case_approximately": 60,
+      "dropped_blocks": 0,
+      "underruns": 0
+    },
+    "audio_device": {
+      "command": "rtk proxy target/debug/examples/audio_output_probe",
+      "duration_seconds": 5,
+      "signal": "silence",
+      "stats": {
+        "queued_frames": 1920,
+        "dropped_blocks": 0,
+        "underruns": 0,
+        "discontinuities": 0,
+        "rendered_frames": 218680,
+        "callback_frames": 220,
+        "callback_rate": 44100,
+        "device_delay_us": 7256
+      },
+      "limitation": "Device callback and OS timing only; no network, acoustic or source-to-ear latency measurement"
+    },
+    "clippy": {
+      "command": "rtk proxy cargo clippy --locked --workspace --all-targets -j 4 -- -D warnings",
+      "passed": true
+    },
+    "release": {
+      "command": "rtk proxy cargo build --release --locked -p removent-app -p removent-daemon -p removent-cli -j 4",
+      "passed": true
+    },
+    "ios": {
+      "configuration": "Debug",
+      "destinations": [
+        "generic/platform=iOS Simulator",
+        "generic/platform=iOS"
+      ],
+      "code_signing_allowed": false,
+      "builds_passed": true,
+      "installed_or_runtime_tested": false
+    },
+    "local_staged_app": {
+      "path": "/tmp/removent-gaming-20261107/Removent.app",
+      "codesign_deep_strict_passed": true,
+      "installed": false,
+      "uploaded_after_final_fix": false
+    }
+  },
+  "release_binaries_sha256": {
+    "removent": "d887eb14b92858f50f0afa2b711aa3b540b43ce51078ffc0262506a507dd4778",
+    "removentd": "52d8526829a822070043a3190f5cd7bc05e8f7417e824c123aea14b59aeb3fef",
+    "removent-cli": "30fd2b50d1476dcebf803cdb34e99e1d28706222b256df7f6567451219f187c6"
+  },
+  "signed_staged_binaries_sha256": {
+    "Contents/MacOS/removent": "1191cb4c3a97cbaa9fc605e49392e9645099857c976a47bda706852e8f8ff008",
+    "Contents/MacOS/removent-cli": "478c21e177a7e056a0b071eb59689bcadfa808b7eade9edbf89da75213f7e5a7",
+    "Contents/Helpers/RemoventHost.app/Contents/MacOS/removentd": "4ab50ba1e24fd7de74ad6ef3b06fbf454695ad2f5676840768b70157bf3115d0"
+  },
+  "raw_log_sha256": {
+    "tests": "953119c4ef7718c558d1e291dd9d4942a33d906cbf6f42ac288ecaa72ff16e98",
+    "clippy": "786133357904d7991ce64a037682a8fd3a643d01fb43185a02f8b70b3391bf1f",
+    "release": "3078862a2a17b16be1951a8145d411fbad389fd679b119307a74cda41f702227",
+    "ios_simulator": "72413e2aa12bf53e15fe62d4e69df1bf25fbe9e4855c04923fe3abd49a5c2b90",
+    "ios_device": "17af0ce6602ec97b7d22a00be81e66c6dbdec66689685c7d0d4ff379dcf7145e",
+    "audio_device": "b7a8deea7b636409071e2028ef7bd2bfd50101d73d57df08b6ad78dd508b33a5",
+    "audio_replay": "947dde1aed1b6d74ffc8a7cd34e07a224b0f39a06d322d16c4ab3e7f21478ebf"
+  },
+  "remote_state": {
+    "user_direction": "Preserve current remote service; finish local validation first",
+    "remote_access_during_this_followup": false,
+    "service_switch_retried": false,
+    "remote_retest_after_final_fix": false,
+    "last_observed_service": "First temporary RemoventHost build; PID 39965 in previous run",
+    "installed_remote_app_replaced": false
+  },
+  "remaining_acceptance": [
+    "Unloaded 1080p60 dynamic remote retest",
+    "Video frame-loss attribution",
+    "Zero steady-state audio underruns on the remote path",
+    "30-minute continuous remote run",
+    "Input-to-display, acoustic audio latency and A/V sync measurement",
+    "WAN/loss/retransmission matrix"
+  ],
+  "known_warnings": [
+    "Existing block v0.1.6 future-incompatibility notice",
+    "Existing Apple target warnings; see Xcode logs"
+  ]
+}

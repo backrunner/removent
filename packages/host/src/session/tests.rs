@@ -483,19 +483,6 @@ async fn dynamic_fps_limits_real_wire_frame_rate_under_capture_flood() {
     producer.await.unwrap();
 }
 
-#[tokio::test]
-async fn raw_backlog_coalesces_to_latest_without_dropping_future_capture() {
-    let (tx, mut rx) = mpsc::channel(4);
-    for frame in 1..=4 {
-        tx.send(frame).await.unwrap();
-    }
-    let first = rx.recv().await.unwrap();
-    assert_eq!(newest_queued(first, &mut rx), 4);
-    assert!(rx.is_empty());
-    tx.send(5).await.unwrap();
-    assert_eq!(rx.recv().await, Some(5));
-}
-
 pub(super) async fn quic_pair() -> (
     [removent_net::quinn::Endpoint; 2],
     RvpConnection,

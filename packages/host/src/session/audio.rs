@@ -8,6 +8,8 @@ pub fn spawn_audio_loop(
     cancel: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        // Input/control is higher priority; audio must not sit behind a video IDR.
+        let _ = stream.set_priority(0);
         // Audio is optional. Losing its capture source or receiver must not
         // cancel the shared session token and tear down healthy video/control.
         // Session cancellation still stops this task, including blocked writes.
@@ -27,7 +29,10 @@ pub fn spawn_audio_loop(
                     _ = cancel.cancelled() => break,
                     item = audio_rx.recv() => {
                         let Some(frame) = item else { break };
-                        newest_queued(frame, &mut audio_rx)
+                        // A capture callback can contain several consecutive 10 ms
+                        // blocks. Preserve all of them: coalescing audio like video
+                        // removes samples without a corresponding sequence gap.
+                        frame
                     }
                 };
                 let (seq, packet) = match encoder.encode_frame(&frame.samples) {

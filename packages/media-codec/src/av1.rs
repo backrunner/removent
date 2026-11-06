@@ -240,6 +240,7 @@ impl Av1Decoder {
                         )));
                     }
                     out.push(DecodedBgra {
+                        surface: None,
                         data: yuv420_to_bgra(&pic, width, height),
                         pts_us: pic.timestamp().unwrap_or(fallback_pts_us),
                     });

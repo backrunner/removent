@@ -13,3 +13,5 @@ pub use video::{
     VideoError, annexb_has_idr, av1_hardware_support, avcc_to_annexb, extract_param_sets,
     split_annexb_nals,
 };
+
+pub use apple_cf::cv::CVPixelBuffer as NativePixelBuffer;

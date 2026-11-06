@@ -2,6 +2,45 @@ use super::*;
 use crate::session::tests::quic_pair;
 
 #[tokio::test]
+async fn one_capture_batch_transmits_every_audio_period() {
+    let (_endpoints, client, host) = quic_pair().await;
+    let (tx, rx) = mpsc::channel(8);
+    // Prequeue before starting the consumer: the old newest_queued path sent
+    // only the final block, including during normal multi-block SCK callbacks.
+    for frame in 0..4 {
+        tx.send(removent_media_capture::AudioFrame {
+            samples: vec![frame as i16 * 100; 960],
+            pts_micros: frame * 10_000,
+        })
+        .await
+        .unwrap();
+    }
+    let cancel = CancellationToken::new();
+    let task = spawn_audio_loop(
+        host.open_media_stream().await.unwrap(),
+        rx,
+        96,
+        cancel.clone(),
+    );
+    let mut stream = client.accept_media_stream().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        for frame in 0..4 {
+            let mut bytes = [0; removent_proto::AUDIO_HEADER_LEN];
+            stream.read_exact(&mut bytes).await.unwrap();
+            let (header, _) = removent_proto::parse_audio_header(&bytes).unwrap();
+            assert_eq!(header.seq, frame as u16);
+            assert_eq!(header.pts_us, frame * 10_000);
+            let mut payload = vec![0; header.payload_len as usize];
+            stream.read_exact(&mut payload).await.unwrap();
+        }
+    })
+    .await
+    .expect("all four consecutive blocks must reach the receiver");
+    cancel.cancel();
+    task.await.unwrap();
+}
+
+#[tokio::test]
 async fn audio_capture_eof_does_not_cancel_video() {
     let (_endpoints, client, host) = quic_pair().await;
     let cancel = CancellationToken::new();

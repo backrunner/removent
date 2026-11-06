@@ -217,6 +217,7 @@ fn reconnect_keeps_the_original_viewer_frame_channel_and_reports_final_error() {
         );
         replacement
             .send(VideoFrame {
+                surface: None,
                 width: 1,
                 height: 1,
                 data: vec![3; 4],

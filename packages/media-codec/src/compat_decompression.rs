@@ -51,7 +51,34 @@ impl CompatibleDecompressionSession {
         .expect("pixel format key");
         let format =
             apple_cf::cf::CFNumber::from_i64(i64::from(crate::video::BGRA_FOURCC)).into_cf_type();
-        let attributes = apple_cf::cf::CFDictionary::from_pairs(&[(&format_key, &format)]);
+        let metal_key = unsafe {
+            apple_cf::cf::CFType::from_raw_borrowed(
+                apple_cf::raw::kCVPixelBufferMetalCompatibilityKey
+                    .cast_mut()
+                    .cast(),
+            )
+        }
+        .unwrap();
+        let surface_key = unsafe {
+            apple_cf::cf::CFType::from_raw_borrowed(
+                apple_cf::raw::kCVPixelBufferIOSurfacePropertiesKey
+                    .cast_mut()
+                    .cast(),
+            )
+        }
+        .unwrap();
+        let enabled = unsafe {
+            apple_cf::cf::CFType::from_raw_borrowed(apple_cf::raw::kCFBooleanTrue.cast_mut().cast())
+        }
+        .unwrap();
+        let surface = apple_cf::cf::CFDictionary::from_pairs(&[]);
+        let surface_value =
+            unsafe { apple_cf::cf::CFType::from_raw_borrowed(surface.as_ptr().cast()) }.unwrap();
+        let attributes = apple_cf::cf::CFDictionary::from_pairs(&[
+            (&format_key, &format),
+            (&metal_key, &enabled),
+            (&surface_key, &surface_value),
+        ]);
         let mut session = std::ptr::null_mut();
         let status = unsafe {
             ffi::VTDecompressionSessionCreate(

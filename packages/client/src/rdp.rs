@@ -198,6 +198,7 @@ fn snapshot(image: &DecodedImage, started: Instant) -> DecodedFrame {
         pixel[3] = 255;
     }
     DecodedFrame {
+        surface: None,
         data,
         width: u32::from(image.width()),
         height: u32::from(image.height()),

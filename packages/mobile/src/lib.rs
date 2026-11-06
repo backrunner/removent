@@ -174,6 +174,8 @@ pub struct Frame {
     pub width: u32,
     pub height: u32,
     pub generation: u64,
+    pub surface: *mut std::ffi::c_void,
+    pub pts_us: i64,
 }
 
 /// # Safety
@@ -193,54 +195,88 @@ pub unsafe extern "C" fn rm_take_frame(engine: *mut Engine) -> *mut Frame {
     };
     if frame.width == 0
         || frame.height == 0
-        || u64::from(frame.width) * u64::from(frame.height) * 4 != frame.data.len() as u64
+        || (frame.surface.is_none()
+            && u64::from(frame.width) * u64::from(frame.height) * 4 != frame.data.len() as u64)
     {
         return std::ptr::null_mut();
     }
     let len = frame.data.len();
     let data = Box::into_raw(frame.data.into_boxed_slice()) as *mut u8;
+    let surface = frame.surface.map_or(std::ptr::null_mut(), |buffer| {
+        let raw = buffer.as_ptr();
+        std::mem::forget(buffer); // ownership transfers to rm_frame_free
+        raw
+    });
     Box::into_raw(Box::new(Frame {
         data,
         len,
         width: frame.width,
         height: frame.height,
         generation: state.generation,
+        surface,
+        pts_us: frame.pts_us,
     }))
 }
 
-#[repr(C)]
-pub struct Audio {
-    pub data: *mut i16,
-    pub len: usize,
-    pub sample_rate: u32,
-    pub channels: u8,
-    pub generation: u64,
-}
-
+/// An independent renderer owns the queue, never a borrowed Engine pointer.
+/// Destroying/reconnecting the engine cannot invalidate a device callback.
 /// # Safety
-/// `engine` is live; free owned interleaved PCM with rm_audio_free.
+/// Engine must be live for this call. Use the renderer on only one audio thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rm_take_audio(engine: *mut Engine) -> *mut Audio {
+pub unsafe extern "C" fn rm_audio_renderer_create(
+    engine: *mut Engine,
+    generation: u64,
+) -> *mut removent_client::audio::AudioRenderer {
     let Some(engine) = (unsafe { engine.as_ref() }) else {
         return std::ptr::null_mut();
     };
-    let mut state = engine
+    let state = engine
         .shared
         .state
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    let Some(pcm) = state.audio.pop_front() else {
+    if state.generation != generation {
         return std::ptr::null_mut();
+    }
+    Box::into_raw(Box::new(removent_client::audio::AudioRenderer::new(
+        state.audio.clone(),
+    )))
+}
+
+/// # Safety
+/// Renderer is live and exclusively borrowed for the callback; left/right are
+/// distinct writable arrays of `frames` f32 elements. No engine lock is acquired.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rm_audio_render(
+    renderer: *mut removent_client::audio::AudioRenderer,
+    left: *mut f32,
+    right: *mut f32,
+    frames: usize,
+    rate: u32,
+) {
+    if left.is_null() || right.is_null() || frames > 65_536 {
+        return;
+    }
+    let Some(renderer) = (unsafe { renderer.as_mut() }) else {
+        return;
     };
-    let len = pcm.len();
-    let data = Box::into_raw(pcm.into_boxed_slice()) as *mut i16;
-    Box::into_raw(Box::new(Audio {
-        data,
-        len,
-        sample_rate: state.audio_rate,
-        channels: state.audio_channels,
-        generation: state.generation,
-    }))
+    let left = unsafe { std::slice::from_raw_parts_mut(left, frames) };
+    let right = unsafe { std::slice::from_raw_parts_mut(right, frames) };
+    renderer.render(frames, rate, std::time::Instant::now(), |i, pair| {
+        left[i] = pair[0];
+        right[i] = pair[1];
+    });
+}
+
+/// # Safety
+/// Drop once, only after the audio callback can no longer access the renderer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rm_audio_renderer_free(
+    renderer: *mut removent_client::audio::AudioRenderer,
+) {
+    if !renderer.is_null() {
+        drop(unsafe { Box::from_raw(renderer) });
+    }
 }
 
 /// # Safety
@@ -249,17 +285,10 @@ pub unsafe extern "C" fn rm_take_audio(engine: *mut Engine) -> *mut Audio {
 pub unsafe extern "C" fn rm_frame_free(frame: *mut Frame) {
     if !frame.is_null() {
         let frame = unsafe { Box::from_raw(frame) };
+        if !frame.surface.is_null() {
+            drop(unsafe { removent_client::NativePixelBuffer::from_raw(frame.surface) });
+        }
         drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(frame.data, frame.len)) });
-    }
-}
-
-/// # Safety
-/// Pass only an unmodified rm_take_audio result, at most once. Null is allowed.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rm_audio_free(audio: *mut Audio) {
-    if !audio.is_null() {
-        let audio = unsafe { Box::from_raw(audio) };
-        drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(audio.data, audio.len)) });
     }
 }
 
@@ -285,6 +314,42 @@ pub unsafe extern "C" fn rm_destroy(engine: *mut Engine) {
 mod tests {
     use super::*;
     #[test]
+    fn audio_callback_is_independent_of_engine_lock_and_lifetime() {
+        unsafe {
+            let dir = tempfile::tempdir().unwrap();
+            let path = CString::new(dir.path().to_str().unwrap()).unwrap();
+            let mut error = std::ptr::null_mut();
+            let engine = rm_create(path.as_ptr(), c"audio-test".as_ptr(), &mut error);
+            assert!(!engine.is_null());
+            let shared = &(*engine).shared;
+            let generation = shared.state.lock().unwrap().generation;
+            assert!(rm_audio_renderer_create(engine, generation + 1).is_null());
+            let renderer = rm_audio_renderer_create(engine, generation);
+            assert!(!renderer.is_null());
+            let mut left = [f32::NAN; 240];
+            let mut right = [f32::NAN; 240];
+            {
+                let state = shared.state.lock().unwrap();
+                for i in 0..2 {
+                    state.audio.push(removent_client::audio::DecodedAudio {
+                        samples: vec![12_000; 960],
+                        pts_us: i * 10_000,
+                        source_at: std::time::Instant::now(),
+                        discontinuity: false,
+                    });
+                }
+                rm_audio_render(renderer, left.as_mut_ptr(), right.as_mut_ptr(), 240, 48_000);
+                assert!(left.iter().all(|v| v.is_finite()));
+                assert_eq!(left, right);
+            }
+            rm_destroy(engine);
+            rm_audio_render(renderer, left.as_mut_ptr(), right.as_mut_ptr(), 240, 48_000);
+            assert!(left.iter().all(|v| v.is_finite()));
+            rm_audio_renderer_free(renderer);
+        }
+    }
+
+    #[test]
     fn abi_reports_bad_commands_and_buffers_outlive_the_engine() {
         unsafe {
             let dir = tempfile::tempdir().unwrap();
@@ -300,6 +365,7 @@ mod tests {
             rm_string_free(response);
             let shared = &(*engine).shared;
             shared.state.lock().unwrap().frame = Some(removent_client::DecodedFrame {
+                surface: None,
                 data: vec![1, 2, 3, 255],
                 width: 1,
                 height: 1,

@@ -119,6 +119,7 @@ fn frames_input_recovery_and_stale_window_disconnect_are_session_local() {
     let mut b_view = second.take_client_frames().unwrap();
     a_frames
         .send(VideoFrame {
+            surface: None,
             width: 1,
             height: 1,
             data: vec![10; 4],
@@ -127,6 +128,7 @@ fn frames_input_recovery_and_stale_window_disconnect_are_session_local() {
         .unwrap();
     b_frames
         .send(VideoFrame {
+            surface: None,
             width: 1,
             height: 1,
             data: vec![20; 4],

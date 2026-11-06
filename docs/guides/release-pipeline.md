@@ -78,6 +78,7 @@ CI 使用 `macos-26` arm64 runner、锁定的 Cargo.lock、串行测试、失败
 ## 自动更新
 
 - 启动 30 秒后检查，之后每 24 小时检查；可关闭，可手动检查。
+- 以上定时检查由桌面应用运行。仅保留后台 host 或托盘时不会自行检查、下载或安装更新；无人值守 host 更新仍需独立协调器、会话准入保护和启动健康回滚，详见[审查记录](../validation/host-unattended-update-audit-2026-11-07.md)。
 - 应用的 **设置 → 系统 → 软件更新** 提供 Stable / Beta 渠道，默认 Stable。Stable 使用 GitHub latest 正式版签名清单；Beta 分页读取官方发布列表，在正式版及 `MAJOR.MINOR.PATCH-beta.N` 中按 SemVer 优先级选择更高版本，再验证该不可变 tag 下的 `latest.json`。草稿、alpha/rc、缺少清单或资产地址不匹配的发布不参与选择。
 - 渠道保存在 `settings.toml` 的 `update_channel = "stable"` / `"beta"`；旧配置默认 Stable。切换后立即重新检查，自动检查也遵循所选渠道。切换清除旧候选与待安装状态；检查、下载、验证和安装进行中不可切换。`update_endpoint` 自定义镜像仍覆盖官方发现地址，但不会绕过渠道、签名和版本规则。
 - 所有渠道都只升级：例如 `0.1.2 → 0.1.3-beta.1 → 0.1.3-beta.2 → 0.1.3`；`0.1.3-beta.2` 切回 Stable 时，若正式版仍是 `0.1.2`，保持当前安装，直到有更高正式版。`0.1.3 → 0.1.3-beta.3`、相同版本或仅 build metadata 不同均不安装。检查、下载、安装及替换前均执行版本约束，替换前另核对磁盘上实际安装版本及暂存包完整版本。

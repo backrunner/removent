@@ -1,0 +1,64 @@
+2026-11-06T19:09:32.761805Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 2400, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 217140, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:09:32.804172Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:09:37.764574Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 437800, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:09:37.804697Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:09:42.767262Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 658460, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:09:42.809637Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:09:47.770028Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 878900, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:09:47.814505Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:09:52.783150Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 1100000, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:09:52.824793Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:09:57.785918Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 1320660, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:09:57.828543Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:10:02.788443Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 1541320, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:10:02.831229Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:10:07.791139Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 1761980, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:10:07.834408Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:10:12.804446Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 1983080, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:10:12.843911Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:10:17.807338Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 2203520, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:10:17.844625Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:10:22.809962Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 2424180, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:10:22.852592Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:10:27.823313Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 2645280, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:10:27.854845Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:10:32.825968Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 2865940, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:10:32.865102Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:10:37.828581Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 3086600, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:10:37.871211Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:10:42.831382Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 960, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 3307260, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:10:42.873856Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:10:47.844546Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 3528360, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:10:47.884279Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:10:52.847330Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 3748800, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:10:52.890172Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:10:57.849969Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 1, underruns: 1, discontinuities: 1, rendered_frames: 3969460, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:10:57.892973Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:11:02.852755Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 2400, dropped_blocks: 2, underruns: 2, discontinuities: 2, rendered_frames: 4190120, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:11:02.894891Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:11:07.866052Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 2400, dropped_blocks: 2, underruns: 2, discontinuities: 2, rendered_frames: 4411220, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:11:07.904525Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:11:12.868004Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 2, underruns: 2, discontinuities: 2, rendered_frames: 4631880, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:11:12.910745Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:11:17.869889Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 2, underruns: 2, discontinuities: 2, rendered_frames: 4852540, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:11:17.912626Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:11:22.872262Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 2, underruns: 2, discontinuities: 2, rendered_frames: 5072980, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:11:22.912742Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:11:27.885213Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 2, underruns: 2, discontinuities: 2, rendered_frames: 5294080, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:11:27.923121Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:11:32.887749Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1920, dropped_blocks: 2, underruns: 2, discontinuities: 2, rendered_frames: 5514740, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:11:32.930362Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:11:37.890160Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 2, underruns: 2, discontinuities: 2, rendered_frames: 5735400, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:11:37.932493Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:11:42.892669Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 2, underruns: 2, discontinuities: 2, rendered_frames: 5956060, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:11:42.935502Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:11:47.905958Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 2, underruns: 2, discontinuities: 2, rendered_frames: 6177160, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:11:47.941772Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:11:52.908483Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 2, underruns: 2, discontinuities: 2, rendered_frames: 6397600, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:11:52.942205Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:11:57.911153Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 2, underruns: 2, discontinuities: 2, rendered_frames: 6618260, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:11:57.951664Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:12:02.913816Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 960, dropped_blocks: 2, underruns: 2, discontinuities: 2, rendered_frames: 6838920, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:12:02.951930Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0
+2026-11-06T19:12:07.927234Z DEBUG removent::engine::native: audio output stats=AudioStats { queued_frames: 1440, dropped_blocks: 2, underruns: 2, discontinuities: 2, rendered_frames: 7060020, callback_frames: 220, callback_rate: 44100, device_delay_us: 7256 }
+2026-11-06T19:12:07.961788Z DEBUG removent_client::session::media: audio delivery depth_ms=0 late_dropped=0 plc_frames=0 dropped_output=0

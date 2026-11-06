@@ -201,6 +201,7 @@ async fn full_session_pair_negotiate_media() {
         server_addr,
         &client_id,
         ClientConfig {
+            native_video: false,
             video_quality: Default::default(),
             host_identity_verified: false,
             pairing_code: None,

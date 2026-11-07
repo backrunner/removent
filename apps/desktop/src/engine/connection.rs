@@ -9,6 +9,8 @@ impl Engine {
     /// Returns a handle scoped to the new session. Existing viewers retain
     /// their own handles, so input, frames, recovery and cancellation stay local.
     pub fn connect_request(&self, request: ConnectionRequest) -> Result<Self> {
+        let activity = removent_core::update_gate::ActivityLease::acquire(&self.paths)
+            .map_err(|_| anyhow::anyhow!(t!("update.err.installing").to_string()))?;
         let mut sessions = self.client_sessions.lock().unwrap();
         sessions.retain(sessions::ClientSlot::is_live);
         let target = sessions::ClientTarget::new(&request);
@@ -44,6 +46,7 @@ impl Engine {
         tracing::info!(parent: &span, "connection requested");
         let handle = self.rt.spawn(
             async move {
+                let _activity = activity;
                 // catch_unwind: even a task panic must reset the UI (the connect button
                 // must not get stuck on "connecting…").
                 let mut changes = recovery.subscribe();

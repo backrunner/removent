@@ -41,23 +41,22 @@ tag push v*
 ## 3. 客户端自动更新
 
 ### 3.1 检查策略
-- 启动后 30s 与每 24h 各查一次 `GET <releases>/latest/download/latest.json`（用户可在设置关闭；企业内网屏蔽时不影响主功能）。
-- 有新版：设置页与菜单栏出现角标提示，**仅提示不强更**。
+- 0.1.12 起自动安装默认开启，允许关闭；已有 `update_check_enabled = false` 不被覆盖。
+- 桌面端 30 秒及每 24 小时检查，独立用户更新器每 6 小时检查。窗口关闭且连接结束后安装，不打断现有会话。
+- Stable/Beta、签名清单、版本和协议约束统一由 `packages/updater` 实现。
 
-### 3.2 安装流程（状态机）
-```
-Idle → Downloading(到 userdata/cache/update/Removent-<ver>-macos-arm64.zip, 断点续传)
-     → Verifying(sha256 == 清单 && Ed25519 验签(载荷为上述四行) && 解包后 codesign --verify 有效且 TeamID 匹配)
-     → Swapping(mv 旧 .app→app.old; mv 新 .app 就位)
-     → Relaunch(spawn 新二进制 + 自身退出; 启动成功后清理 app.old, 失败则回滚)
-```
-要点：
-- 校验三重：清单哈希、发布签名、Apple codesign。任一失败即丢弃下载并告警，绝不执行。
-- 更新期间会话进行中则推迟到会话结束。
-- 版本兼容：若 `min_compatible_proto` 高于本端，提示"两端需一起升级"，避免升级一端导致无法互连。
+### 3.2 安装与恢复
+
+`检查 → 下载并验签 → 权限及真实主程序启动预检 → 持久事务 → 暂停 host → 同盘替换 → host 连续健康检查 → 保留备份`
+
+失败从已验证的 `.app.update-backup` 恢复。安装进程中断时，独立代理先恢复事务，再读取更新设置或访问网络。安装前及安装中以共享/排他准入锁保护会话，持久维护标记覆盖进程死亡。主动停止的 host 不被更新流程重新开启。
+
+更新器使用应用目录外的固定监护进程及可替换的签名工作进程；新版工作进程故障时回到旧副本。登录前 host 使用独立 root-owned 副本，保持原有服务并提示管理员更新，不越权静默替换。
+
+详细契约、权限边界及验收命令见[自动更新](../guides/automatic-updates.md)。
 
 ## 4. 发布纪律
 
 1. 当前维护者流程：直接提交到 main，完成 CI 和发布验收后，从 main 创建不可变版本 tag 发布；不要求开 PR。
 2. 每个 release 附 changelog（keepachangelog 格式），标注协议版本变更。
-3. 回滚预案：Releases 保留全部历史版本可手动重下；更新器内置"恢复上一版"入口（利用 app.old）。
+3. 回滚预案：Releases 保留全部历史版本可手动重下；独立更新器执行经过健康检查的自动回退，并保留 `.app.update-backup` 供恢复。

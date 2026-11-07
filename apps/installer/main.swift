@@ -120,6 +120,14 @@ if readOnly {
 // an update. Build/staging bundles do not take over the user's terminal commands.
 let applicationDirectories = ["/Applications", fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path]
 if applicationDirectories.contains(source.deletingLastPathComponent().path) {
+    // Bootstrap recovery before the desktop starts. It remains available even
+    // if the new desktop or host immediately crashes. No permission prompts.
+    let updater = Process()
+    updater.executableURL = source.appendingPathComponent("Contents/MacOS/removent-update")
+    updater.arguments = ["--install", source.path]
+    updater.standardOutput = FileHandle.nullDevice
+    updater.standardError = FileHandle.nullDevice
+    try? updater.run()
     // Covers drag-and-drop installs as well as the DMG installation flow.
     // The service owns the persistent choice so a later login-off is respected.
     do {

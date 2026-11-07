@@ -28,6 +28,10 @@ fn claim_initial_request(root: &Path, name: &str) -> std::io::Result<bool> {
 }
 
 pub fn request_initial_permissions(state: &DaemonState) {
+    // Unattended trial startup must never present consent UI.
+    if state.paths.run_dir().join("update-maintenance").exists() {
+        return;
+    }
     if !state.login_window && state.enabled.load(Ordering::SeqCst) {
         let _ = start_request(state.paths.root.clone(), None, true);
     }

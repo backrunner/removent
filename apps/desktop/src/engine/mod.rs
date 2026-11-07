@@ -120,6 +120,7 @@ pub enum UiEvent {
     },
     /// Auto-update state machine snapshot (release.md §3; apps/desktop/src/updater.rs).
     UpdateStatus(UpdateStatus),
+    BackgroundUpdateChanged,
     PairedConnections {
         generation: usize,
         entries: Vec<SavedConnection>,
@@ -359,6 +360,7 @@ pub struct Engine {
     startup: Arc<Mutex<StartupSettings>>,
     /// Auto-update shared state (status + manifest + staged bundle).
     update: Arc<Mutex<UpdateShared>>,
+    background_update: Arc<Mutex<Option<removent_updater::agent::AgentStatus>>>,
     /// Live controlled-side sessions (daemon IpcEvent SessionStarted/Ended,
     /// reconciled against StatusReport.sessions on every poll);
     /// an update install is deferred while any session runs.
@@ -385,6 +387,7 @@ impl Clone for Engine {
             #[cfg(target_os = "macos")]
             startup: self.startup.clone(),
             update: self.update.clone(),
+            background_update: self.background_update.clone(),
             host_sessions: self.host_sessions.clone(),
         }
     }
@@ -424,9 +427,12 @@ fn known_fingerprints(paths: &DataPaths) -> Vec<[u8; 32]> {
 impl Engine {
     pub fn new(rt: tokio::runtime::Runtime, paths: DataPaths, settings: Settings) -> Self {
         let engine = Self::with_state(rt, paths, settings);
-        engine.spawn_daemon_link();
-        engine.spawn_update_scheduler();
-        crate::cloud_sync::start(&engine);
+        if !std::env::args().any(|arg| arg == "--update-smoke") {
+            engine.spawn_daemon_link();
+            engine.spawn_update_scheduler();
+            engine.spawn_background_update_status();
+            crate::cloud_sync::start(&engine);
+        }
         engine
     }
 
@@ -452,6 +458,7 @@ impl Engine {
             #[cfg(target_os = "macos")]
             startup: Default::default(),
             update,
+            background_update: Arc::new(Mutex::new(None)),
             host_sessions: Arc::new(AtomicUsize::new(0)),
         }
     }

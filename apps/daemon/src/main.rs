@@ -31,7 +31,7 @@ fn start(paths: DataPaths) -> anyhow::Result<()> {
     {
         return Ok(());
     }
-    let settings = Settings::load(&paths)?;
+    let settings = Settings::load_strict(&paths)?;
     rust_i18n::set_locale(removent_core::resolve_locale(settings.language));
 
     // Single instance: a daemon-specific lock, separate from the app's .lock.
@@ -48,6 +48,10 @@ fn start(paths: DataPaths) -> anyhow::Result<()> {
             std::process::exit(1);
         }
     };
+    // Lifetime receipt that this daemon participates in update admission. The
+    // updater can distinguish an unresponsive new host from a legacy process
+    // whose live sessions do not yet hold the shared maintenance gate.
+    let _update_aware = DataDirLock::acquire_at(&paths.run_dir().join("update-aware-daemon.lock"))?;
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -57,7 +61,7 @@ fn start(paths: DataPaths) -> anyhow::Result<()> {
 }
 
 async fn run(paths: DataPaths) -> anyhow::Result<()> {
-    let mut settings = Settings::load(&paths)?;
+    let mut settings = Settings::load_strict(&paths)?;
     if std::env::args().any(|arg| arg == "--login-window") {
         removent_daemon::login_window::restrict(&mut settings);
     }

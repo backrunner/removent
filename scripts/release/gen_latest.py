@@ -172,7 +172,7 @@ def check_release_key(key_path: str) -> None:
     # RFC 8410 SubjectPublicKeyInfo header for Ed25519, then exactly 32 bytes.
     if len(public) != 44 or public[:12].hex() != '302a300506032b6570032100':
         raise ValueError('Update key must be Ed25519')
-    source = (pathlib.Path(__file__).resolve().parents[2] / 'apps/desktop/src/updater/manifest.rs').read_text()
+    source = (pathlib.Path(__file__).resolve().parents[2] / 'packages/updater/src/manifest.rs').read_text()
     expected = re.search(r'RELEASE_PUBLIC_KEY_HEX: &str =\s*"([0-9a-f]{64})"', source).group(1)
     if public[12:].hex() != expected:
         raise ValueError('Update signing key does not match the public key compiled into the app')

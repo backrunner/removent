@@ -46,6 +46,7 @@ def verify_bundle(bundle):
     assert p['CFBundleIconFile'] == 'AppIcon'
     assert (bundle / 'Contents/Resources/AppIcon.icns').stat().st_size > 1000
     assert (bundle / 'Contents/MacOS/removent-cli').is_file()
+    assert (bundle / 'Contents/MacOS/removent-update').is_file()
     cli_setup = bundle / 'Contents/Resources/install-cli.sh'
     assert cli_setup.read_bytes() == (ROOT / 'apps/installer/install-cli.sh').read_bytes()
     run('/bin/bash', '-n', str(cli_setup))
@@ -83,7 +84,7 @@ def main():
         public = pathlib.Path(td) / 'key.pem'
         # Only the embedded public key is used; verification does not need CI secrets.
         import re
-        source = (ROOT / 'apps/desktop/src/updater/manifest.rs').read_text()
+        source = (ROOT / 'packages/updater/src/manifest.rs').read_text()
         key = bytes.fromhex(re.search(r'RELEASE_PUBLIC_KEY_HEX: &str =\s*"([0-9a-f]{64})"', source).group(1))
         der = pathlib.Path(td) / 'key.der'
         der.write_bytes(bytes.fromhex('302a300506032b6570032100') + key)

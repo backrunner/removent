@@ -1,0 +1,45 @@
+update.section: 软件更新
+update.current: 当前版本
+update.check_now: 检查更新
+update.auto_check: 自动检查更新
+update.channel: 更新渠道
+update.channel_stable: Stable
+update.channel_beta: Beta
+update.channel_hint: Stable 仅正式版，Beta 包含测试版；切换不会降级。
+update.checking: 正在检查更新…
+update.up_to_date: 当前渠道没有更高版本
+update.last_checked: 上次检查于 %{time}
+update.never_checked: 尚未检查更新
+update.available: "Removent %{version}"
+update.release_notes: 更新日志
+update.download_install: 下载并安装
+update.downloading: 正在下载 %{version}…
+update.verifying: 正在校验更新…
+update.ready: "%{version} 已就绪，可以安装"
+update.install_now: 安装并重启
+update.session_active_hint: 会话进行中，请先结束会话再安装
+update.installing: 正在安装，应用将自动重启…
+update.err.fetch: 获取更新信息失败（%{err}）
+update.err.http_forbidden: GitHub 或更新服务器拒绝访问，可能已达到 GitHub 匿名 API 请求上限（HTTP 403），请稍后重试
+update.err.http_not_found: 更新信息不存在（HTTP 404），请检查更新地址与发布渠道
+update.err.http_rate_limit: 更新服务器请求频率受限（HTTP 429），请稍后重试
+update.err.dns: 无法解析更新服务器或代理地址，请检查网络和 DNS 设置
+update.err.connect: 无法连接更新服务器，请检查网络或代理设置
+update.err.timeout: 请求更新超时，请检查网络或稍后重试
+update.err.tls: 无法与更新服务器建立安全连接，请检查系统时间、证书和代理设置
+update.err.bad_manifest: 更新清单格式无效（%{err}）
+update.err.signature: 更新签名校验失败，已丢弃下载
+update.err.proto_mismatch: 该版本要求两端一起升级，请同时升级对端后再更新
+update.err.download: 更新下载失败（%{err}）
+update.err.hash_mismatch: 更新文件哈希不一致，已丢弃下载
+update.err.unpack: 解包更新失败（%{err}）
+update.err.codesign: 更新未通过 macOS 代码签名校验，已丢弃
+update.err.codesign_team: 更新的开发者团队签名不符，已丢弃
+update.err.swap: 替换应用失败（%{err}）
+update.err.swap_rollback: 替换应用失败（%{err}），自动回滚也未成功——旧版本保留在 %{backup}，请手动将其移回原位
+update.err.not_in_bundle: 仅在已安装的 .app 中才能自动更新（当前为开发环境）
+update.err.session_active: 会话进行中，请先结束会话再安装
+update.err.busy: 请等待当前更新操作完成后再切换渠道
+update.err.not_upgrade: 此版本不是当前渠道的更高版本，请重新检查更新
+
+update.err.installing: 正在安装更新，请稍后重新连接。

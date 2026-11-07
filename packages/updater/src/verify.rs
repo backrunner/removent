@@ -3,7 +3,8 @@ use super::*;
 /// Download to a `.part` file; `resume` continues a partial download (`-C -`).
 pub(super) fn curl_download(url: &str, part: &Path, resume: bool) -> bool {
     let mut cmd = Command::new("/usr/bin/curl");
-    cmd.arg("-fSL")
+    cmd.arg("-q")
+        .arg("-fSL")
         .args([
             "--proto",
             "=https",
@@ -68,14 +69,14 @@ pub(super) fn release_codesign_requirement() -> String {
 
 pub(super) fn codesign_verify(app: &Path) -> Result<(), String> {
     let requirement = release_codesign_requirement();
-    let ok = Command::new("/usr/bin/codesign")
-        .args(["--verify", "--deep", "--strict", "-R", &requirement])
-        .arg(app)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+    let ok = crate::agent::io::run(
+        Command::new("/usr/bin/codesign")
+            .args(["--verify", "--deep", "--strict", "-R", &requirement])
+            .arg(app),
+        Duration::from_secs(30),
+    )
+    .map(|out| out.status.success())
+    .unwrap_or(false);
     if !ok {
         return Err(t!("update.err.codesign").to_string());
     }

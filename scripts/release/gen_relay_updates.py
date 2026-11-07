@@ -22,7 +22,7 @@ def generate(directory, version, key, *, check_key=True):
     if check_key:
         check_release_key(str(key))
         source = Path(__file__).resolve().parents[2]
-        app = (source / "apps/desktop/src/updater/manifest.rs").read_text()
+        app = (source / "packages/updater/src/manifest.rs").read_text()
         relay = (source / "apps/relay/src/updater/mod.rs").read_text()
         app_key = re.search(r'RELEASE_PUBLIC_KEY_HEX: &str =\s*"([0-9a-f]{64})"', app)[1]
         relay_key = re.search(r'PUBLIC_KEY: &str =\s*"([0-9a-f]{64})"', relay)[1]

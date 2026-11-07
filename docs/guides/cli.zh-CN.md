@@ -99,6 +99,7 @@ Esc 先清空搜索，再返回。枚举选择器默认聚焦当前值，并标�
 | `clipboard_clear_after_secs` | `0`–`4294967295`，`0` 表示不自动清空 | 重新打开桌面端 |
 | `video_quality` | `Auto`、`Smooth`、`Balanced`、`HighQuality`、`Extreme` | 重新打开桌面端 |
 | `update_check_enabled` | 布尔值 | 重新打开桌面端 |
+| `update_auto_install` | 布尔值（默认 `true`） | 独立更新器下次空闲检查生效 |
 | `update_channel` | `stable`、`beta` | 重新打开桌面端 |
 | `update_endpoint` | 不含凭据和片段的 HTTPS 地址，留空使用默认地址 | 重新打开桌面端 |
 

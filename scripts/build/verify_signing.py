@@ -10,6 +10,7 @@ COMPONENTS = (
     ('', 'com.alkinum.removent'),
     ('Contents/MacOS/removent', 'com.alkinum.removent.desktop'),
     ('Contents/MacOS/removent-cli', 'com.alkinum.removent.cli'),
+    ('Contents/MacOS/removent-update', 'com.alkinum.removent.update'),
     ('Contents/Helpers/RemoventHost.app', 'com.alkinum.removent.host'),
     ('Contents/Helpers/RemoventTray.app', 'com.alkinum.removent.tray'),
     ('Contents/Helpers/RemoventSync.app', 'com.alkinum.removent.sync'),

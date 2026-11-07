@@ -26,6 +26,7 @@ impl DataDirLock {
     }
 
     fn lock_at(lock_file: &std::path::Path, blocking: bool) -> Result<Self> {
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
         if let Some(parent) = lock_file.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -33,7 +34,21 @@ impl DataDirLock {
             .create(true)
             .truncate(false)
             .write(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
             .open(lock_file)?;
+        let meta = file.metadata()?;
+        if !meta.is_file()
+            || meta.uid() != unsafe { libc::geteuid() }
+            || meta.nlink() != 1
+            || meta.mode() & 0o022 != 0
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Unsafe process lock file",
+            )
+            .into());
+        }
         let flags = libc::LOCK_EX | if blocking { 0 } else { libc::LOCK_NB };
         loop {
             let rc = unsafe { libc::flock(file.as_raw_fd(), flags) };
@@ -71,5 +86,16 @@ mod tests {
         ));
         drop(_g1);
         let _g2 = DataDirLock::acquire(&p).unwrap();
+    }
+
+    #[test]
+    fn a_fifo_cannot_hang_service_or_recovery_startup() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("lock");
+        let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let start = std::time::Instant::now();
+        assert!(DataDirLock::acquire_at(&path).is_err());
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
     }
 }

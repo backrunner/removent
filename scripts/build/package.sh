@@ -16,6 +16,7 @@ VERSION=$(python3 scripts/release/release_meta.py version)
 BASE_VERSION=$(python3 scripts/release/release_meta.py base)
 BUILD_VERSION=$(python3 scripts/release/release_meta.py build)
 APP_NAME="Removent"
+PROTO_VERSION=$(sed -n 's/.*PROTO_VERSION: u16 = \([0-9][0-9]*\).*/\1/p' packages/proto/src/constants.rs | head -1)
 mkdir -p dist
 BUILD_ROOT=$(mktemp -d "$PWD/dist/.removent-package.XXXXXX")
 trap 'rm -rf "$BUILD_ROOT"' EXIT
@@ -46,7 +47,7 @@ if [ -n "${REMOVENT_CLOUDKIT_PROFILE:-}" ]; then
 fi
 
 echo "==> build release"
-cargo build --locked --release -p removent-app -p removent-daemon -p removent-cli
+cargo build --locked --release -p removent-app -p removent-daemon -p removent-cli -p removent-updater
 TARGET_DIR=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
 
 echo "==> build tray"
@@ -66,6 +67,7 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
     <key>RemoventReleaseVersion</key><string>${VERSION}</string>
+    <key>RemoventProtocolVersion</key><integer>${PROTO_VERSION}</integer>
     <key>CFBundleIdentifier</key><string>com.alkinum.removent</string>
     <key>CFBundleLocalizations</key>
     <array>
@@ -108,6 +110,7 @@ cp assets/branding/AppIcon.icns "$BUNDLE/Contents/Resources/AppIcon.icns"
 # TCC needs a stable app identity for the actual process performing capture.
 python3 scripts/build/package_host.py "$BUNDLE" "$TARGET_DIR/release/removentd" "$BASE_VERSION" "$BUILD_VERSION"
 cp "$TARGET_DIR/release/removent-cli" "$BUNDLE/Contents/MacOS/removent-cli"
+cp "$TARGET_DIR/release/removent-update" "$BUNDLE/Contents/MacOS/removent-update"
 cp apps/installer/install-cli.sh "$BUNDLE/Contents/Resources/install-cli.sh"
 
 # Embed the tray: the main app auto-launches it on startup (main.rs autostart_tray looks in Contents/Helpers).
@@ -131,6 +134,8 @@ if [ -n "$IDENTITY" ]; then
     codesign --force --options runtime --timestamp --sign "$IDENTITY" \
         "$BUNDLE/Contents/Helpers/RemoventHost.app"
     codesign --force --options runtime --timestamp --sign "$IDENTITY" \
+        --identifier com.alkinum.removent.update "$BUNDLE/Contents/MacOS/removent-update"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" \
         --identifier com.alkinum.removent.cli "$BUNDLE/Contents/MacOS/removent-cli"
     codesign --force --options runtime --timestamp --sign "$IDENTITY" \
         --identifier com.alkinum.removent.desktop "$BUNDLE/Contents/MacOS/removent"
@@ -151,6 +156,7 @@ elif [ -n "$LOCAL_IDENTITY" ]; then
     fi
     codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" "$BUNDLE/Contents/Helpers/RemoventTray.app"
     codesign --force --options runtime --timestamp=none --sign "$LOCAL_HOST_IDENTITY" "$BUNDLE/Contents/Helpers/RemoventHost.app"
+    codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" --identifier com.alkinum.removent.update "$BUNDLE/Contents/MacOS/removent-update"
     codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" --identifier com.alkinum.removent.cli "$BUNDLE/Contents/MacOS/removent-cli"
     codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" --identifier com.alkinum.removent.desktop "$BUNDLE/Contents/MacOS/removent"
     codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" "$BUNDLE"

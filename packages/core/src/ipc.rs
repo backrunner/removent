@@ -24,6 +24,7 @@ pub enum HostPermission {
 pub enum IpcRequest {
     /// Query the full status snapshot.
     Status,
+    UpdateHealth,
     PairingShow,
     PairingGenerate,
     PairingRevoke,
@@ -102,6 +103,11 @@ pub struct StatusReport {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IpcResponse {
     Status(Box<StatusReport>),
+    UpdateHealth {
+        version: String,
+        pid: u32,
+        status: Box<StatusReport>,
+    },
     Ok,
     PairingCode {
         code: String,

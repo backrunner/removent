@@ -416,3 +416,5 @@ tui.value.highquality: "High quality"
 tui.value.extreme: "Extreme"
 tui.value.stable: "Stable"
 tui.value.beta: "Beta"
+
+tui.setting.update_auto_install: "Install updates automatically"

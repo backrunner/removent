@@ -105,14 +105,16 @@ pub(super) fn download_and_stage(
     let _ = std::fs::remove_dir_all(&stage);
     std::fs::create_dir_all(&stage)
         .map_err(|e| t!("update.err.unpack", err = e.to_string()).to_string())?;
-    let unpacked = Command::new("ditto")
-        .arg("-x")
-        .arg("-k")
-        .arg(&zip)
-        .arg(&stage)
-        .status()
-        .map_err(|e| t!("update.err.unpack", err = e.to_string()).to_string())?;
-    if !unpacked.success() {
+    let unpacked = crate::agent::io::run(
+        Command::new("/usr/bin/ditto")
+            .arg("-x")
+            .arg("-k")
+            .arg(&zip)
+            .arg(&stage),
+        Duration::from_secs(180),
+    )
+    .map_err(|e| t!("update.err.unpack", err = e.to_string()).to_string())?;
+    if !unpacked.status.success() {
         return Err(t!("update.err.unpack", err = "ditto").to_string());
     }
     let app = find_app_bundle(&stage)

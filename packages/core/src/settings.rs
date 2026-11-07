@@ -43,6 +43,8 @@ pub struct Settings {
     pub video_quality: QualityPreset,
     /// Update check (release.md §3).
     pub update_check_enabled: bool,
+    /// Install signed upgrades automatically when no connection is active.
+    pub update_auto_install: bool,
     pub update_channel: UpdateChannel,
     pub update_endpoint: String,
     #[serde(skip)]
@@ -127,6 +129,7 @@ impl Default for Settings {
             clipboard_clear_after_secs: 60,
             video_quality: QualityPreset::Auto,
             update_check_enabled: true,
+            update_auto_install: true,
             update_channel: UpdateChannel::Stable,
             update_endpoint: String::new(),
             loaded_from: None,
@@ -221,6 +224,7 @@ impl Settings {
     }
 
     pub fn save(&self, paths: &DataPaths) -> Result<()> {
+        let _activity = crate::update_gate::ActivityLease::acquire(paths)?;
         self.authentication
             .validate()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;

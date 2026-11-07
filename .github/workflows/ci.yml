@@ -122,6 +122,8 @@ jobs:
           python-version: '3.12'
       - name: Package development bundle
         run: bash scripts/build/package.sh
+      - name: Verify packaged desktop, host and updater startup
+        run: python3 scripts/qa/test_update_startup.py --bundle dist/Removent.app
       - name: Check CloudKit helper lifecycle without cloud access
         run: python3 scripts/qa/test_cloud_sync_helper.py
       - uses: actions/upload-artifact@v4

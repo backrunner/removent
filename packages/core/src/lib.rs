@@ -19,6 +19,7 @@ pub mod service_intent;
 pub mod settings;
 #[cfg(target_os = "macos")]
 pub mod system_service;
+pub mod update_gate;
 
 pub use adapt::{AdaptationController, QualityState, Sample};
 pub use clip::{
@@ -41,3 +42,5 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub mod latest;
 
 pub mod pairing_invitation;
+
+pub mod process;

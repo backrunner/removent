@@ -484,3 +484,10 @@ auth.remember_credentials: "记忆凭据并存入 Keychain"
 auth.keychain_read_failed: "无法读取 Keychain，请重新输入凭据"
 auth.keychain_save_failed: "连接已建立，但无法更新 Keychain 凭据，请检查钥匙串权限"
 connection.native_unreachable: "无法连接 Removent 服务（%{address}）。请在远端开启 Removent 共享，并检查 UDP %{port} 是否可达"
+
+update.err.installing: 正在安装更新，请稍后重新连接。
+
+update.auto_install: 自动安装更新
+update.auto_install_hint: 开启自动检查后，关闭主窗口且连接结束时自动安装。需要管理员授权或新权限的更新会等待手动处理。
+
+update.background_attention: "后台更新需要处理，请检查以下原因后重试："

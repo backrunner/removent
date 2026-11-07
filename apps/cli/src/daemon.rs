@@ -142,6 +142,32 @@ pub(super) async fn cmd_daemon(action: &str, format: Format) -> anyhow::Result<(
                 "login-off" => service.set_launch_at_login(false)?,
                 _ => {}
             }
+            if matches!(
+                service_action.as_str(),
+                "start" | "install-defaults" | "login-on"
+            ) {
+                let executable = std::env::current_exe()?.canonicalize()?;
+                if let Some(bundle) = removent_core::system_service::installed_bundle(&executable) {
+                    // Headless installs must also retain an update/recovery path.
+                    let helper = bundle.join("Contents/MacOS/removent-update");
+                    let user_apps = std::env::var_os("HOME")
+                        .map(|h| std::path::PathBuf::from(h).join("Applications"));
+                    let installed = bundle.parent().is_some_and(|p| {
+                        p == std::path::Path::new("/Applications")
+                            || user_apps.as_deref() == Some(p)
+                    });
+                    if installed && helper.is_file() && unsafe { libc::geteuid() } != 0 {
+                        let _ = std::process::Command::new(helper)
+                            .arg("--install")
+                            .arg(bundle)
+                            .env("REMOVENT_DATA_DIR", &service.paths.root)
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null())
+                            .spawn();
+                    }
+                }
+            }
             service.status()
         });
         let status =

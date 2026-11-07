@@ -484,3 +484,10 @@ auth.remember_credentials: "Remember credentials in Keychain"
 auth.keychain_read_failed: "Cannot read Keychain. Enter your credentials again."
 auth.keychain_save_failed: "Connected, but could not update Keychain credentials. Check Keychain access."
 connection.native_unreachable: "Cannot reach Removent at %{address}. Enable Removent sharing on the host and check UDP port %{port}."
+
+update.err.installing: An update is being installed. Try connecting again shortly.
+
+update.auto_install: Install updates automatically
+update.auto_install_hint: When automatic checks are enabled, updates install after you close the main window and connections end. Updates requiring administrator approval or new permissions wait for you.
+
+update.background_attention: "Background update needs attention. Open Software Update or resolve the issue below:"

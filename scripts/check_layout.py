@@ -50,7 +50,7 @@ def main():
             if lines > 650:
                 errors.append(f'{path.relative_to(ROOT)}: {lines} lines exceed 650; split by responsibility')
     public_keys = []
-    for source, constant in (('apps/desktop/src/updater/manifest.rs', 'RELEASE_PUBLIC_KEY_HEX'),
+    for source, constant in (('packages/updater/src/manifest.rs', 'RELEASE_PUBLIC_KEY_HEX'),
                              ('apps/relay/src/updater/mod.rs', 'PUBLIC_KEY')):
         match = re.search(rf'{constant}: &str =\s*"([0-9a-f]{{64}})"',
                           (ROOT / source).read_text())

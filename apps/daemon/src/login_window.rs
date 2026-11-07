@@ -68,6 +68,7 @@ pub fn restrict(settings: &mut Settings) {
     settings.vnc_enabled = false;
     settings.audio_enabled_default = false;
     settings.update_check_enabled = false;
+    settings.update_auto_install = false;
     settings.authentication = removent_core::authentication::AuthenticationSettings {
         mode: removent_core::AuthenticationMode::SystemAccount,
         ..Default::default()

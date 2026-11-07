@@ -33,6 +33,10 @@ fn main() -> Result<()> {
 
 fn run(paths: DataPaths) -> Result<()> {
     let started = std::time::Instant::now();
+    let smoke = std::env::args().any(|arg| arg == "--update-smoke");
+    // Main-window lifetime is an idle-update boundary. Closing it leaves the
+    // host running and releases this lease for the independent installer.
+    let _activity = removent_core::update_gate::ActivityLease::acquire(&paths)?;
     let settings = removent_core::Settings::load(&paths).unwrap_or_else(|error| {
         tracing::warn!(%error, "could not load settings; using defaults");
         removent_core::Settings::default()
@@ -46,12 +50,18 @@ fn run(paths: DataPaths) -> Result<()> {
         .build()?;
 
     let engine = engine::Engine::new(rt, paths.clone(), settings);
-    engine.start_background_daemon();
+    if !smoke {
+        engine.start_background_daemon();
+    }
     // Tray process lookup/launch must not delay the first window.
     let tray_paths = paths.clone();
-    engine.rt.spawn_blocking(move || autostart_tray(tray_paths));
+    if !smoke {
+        engine.rt.spawn_blocking(move || autostart_tray(tray_paths));
+    }
 
-    engine.start_discovery();
+    if !smoke {
+        engine.start_discovery();
+    }
 
     let engine_for_window = engine.clone();
     let theme_pref = engine.settings().theme;
@@ -98,6 +108,8 @@ fn run(paths: DataPaths) -> Result<()> {
             let home_window = cx
                 .open_window(
                     gpui::WindowOptions {
+                        focus: !smoke,
+                        show: !smoke,
                         window_bounds: Some(gpui::WindowBounds::Windowed(gpui::Bounds::centered(
                             None,
                             gpui::size(gpui::px(1040.), gpui::px(700.)),
@@ -112,7 +124,8 @@ fn run(paths: DataPaths) -> Result<()> {
                         let _ = paths.ensure_layout();
                         // Two-machine debugging aid: REMOVENT_AUTOSTART_HOST=1 auto-enables
                         // the host service.
-                        if std::env::var("REMOVENT_AUTOSTART_HOST").as_deref() == Ok("1") {
+                        if !smoke && std::env::var("REMOVENT_AUTOSTART_HOST").as_deref() == Ok("1")
+                        {
                             // Enable the host service via the daemon (spawning it when offline).
                             engine_for_window.set_host_enabled(true);
                             tracing::info!("host service autostart requested (env)");
@@ -120,9 +133,18 @@ fn run(paths: DataPaths) -> Result<()> {
                         // Note: the engine itself must be moved (events_rx can only be taken
                         // once; a clone holds an empty one).
                         let view = cx.new(|cx| ui::HomeView::new(engine_for_window, window, cx));
-                        window.on_next_frame(move |_, _| {
-                            // Preserve rollback until the new app has rendered a frame.
-                            updater::cleanup_stale_backup();
+                        window.on_next_frame(move |_, cx| {
+                            if smoke {
+                                let receipt = paths.run_dir().join("update-smoke-ok");
+                                cx.spawn(async move |cx| {
+                                    cx.background_executor()
+                                        .timer(std::time::Duration::from_secs(10))
+                                        .await;
+                                    let _ = std::fs::write(receipt, env!("CARGO_PKG_VERSION"));
+                                    cx.update(|cx| cx.quit());
+                                })
+                                .detach();
+                            }
                             tracing::info!(
                                 elapsed_ms = started.elapsed().as_millis(),
                                 "home first frame"
@@ -151,7 +173,9 @@ fn run(paths: DataPaths) -> Result<()> {
                 }
             })
             .detach();
-            cx.activate(true);
+            if !smoke {
+                cx.activate(true);
+            }
         });
     Ok(())
 }

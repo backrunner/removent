@@ -71,14 +71,14 @@ bash scripts/release/publish_release.sh
 
 公证 API key 可替换为 Apple ID 那组三个 secrets。私钥只在当前 job 临时文件中出现，退出时清除。不要导出整个钥匙串，只导出用于 Removent 发布的身份。签名 Team ID 固定为 `PB8H83VL3Z`，变更身份需要同时审查更新器和发布验收代码。
 
-打包及发布验收逐一检查主程序、Desktop、CLI、RemoventHost、托盘和 CloudKit helper 的签名，要求各组件使用同一个 Developer ID 身份、固定的组件标识、hardened runtime 和安全时间戳。任何组件身份不一致都会阻止发布；外层 bundle 验签不能替代嵌套组件检查。
+打包及发布验收逐一检查主程序、Desktop、CLI、独立更新器、RemoventHost、托盘和 CloudKit helper 的签名，要求各组件使用同一个 Developer ID 身份、固定的组件标识、hardened runtime 和安全时间戳。任何组件身份不一致都会阻止发布；外层 bundle 验签不能替代嵌套组件检查。
 
 CI 使用 `macos-26` arm64 runner、锁定的 Cargo.lock、串行测试、失败即停止。发布任务要求同一提交在 main 的 CI 和 Relay 两个工作流中完整通过检查、开发打包、官网构建及浏览器测试、跨平台 relay 和真实服务验收，再复用构建缓存进行签名构建；不会使用其他提交的检查结果。普通 CI 的 ZIP 明确标记 development/not-notarized，不能替代公开安装包。官网静态文件以 `Removent-website` artifact 保存，托管发布单独进行。
 
 ## 自动更新
 
-- 启动 30 秒后检查，之后每 24 小时检查；可关闭，可手动检查。
-- 以上定时检查由桌面应用运行。仅保留后台 host 或托盘时不会自行检查、下载或安装更新；无人值守 host 更新仍需独立协调器、会话准入保护和启动健康回滚，详见[审查记录](../validation/host-unattended-update-audit-2026-11-07.md)。
+- 桌面端启动 30 秒后检查，之后每 24 小时检查。0.1.12 起，独立后台更新器每 6 小时检查，主窗口和连接均结束后可无人值守安装。自动安装默认开启，可关闭；已有的自动检查关闭设置继续生效。
+- 详见[自动更新与恢复](automatic-updates.md)。用户会话 host 更新后独立验收并自动回退；管理员维护的登录前 host 保留原副本，并在设置中提示授权更新。
 - 应用的 **设置 → 系统 → 软件更新** 提供 Stable / Beta 渠道，默认 Stable。Stable 使用 GitHub latest 正式版签名清单；Beta 分页读取官方发布列表，在正式版及 `MAJOR.MINOR.PATCH-beta.N` 中按 SemVer 优先级选择更高版本，再验证该不可变 tag 下的 `latest.json`。草稿、alpha/rc、缺少清单或资产地址不匹配的发布不参与选择。
 - 渠道保存在 `settings.toml` 的 `update_channel = "stable"` / `"beta"`；旧配置默认 Stable。切换后立即重新检查，自动检查也遵循所选渠道。切换清除旧候选与待安装状态；检查、下载、验证和安装进行中不可切换。`update_endpoint` 自定义镜像仍覆盖官方发现地址，但不会绕过渠道、签名和版本规则。
 - 所有渠道都只升级：例如 `0.1.2 → 0.1.3-beta.1 → 0.1.3-beta.2 → 0.1.3`；`0.1.3-beta.2` 切回 Stable 时，若正式版仍是 `0.1.2`，保持当前安装，直到有更高正式版。`0.1.3 → 0.1.3-beta.3`、相同版本或仅 build metadata 不同均不安装。检查、下载、安装及替换前均执行版本约束，替换前另核对磁盘上实际安装版本及暂存包完整版本。
@@ -86,8 +86,8 @@ CI 使用 `macos-26` arm64 runner、锁定的 Cargo.lock、串行测试、失败
 - 下载前校验 Ed25519，下载后核对 SHA-256，再验证 Apple Developer ID 证书、Team ID、bundle ID 和包内完整版本。
 - 只使用 HTTPS（包括重定向），清单 2 MiB 上限、更新 ZIP 1 GiB 上限，连接和低速超时；失败支持再次下载及断点续传。
 - 获取发布列表或清单时，临时网络／服务器错误最多重试两次，每个地址共用 30 秒超时预算；每次响应独立读取，避免重试时拼接损坏的清单。错误提示区分 HTTP 状态、DNS、连接、超时和 TLS 失败，日志记录阶段与状态码，不记录完整更新地址。
-- 用户点击安装；会话进行中推迟。先把新 App 暂存到安装目录所在磁盘，再做同磁盘重命名，保留 `.app.old`。
-- Launch Services 拒绝启动时回滚。新进程首帧绘制后清理旧版本；尚未实现独立进程的启动健康监测，因此“系统接受启动后，新进程早期崩溃”需要从保留的 `.app.old` 手动恢复，不能称为完整自动崩溃回滚。
+- 自动和手动安装都交给独立更新器。共享准入锁保护握手及会话，持久事务记录保护安装中断；同磁盘替换保留 `.app.update-backup`。
+- 主程序先通过首帧及持续运行检查，host 再接受 60 秒版本、PID、身份和权限检查。失败恢复上一版，后续更高修复版仍可安装；独立监护进程还保留上一版更新器。完整运行时验收见[验证记录](../validation/automatic-update-2026-11-07.md)。
 
 ## DMG 和图标
 

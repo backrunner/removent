@@ -18,6 +18,7 @@ fi
 # Reject a mismatched key before spending time building or signing artifacts.
 python3 scripts/release/gen_latest.py --check-key "$UPDATE_SIGNING_KEY_FILE"
 scripts/build/package.sh
+python3 scripts/qa/test_update_startup.py --bundle dist/Removent.app
 scripts/release/notarize.sh "$ZIP"
 xcrun stapler staple dist/Removent.app
 xcrun stapler validate dist/Removent.app

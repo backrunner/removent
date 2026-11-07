@@ -21,6 +21,7 @@ const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12
 
 #[derive(Clone)]
 pub struct VncConfig {
+    pub paths: removent_core::DataPaths,
     pub bind_addr: SocketAddr,
     pub password: String,
     pub input_sink: Option<Arc<dyn InputSink>>,
@@ -147,8 +148,10 @@ pub async fn serve_vnc(cfg: VncConfig) -> io::Result<()> {
                     tracing::debug!(?peer, "VNC connection rejected while host is busy");
                     continue;
                 };
+                let Ok(activity) = removent_core::update_gate::ActivityLease::acquire(&cfg.paths) else { continue; };
                 let cfg = cfg.clone();
                 clients.spawn(async move {
+                    let _activity = activity;
                     if let Err(e) = serve_client(stream, cfg, permit).await {
                         tracing::debug!(?peer, err = %e, "VNC client disconnected");
                     }
@@ -166,6 +169,7 @@ async fn serve_client(
     cfg: VncConfig,
     _permit: tokio::sync::OwnedSemaphorePermit,
 ) -> io::Result<()> {
+    let _activity = removent_core::update_gate::ActivityLease::acquire(&cfg.paths)?;
     let target = tokio::select! {
         _ = cfg.shutdown.cancelled() => {
             return Err(io::Error::new(io::ErrorKind::Interrupted, "VNC service stopped"));

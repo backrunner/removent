@@ -394,6 +394,7 @@ impl HomeView {
             } => {
                 self.daemon_perms = Some((screen_recording, accessibility));
             }
+            UiEvent::BackgroundUpdateChanged => {}
             UiEvent::UpdateStatus(st) => {
                 // Events are wakeups: a channel switch may already have
                 // invalidated a queued Available/ReadyToInstall snapshot.
@@ -405,6 +406,9 @@ impl HomeView {
                 // click "Install and Relaunch" (release.md §3: never forced).
                 let auto_install = matches!(&st, UpdateStatus::ReadyToInstall { .. })
                     && !self.engine.session_active();
+                if matches!(&st, UpdateStatus::Relaunching) {
+                    cx.quit();
+                }
                 self.update_status = st;
                 if auto_install {
                     let _ = self.engine.install_update();

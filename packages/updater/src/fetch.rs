@@ -83,6 +83,7 @@ pub(super) fn fetch_with_retry(
 
 pub(super) fn curl_get_once(url: &str, timeout: Duration) -> Result<Vec<u8>, FetchError> {
     let out = Command::new("/usr/bin/curl")
+        .arg("-q")
         .args([
             "-fsSL",
             "--proto",

@@ -61,6 +61,10 @@ pub(super) async fn run_connection(
     conn: RvpConnection,
     _permit: tokio::sync::OwnedSemaphorePermit,
 ) {
+    let Ok(_activity) = removent_core::update_gate::ActivityLease::acquire(&ctx.paths) else {
+        reject_busy_inner(conn, ctx.settings.device_name, ctx.paths).await;
+        return;
+    };
     // Reload peers per connection: pairing/grant changes take effect immediately.
     let mut peers = match PeersStore::load(&ctx.paths) {
         Ok(p) => p,

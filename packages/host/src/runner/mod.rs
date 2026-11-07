@@ -191,6 +191,7 @@ pub async fn serve_forever(
     let vnc_shutdown = shutdown.child_token();
     if settings.vnc_enabled {
         let vnc_cfg = VncConfig {
+            paths: cfg.paths.clone(),
             bind_addr: SocketAddr::from(([0, 0, 0, 0], settings.vnc_port)),
             password: settings.vnc_password.clone(),
             input_sink: session_input(&cfg.input_sink),
@@ -277,6 +278,10 @@ pub async fn serve_forever(
             incoming.refuse();
             continue;
         }
+        let Ok(activity) = removent_core::update_gate::ActivityLease::acquire(&cfg.paths) else {
+            incoming.refuse();
+            continue;
+        };
         let ctx = ConnectionCtx {
             paths: cfg.paths.clone(),
             settings: settings.clone(),
@@ -291,6 +296,7 @@ pub async fn serve_forever(
         let slot = slots.native.clone();
         connections.spawn(async move {
             let work = async move {
+                let _activity = activity;
                 let quinn_conn = match incoming.await {
                     Ok(c) => c,
                     Err(e) => {

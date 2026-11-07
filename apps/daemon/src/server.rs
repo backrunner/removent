@@ -97,6 +97,11 @@ async fn handle_conn(state: Arc<DaemonState>, stream: UnixStream) {
 fn handle_request(state: &Arc<DaemonState>, req: IpcRequest) -> IpcResponse {
     match req {
         IpcRequest::Status => IpcResponse::Status(Box::new(state.snapshot())),
+        IpcRequest::UpdateHealth => IpcResponse::UpdateHealth {
+            version: env!("CARGO_PKG_VERSION").into(),
+            pid: std::process::id(),
+            status: Box::new(state.snapshot()),
+        },
         IpcRequest::PairingShow => {
             if let Some(code) = state.active_pin() {
                 let expires_at_unix = (code.len() == 12)

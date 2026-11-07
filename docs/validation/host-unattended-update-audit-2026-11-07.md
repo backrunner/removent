@@ -1,5 +1,7 @@
 # Host unattended update audit
 
+Historical audit of 0.1.11, before implementation. The 0.1.12 implementation and acceptance are recorded in [automatic-update-2026-11-07.md](automatic-update-2026-11-07.md).
+
 Date: 2026-11-07. Scope: existing desktop updater and host service lifecycle. No unattended installation policy is enabled by this release, and the existing br-gateway service is preserved.
 
 ## Current behavior

@@ -13,13 +13,14 @@ members = [
     "packages/media-capture",
     "packages/media-codec",
     "packages/mobile",
+    "packages/updater",
     "packages/net",
     "packages/proto",
     "packages/relay-transport",
 ]
 
 [workspace.package]
-version = "0.1.11"
+version = "0.1.12"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/backrunner/removent"
@@ -27,6 +28,7 @@ rust-version = "1.92"
 
 [workspace.dependencies]
 removent-core = { path = "packages/core" }
+removent-updater = { path = "packages/updater" }
 removent-proto = { path = "packages/proto" }
 removent-net = { path = "packages/net" }
 removent-media-capture = { path = "packages/media-capture" }

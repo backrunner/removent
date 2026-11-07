@@ -96,6 +96,7 @@ pub const SETTINGS: &[Setting] = &[
         false
     ),
     setting!("update_check_enabled", Kind::Bool, false, false),
+    setting!("update_auto_install", Kind::Bool, false, false),
     setting!(
         "update_channel",
         Kind::Choice(&["stable", "beta"]),

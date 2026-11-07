@@ -116,6 +116,7 @@ reported without moving or resetting the file or echoing its contents.
 | `clipboard_clear_after_secs` | `0`–`4294967295`; `0` disables clearing | Reopen desktop |
 | `video_quality` | `Auto`, `Smooth`, `Balanced`, `HighQuality`, `Extreme` | Reopen desktop |
 | `update_check_enabled` | Boolean | Reopen desktop |
+| `update_auto_install` | Boolean (default `true`) | Independent agent, next idle check |
 | `update_channel` | `stable`, `beta` | Reopen desktop |
 | `update_endpoint` | HTTPS URL without credentials or fragment; empty uses default | Reopen desktop |
 

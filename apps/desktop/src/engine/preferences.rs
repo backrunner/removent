@@ -136,6 +136,37 @@ impl Engine {
         client_live || self.host_sessions.load(Ordering::SeqCst) > 0
     }
 
+    pub fn background_update_status(&self) -> Option<removent_updater::agent::AgentStatus> {
+        self.background_update.lock().unwrap().clone()
+    }
+
+    pub(super) fn spawn_background_update_status(&self) {
+        let paths = self.paths.clone();
+        let shared = self.background_update.clone();
+        let events = self.events_tx.clone();
+        self.rt.spawn(async move {
+            loop {
+                let paths = paths.clone();
+                let value = tokio::task::spawn_blocking(move || {
+                    removent_updater::agent::read_status(&paths).ok()
+                })
+                .await
+                .ok()
+                .flatten();
+                let changed = {
+                    let mut state = shared.lock().unwrap();
+                    let changed = *state != value;
+                    *state = value;
+                    changed
+                };
+                if changed {
+                    let _ = events.send(UiEvent::BackgroundUpdateChanged);
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            }
+        });
+    }
+
     /// Check schedule (release.md §3.1): once 30s after launch, then every 24h;
     /// skipped when the user disabled update checks.
     pub(super) fn spawn_update_scheduler(&self) {

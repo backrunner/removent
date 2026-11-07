@@ -63,10 +63,11 @@ impl Service {
     }
 
     fn launchctl(&self, args: &[&str]) -> Result<Output> {
-        Command::new("/bin/launchctl")
-            .args(args)
-            .output()
-            .context("Could not run launchctl")
+        crate::process::run_bounded(
+            Command::new("/bin/launchctl").args(args),
+            Duration::from_secs(15),
+        )
+        .context("Could not run launchctl")
     }
 
     fn checked(&self, args: &[&str]) -> Result<()> {
@@ -93,8 +94,20 @@ impl Service {
 
     fn lock(&self) -> Result<DataDirLock> {
         self.paths.ensure_layout()?;
-        DataDirLock::acquire_blocking(&self.paths.run_dir().join("service.lock"))
-            .context("Could not lock service management")
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            match DataDirLock::acquire_at(&self.paths.run_dir().join("service.lock")) {
+                Ok(lock) => return Ok(lock),
+                Err(crate::CoreError::AlreadyRunning) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(50))
+                }
+                Err(error) => {
+                    return Err(
+                        anyhow::Error::new(error).context("Could not lock service management")
+                    );
+                }
+            }
+        }
     }
 
     fn plist(&self) -> Result<String> {
@@ -110,6 +123,7 @@ impl Service {
     /// instance against a live daemon using the same data directory.
     pub fn start(&self) -> Result<()> {
         let _lock = self.lock()?;
+        let _activity = crate::update_gate::ActivityLease::acquire(&self.paths)?;
         crate::service_intent::set_stopped(&self.paths, false)?;
         self.start_locked()
     }
@@ -118,6 +132,9 @@ impl Service {
     /// intent under the same lock as start/stop so a stale poll cannot restart it.
     pub fn ensure_running(&self) -> Result<()> {
         let _lock = self.lock()?;
+        let Ok(_activity) = crate::update_gate::ActivityLease::acquire(&self.paths) else {
+            return Ok(());
+        };
         if !crate::service_intent::is_stopped(&self.paths)? {
             self.start_locked()?;
         }
@@ -134,7 +151,9 @@ impl Service {
         } else {
             let plist = self.plist()?;
             let transient = self.paths.run_dir().join(format!("{}.plist", self.label));
-            crate::settings::atomic_write(&transient, plist.as_bytes())?;
+            if std::fs::read(&transient).ok().as_deref() != Some(plist.as_bytes()) {
+                crate::settings::atomic_write(&transient, plist.as_bytes())?;
+            }
             self.checked(&["enable", &self.target()])?;
             self.checked(&[
                 "bootstrap",
@@ -158,6 +177,7 @@ impl Service {
     /// Register future logins without restarting a running service. Existing
     /// unmanaged instances are adopted on the next login or explicit restart.
     pub fn set_launch_at_login(&self, on: bool) -> Result<()> {
+        let _activity = crate::update_gate::ActivityLease::acquire(&self.paths)?;
         let _lock = self.lock()?;
         self.set_launch_at_login_locked(on)
     }
@@ -169,6 +189,7 @@ impl Service {
     /// Used by installers and the installed bundle launcher. Never undo a later
     /// explicit login-off or a manual stop, and refresh retained bundle paths.
     pub fn install_defaults(&self) -> Result<()> {
+        let _activity = crate::update_gate::ActivityLease::acquire(&self.paths)?;
         let _lock = self.lock()?;
         if self.login_file.is_file() {
             crate::settings::atomic_write(&self.login_file, self.plist()?.as_bytes())?;
@@ -235,10 +256,31 @@ impl Service {
 
     pub fn restart(&self) -> Result<()> {
         let _lock = self.lock()?;
+        let _activity = crate::update_gate::ActivityLease::acquire(&self.paths)?;
         crate::service_intent::set_stopped(&self.paths, true)?;
         self.stop_locked()?;
         crate::service_intent::set_stopped(&self.paths, false)?;
         self.start_locked()
+    }
+
+    /// Update-only lifecycle; never manufacture a user stop or clear a stop
+    /// recorded while the update was in progress. The caller holds admission.
+    pub fn quiesce_for_update(&self, _lease: &crate::update_gate::MaintenanceLease) -> Result<()> {
+        let _lock = self.lock()?;
+        let status = self.status()?;
+        ensure!(
+            status.managed || !status.reachable,
+            "Unmanaged host requires a manual update"
+        );
+        self.stop_locked()
+    }
+
+    pub fn resume_after_update(&self, _lease: &crate::update_gate::MaintenanceLease) -> Result<()> {
+        let _lock = self.lock()?;
+        if !crate::service_intent::is_stopped(&self.paths)? {
+            self.start_locked()?;
+        }
+        Ok(())
     }
 
     fn stop_locked(&self) -> Result<()> {

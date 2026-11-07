@@ -91,6 +91,7 @@ async fn main() -> std::process::ExitCode {
 }
 
 fn cloud_sync(paths: &DataPaths) -> anyhow::Result<()> {
+    let _activity = removent_core::update_gate::ActivityLease::acquire(paths)?;
     use std::io::Read;
     let mut input = String::new();
     std::io::stdin()

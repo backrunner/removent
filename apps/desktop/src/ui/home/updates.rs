@@ -96,6 +96,7 @@ impl HomeView {
         let settings = self.engine.settings();
         let auto_check = settings.update_check_enabled;
         let busy = self.update_status.is_busy();
+        let background = self.engine.background_update_status();
         let last_check = self
             .engine
             .last_update_check()
@@ -357,6 +358,62 @@ impl HomeView {
                                         cx,
                                     ))
                             }),
+                    )
+                    .child(Divider::horizontal())
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_3()
+                            .px_4()
+                            .py_3()
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .text_size(px(13.))
+                                            .child(t!("update.auto_install").to_string()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(12.))
+                                            .text_color(colors.muted_foreground)
+                                            .child(t!("update.auto_install_hint").to_string())
+                                            .when_some(
+                                                background.as_ref().filter(|s| {
+                                                    matches!(
+                                                        s.state.as_str(),
+                                                        "deferred"
+                                                            | "rolled_back"
+                                                            | "needs_admin"
+                                                            | "agent_recovered"
+                                                    )
+                                                }),
+                                                |this, status| {
+                                                    this.child(div().pt_1().child(format!(
+                                                        "{} {}",
+                                                        t!("update.background_attention"),
+                                                        status.detail
+                                                    )))
+                                                },
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                Switch::new("update-auto-install")
+                                    .small()
+                                    .checked(settings.update_auto_install)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        let on = !this.engine.settings().update_auto_install;
+                                        this.persist_settings(|s| s.update_auto_install = on);
+                                        cx.notify();
+                                    })),
+                            ),
                     )
                     .child(Divider::horizontal())
                     .child(

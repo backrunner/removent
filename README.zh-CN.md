@@ -191,6 +191,7 @@ make website-check
 | `infra/` | 部署和服务模板 |
 | `docs/` | 使用指南、架构和验证记录 |
 
+[Computer Use MCP（开发版）](docs/guides/computer-use-mcp.md) |
 [仓库结构](docs/architecture/monorepo.md) |
 [设计文档](docs/design/README.md) |
 [发布指南](docs/guides/release-pipeline.md)

@@ -186,7 +186,7 @@ WSS 容器冷启动时，仅允许凭据唯一定位一个离线房间的控制�
 Hello{ app_version, device_name, os_ver, caps[] }
 HelloAck{ proto_version, caps[], resume_token_opt }
 ```
-- `feature_bits`：按位声明扩展（bit0=file-transfer, bit1=two-way-audio, bit2=hdr, bit5=software AV1 temporal units, bit9=dynamic video profiles, …）。
+- `feature_bits`：按位声明扩展（bit0=file-transfer, bit1=two-way-audio, bit2=hdr, bit5=software AV1 temporal units, bit9=dynamic video profiles, bit10=automation RPC, …）。
 - 版本不兼容且无公共特性集 → `Error{code=VersionMismatch}` 后关流。
 
 ### 5.2 会话协商
@@ -353,3 +353,34 @@ relay 的外层 DATAGRAM 收发队列各 32 KiB；WebSocket 每方向 16 条消�
 2. 枚举只追加变体；新增消息走未占用编号段；接收端遇到未知变体必须**跳过而非报错**（len 前缀天然支持）。
 3. 媒体二进制头保留 `flags` 扩展位；codec_id 预留 AV1。
 4. 发布流程中 `latest.json` 附带 `min_compatible_proto`，升级器据此提示两端需同升的场景。
+
+
+## Computer Use 扩展（AUT1）
+
+双方实现 `feature_bits::AUTOMATION`（bit 10）时，控制端可以在已认证、准入并完成协商的 RVP 连接中打开自动化 bidi 流。单个流包含一个请求和一个响应，优先级低于控制流，不改变现有 postcard 枚举布局。唯一 bidi 接收器分流 `CLP1` 与 `AUT1`，并限制并发头部读取数量及期限。
+
+请求：四字节 ASCII `AUT1`，随后是 UTF-8 JSON `Request { version: 1, operation_id, command, control_revision? }`，以流 FIN 结束。响应：JSON `Response { version: 1, operation_id, result: { Ok: value } | { Err: { code, message } } }`，以 FIN 结束。请求最大 128 KiB，响应最大 24 MiB。具体类型和参数上限以 `packages/proto/src/automation.rs` 为准。未知字段、版本或无效参数不能派发到执行器。
+
+`AUTOMATION_HANDOVER`（bit 11）另行声明控制权切换能力，支持 `control_status`、`resume_control { revision }` 和可选的 `control_revision`。连接旧 host 时省略该字段，并在本地拒绝其不支持的控制权请求。所有 revision 为 JavaScript 可精确表示的非负整数。host 初始 revision 为 0；旧请求缺省为 0，首次接管后必须显式恢复并使用新 revision 才能继续变更。MCP 客户端只在自己的 `resume_control` 成功后更新缓存，不因状态查询而自动取得新控制权。
+
+bit 10 只表示协议实现。被控端还必须确认认证证书在 `automation_allowed_peers` 中、会话获得 input 授权且不是登录窗口服务。此授权独立于旧 input/clipboard 能力，默认关闭。主机设置变更走现有 daemon reload，撤销授权会终止旧会话。macOS 权限在执行时重新检查。
+
+执行器按会话串行运行，等待队列最多 4 个。每会话最多记录 4096 个变更操作，期间不驱逐去重结果；同 ID 同内容返回原结果，不同内容返回 `operation_conflict`。达到上限返回 `session_limit`，不能静默重放。客户端传输超时报告 `outcome_unknown`，不会自动重连或补发。取消通过 QUIC STOP_SENDING、连接关闭及被控端 cancellation token 传播。原生系统调用可能无法立即终止，因此最多保留一个原生工作线程；它仍在停止时新会话不能再分配工作线程。
+
+RVP viewer 的有效键鼠/滚动输入在注入前递增 revision、暂停自动化并取消活动变更。host 等待执行器结束输入释放；超过 2 秒关闭会话，不继续派发人工输入。接管 guard 保持到人工输入实际派发结束，避免慢速释放期间的恢复请求抢先执行。`control_status` 绕过普通动作队列，返回 `mode`、`revision`、`active_operation`、`input_held`、`input_pending` 和 `can_resume`。恢复要求调用者持有当前 revision、没有活动原生变更、待派发或未释放的人工输入，并且最后一次人工输入派发结束后至少经过 500ms；恢复成功再次递增 revision。排队请求还校验入队时的 revision，迟到的请求校验携带的 revision，避免旧动作跨过接管与恢复执行。暂停不阻止读取，但读取期间 revision 改变会丢弃该观察。每次 revision 改变都会作废坐标观察和 AX 引用。被控端的本地输入接管见下文。
+
+去重键绑定 operation ID 与 command，不包含控制 revision；重试同一操作只取原结果。被取消、接管打断或拒绝的变更同样记入去重表。接管的执行取消令牌是 RPC 令牌的子令牌，允许原 RPC 返回 `control_changed`，而不是因人工接管静默断流。该结果不能保证接管前的输入或已经进入系统的 AX 调用没有产生效果。
+
+`executed` / `native_api_returned` 只表示原生 API 调用完成，不等于应用业务动作成功。图像或树观察必须单独验证结果。截图启动新的 ScreenCaptureKit 流，不使用动作前的视频缓存；返回的 observation 保存图像像素与显示器 points 的映射，保留最近 8 个且 60 秒过期。显示器布局改变会使其失效。AX 引用包含随机会话范围，绑定进程实例，并在新快照或 60 秒后失效。
+
+### 被控端本地输入接管
+
+原生执行器只在获准的用户会话中创建 Session 级只读事件 tap，监视普通键鼠和滚动；不拦截、延迟或重放物理事件。自有输入按进程内随机 user-data 标记与来源 PID 识别并排除，其他未标记的本地输入（包括其他自动化）会递增控制 revision、暂停并取消 agent。来源标记不是认证机制。该监听只保留有界的按键/按钮持有位，不读取字符，不保存事件历史。
+
+`control_status` 增加 `viewer_input_held`、`local_input_held`、`last_input_source`（viewer/local/monitor）和 `local_input_monitor { state, reason }`。两类持有状态独立，`input_held` 为两者的或。本地监听器调用独立同步入口取消活动变更，不经过原生动作队列；坐标与 AX 引用仍随 revision 失效。清理 agent 输入时保留已观察到的本地同键、同按钮及修饰键持有状态，Unicode 取消仍发送带原字符的匹配 key-up。
+
+CGEventTapCreate 可能静默移除未获许可的事件位，因此启动时通过前后 tap 清单识别本进程新建的唯一监听，校验完整事件掩码；清单不完整或身份不唯一时不报告 ready。使用同一个 tap 保持键鼠事件顺序。监听就绪前、权限不足、安全输入启用、tap 被禁用或心跳中断时，不允许原生变更或恢复。初始持有状态来自物理 HID 状态采样；已有持有状态会暂停自动化。监听启动期限为 2 秒，运行检查周期为 100ms，心跳有效期为 500ms；延迟恢复的线程和心跳也不能跨过监听空档重新标记 ready。运行故障会取消活动变更，状态和允许的只读观察仍可用。解决原因后必须重连以重新采样；这些周期不承诺硬实时响应。
+
+监听线程和原生动作线程共享同一原生会话名额，任一未退出时不能重复创建新的原生会话。会话取消或工作线程退出会停止事件监听与 watchdog；OS 回调只在自己的 run loop 上执行，退出前注销 tap。被控端的真实物理事件已由系统派发，因此不能像 RVP viewer 那样等待 agent 释放后才派发，也不能撤回已进入系统的 AX 调用。当前监听不覆盖系统媒体键等非普通键鼠事件。
+
+事件 tap 的位置、只读选项、权限掩码及生命周期遵循 [Apple CGEventTapCreate 文档](https://developer.apple.com/documentation/coregraphics/cgevent/tapcreate(tap:place:options:eventsofinterest:callback:userinfo:))；代码只做权限预检，不触发授权提示。

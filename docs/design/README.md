@@ -12,6 +12,7 @@ Removent 是一个类 NoMachine 的远程桌面工具，**完全用 Rust + GPUI 
 | [requirements.md](requirements.md) | 需求文档：目标、功能需求（FR）、非功能需求（NFR）、与 NoMachine/RustDesk 能力对标矩阵、权限矩阵、明确不做的事 |
 | [architecture.md](architecture.md) | 技术架构与模块设计：Cargo workspace 划分、数据流管线、线程模型、进程形态、存储布局 |
 | [protocol.md](protocol.md) | 自定义协议 RVP（Removent Protocol）：发现、配对、会话控制、媒体帧格式、剪贴板、版本演进规则 |
+| [computer-use-bridge.md](computer-use-bridge.md) | MCP 远程 Computer Use 与浏览器桥接设计：本机能力对齐、连接生命周期、RVP 扩展与验收 |
 | [research.md](research.md) | 技术选型调研：各依赖库现状 / license 评估 / 关键 API 细节 / 风险清单 |
 | [ui-design.md](ui-design.md) | UI 设计基调「Quiet Control」：设计原则、设计 token、核心界面规格、组件库选型（gpui-component） |
 | [milestones.md](milestones.md) | 里程碑 M0–M7：范围、验收标准、依赖关系、延迟预算附录 |

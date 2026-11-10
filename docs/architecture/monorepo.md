@@ -7,11 +7,12 @@ provides repository-wide entry points without introducing another package manage
 | Directory | Responsibility |
 | --- | --- |
 | `apps/desktop` | GPUI desktop UI and platform orchestration |
-| `apps/cli`, `apps/daemon`, `apps/relay` | Executable entry points and process/service management |
+| `apps/cli`, `apps/daemon`, `apps/relay`, `apps/mcp` | Executable entry points and process/service management |
 | `apps/mobile`, `apps/tray`, `apps/cloud-sync-helper`, `apps/installer` | Apple native application targets |
 | `apps/website`, `apps/relay-worker` | Public documentation website and Cloudflare relay controller |
 | `packages/core`, `packages/proto`, `packages/net` | Shared configuration, identity, protocol and networking |
 | `packages/client`, `packages/host` | Reusable controller and hosting engines |
+| `packages/automation` | Session-scoped native Computer Use execution, observations and operation deduplication |
 | `packages/media-capture`, `packages/media-codec`, `packages/input` | Capture, codecs and input adapters |
 | `packages/relay-transport` | Shared QUIC/WebSocket relay library used by clients, hosts and the relay application |
 | `packages/mobile` | Rust controller ABI consumed by the native mobile app |

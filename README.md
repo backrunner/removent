@@ -212,6 +212,7 @@ make website-check
 | `infra/` | Deployment and service templates |
 | `docs/` | Guides, architecture and validation records |
 
+[Computer Use MCP (development)](docs/guides/computer-use-mcp.md) ·
 [Repository layout](docs/architecture/monorepo.md) ·
 [Design documents](docs/design/README.md) ·
 [Release guide](docs/guides/release-pipeline.md)

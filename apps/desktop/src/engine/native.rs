@@ -189,6 +189,18 @@ pub(super) async fn run_client(
             }
         }
     }
+    // Same-user MCP clients can borrow this authenticated session without a second host connection.
+    let _automation_bridge = match removent_client::automation::broker::Publisher::start(
+        &paths,
+        session.conn.clone(),
+        session.host_features,
+    ) {
+        Ok(bridge) => Some(bridge),
+        Err(error) => {
+            tracing::debug!(err=%error, "local automation bridge unavailable");
+            None
+        }
+    };
     // Frame bridge: install the channel before telling the UI to open the viewer
     // (eliminates the race of not being able to take rx).
     let ftx = attempt.publish(

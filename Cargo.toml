@@ -3,6 +3,7 @@ resolver = "3"
 exclude = ["vendor/mdns-sd"]
 members = [
     "apps/cli",
+    "apps/mcp",
     "apps/daemon",
     "apps/desktop",
     "apps/relay",

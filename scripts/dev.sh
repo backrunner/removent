@@ -30,7 +30,7 @@ if [[ "$build" == 1 ]]; then
         echo "Metal compiler not found. Install full Xcode and its Metal toolchain." >&2
         exit 1
     fi
-    cargo build --locked -p removent-app -p removent-daemon -p removent-cli
+    cargo build --locked -p removent-app -p removent-daemon -p removent-cli -p removent-mcp
     if [[ "$tray" == 1 ]]; then
         swift build -c debug --package-path apps/tray
     fi

@@ -47,7 +47,7 @@ if [ -n "${REMOVENT_CLOUDKIT_PROFILE:-}" ]; then
 fi
 
 echo "==> build release"
-cargo build --locked --release -p removent-app -p removent-daemon -p removent-cli -p removent-updater
+cargo build --locked --release -p removent-app -p removent-daemon -p removent-cli -p removent-mcp -p removent-updater
 TARGET_DIR=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
 
 echo "==> build tray"
@@ -110,6 +110,7 @@ cp assets/branding/AppIcon.icns "$BUNDLE/Contents/Resources/AppIcon.icns"
 # TCC needs a stable app identity for the actual process performing capture.
 python3 scripts/build/package_host.py "$BUNDLE" "$TARGET_DIR/release/removentd" "$BASE_VERSION" "$BUILD_VERSION"
 cp "$TARGET_DIR/release/removent-cli" "$BUNDLE/Contents/MacOS/removent-cli"
+cp "$TARGET_DIR/release/removent-mcp" "$BUNDLE/Contents/MacOS/removent-mcp"
 cp "$TARGET_DIR/release/removent-update" "$BUNDLE/Contents/MacOS/removent-update"
 cp apps/installer/install-cli.sh "$BUNDLE/Contents/Resources/install-cli.sh"
 
@@ -136,6 +137,8 @@ if [ -n "$IDENTITY" ]; then
     codesign --force --options runtime --timestamp --sign "$IDENTITY" \
         --identifier com.alkinum.removent.update "$BUNDLE/Contents/MacOS/removent-update"
     codesign --force --options runtime --timestamp --sign "$IDENTITY" \
+        --identifier com.alkinum.removent.mcp "$BUNDLE/Contents/MacOS/removent-mcp"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" \
         --identifier com.alkinum.removent.cli "$BUNDLE/Contents/MacOS/removent-cli"
     codesign --force --options runtime --timestamp --sign "$IDENTITY" \
         --identifier com.alkinum.removent.desktop "$BUNDLE/Contents/MacOS/removent"
@@ -157,6 +160,7 @@ elif [ -n "$LOCAL_IDENTITY" ]; then
     codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" "$BUNDLE/Contents/Helpers/RemoventTray.app"
     codesign --force --options runtime --timestamp=none --sign "$LOCAL_HOST_IDENTITY" "$BUNDLE/Contents/Helpers/RemoventHost.app"
     codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" --identifier com.alkinum.removent.update "$BUNDLE/Contents/MacOS/removent-update"
+    codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" --identifier com.alkinum.removent.mcp "$BUNDLE/Contents/MacOS/removent-mcp"
     codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" --identifier com.alkinum.removent.cli "$BUNDLE/Contents/MacOS/removent-cli"
     codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" --identifier com.alkinum.removent.desktop "$BUNDLE/Contents/MacOS/removent"
     codesign --force --options runtime --timestamp=none --sign "$LOCAL_IDENTITY" "$BUNDLE"

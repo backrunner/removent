@@ -27,15 +27,7 @@ pub fn can_remember(mode: AuthenticationMode) -> bool {
 }
 
 fn account(local: &str, host: [u8; 32], mode: AuthenticationMode) -> Option<String> {
-    let method = match mode {
-        AuthenticationMode::SystemAccount => "system",
-        AuthenticationMode::Password => "password",
-        _ => return None,
-    };
-    Some(format!(
-        "native-auth:v1:{local}:{}:{method}",
-        hex::encode(host)
-    ))
+    removent_client::automation::credential_account(local, host, mode)
 }
 
 pub(super) struct PendingAuthentication {

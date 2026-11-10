@@ -80,6 +80,8 @@ pub struct ClientSession {
     /// and the final pointer position during network backpressure.
     pub input_tx: crate::InputSender,
     pub negotiated: NegotiateAck,
+    /// Host protocol features, distinct from the per-peer automation grant.
+    pub host_features: u64,
     /// Most recently received quick-resume token (the host rotates it every session, §7.4).
     pub resume_token: Arc<Mutex<Option<[u8; 16]>>>,
     /// Decoded BGRA frames (consumed by the renderer).

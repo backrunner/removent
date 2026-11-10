@@ -213,6 +213,7 @@ pub(super) fn build_session(
     }
 
     Ok(ClientSession {
+        host_features: 0,
         conn,
         cmd_tx,
         input_tx,

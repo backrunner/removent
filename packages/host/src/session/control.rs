@@ -3,6 +3,7 @@ use super::*;
 /// Resident processing pump for the control stream: Pong replies, KeyframeRequest
 /// forwarding (rate-limited), StatsReport → adaptation controller → QualityControl delivery.
 pub struct ControlPumpDeps {
+    pub automation: Option<removent_automation::Executor>,
     pub conn: RvpConnection,
     /// Keyframe injection endpoint for the video loop (None when there is no video loop).
     pub kf_tx: Option<mpsc::Sender<()>>,
@@ -111,8 +112,15 @@ pub fn spawn_control_pump(
     };
     tokio::spawn(async move {
         let cancel = deps.cancel.clone();
+        let (automation_tx, automation_rx) = mpsc::channel(4);
+        let automation_task =
+            crate::automation::serve(automation_rx, deps.automation.clone(), cancel.clone());
+        let _automation_guard = AbortTask(automation_task);
         let (mut clipboard, clipboard_tx) =
-            removent_net::clipboard::ClipboardReader::new(deps.conn.clone());
+            removent_net::clipboard::ClipboardReader::with_automation(
+                deps.conn.clone(),
+                Some(automation_tx),
+            );
         let mut writer =
             removent_net::control_writer::ControlWriter::with_clipboard(sink, clipboard_tx);
         let work = async {
@@ -210,7 +218,10 @@ pub fn spawn_control_pump(
                                             continue;
                                         }
                                     }
-                                    cleanup.tracker.note_mouse(display_id, x_px, y_px, kind);
+                                    let mut next_input = cleanup.tracker.clone();
+                                    next_input.note_mouse(display_id, x_px, y_px, kind);
+                                    let Ok(_manual) = begin_manual(&deps.automation, next_input.has_held_input() || buttons != 0).await else { break; };
+                                    cleanup.tracker = next_input;
                                     if let Some(input) = deps.input.as_ref()
                                         && let Err(e) = input.mouse(display_id, x_px, y_px, buttons, kind)
                                     {
@@ -229,7 +240,10 @@ pub fn spawn_control_pump(
                                         tracing::warn!("input transition rate limit exceeded, closing session");
                                         break;
                                     }
-                                    cleanup.tracker.note_key(vk_code, modifiers, kind);
+                                    let mut next_input = cleanup.tracker.clone();
+                                    next_input.note_key(vk_code, modifiers, kind);
+                                    let Ok(_manual) = begin_manual(&deps.automation, next_input.has_held_input() || modifiers.intersects(removent_proto::KeyModifiers::SHIFT | removent_proto::KeyModifiers::CONTROL | removent_proto::KeyModifiers::OPTION | removent_proto::KeyModifiers::COMMAND | removent_proto::KeyModifiers::FUNCTION)).await else { break; };
+                                    cleanup.tracker = next_input;
                                     if let Some(input) = deps.input.as_ref()
                                         && let Err(e) = input.key(vk_code, modifiers, kind, unicode)
                                     {
@@ -247,7 +261,10 @@ pub fn spawn_control_pump(
                                         tracing::warn!("input rate limit exceeded, dropping scroll event");
                                         continue;
                                     }
-                                    cleanup.tracker.note_scroll(display_id, phase);
+                                    let mut next_input = cleanup.tracker.clone();
+                                    next_input.note_scroll(display_id, phase);
+                                    let Ok(_manual) = begin_manual(&deps.automation, next_input.has_held_input()).await else { break; };
+                                    cleanup.tracker = next_input;
                                     if let Some(input) = deps.input.as_ref()
                                         && let Err(e) = input.scroll(display_id, dx_mm, dy_mm, phase)
                                     {
@@ -361,4 +378,23 @@ pub fn spawn_control_pump(
         }
         drop(cleanup);
     })
+}
+
+struct AbortTask(tokio::task::JoinHandle<()>);
+impl Drop for AbortTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+async fn begin_manual(
+    automation: &Option<removent_automation::Executor>,
+    held: bool,
+) -> Result<Option<removent_automation::ManualInput>, ()> {
+    match automation {
+        Some(executor) => executor.manual_input(held).await.map(Some).map_err(|_| {
+            tracing::warn!("native action did not stop for manual takeover; closing session");
+        }),
+        None => Ok(None),
+    }
 }

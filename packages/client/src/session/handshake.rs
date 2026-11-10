@@ -109,6 +109,8 @@ pub async fn connect_session_with_confirmation(
                 | removent_proto::feature_bits::AUTH_METHODS
                 | removent_proto::feature_bits::SYSTEM_ACCOUNT_AUTH
                 | removent_proto::feature_bits::DYNAMIC_VIDEO
+                | removent_proto::feature_bits::AUTOMATION_HANDOVER
+                | removent_proto::feature_bits::AUTOMATION
                 | if cfg.pairing_code.is_some() {
                     removent_proto::feature_bits::PAIRING_INVITATION
                 } else {
@@ -239,7 +241,10 @@ pub async fn connect_session_with_confirmation(
         // negotiation and we reuse the previous parameters. A rejected token
         // falls through to full negotiation so both ends stay in sync.
         ControlMsg::SessionAccept if resume_accepted && prev_ack.is_some() => {
-            return build_session(conn, sink, source, prev_ack.unwrap(), cfg);
+            return build_session(conn, sink, source, prev_ack.unwrap(), cfg).map(|mut session| {
+                session.host_features = server_ack.feature_bits;
+                session
+            });
         }
         ControlMsg::SessionAccept => {}
         _ => unreachable!(),
@@ -292,5 +297,8 @@ pub async fn connect_session_with_confirmation(
     };
     let ack = *ack;
 
-    build_session(conn, sink, source, ack, cfg)
+    build_session(conn, sink, source, ack, cfg).map(|mut session| {
+        session.host_features = server_ack.feature_bits;
+        session
+    })
 }

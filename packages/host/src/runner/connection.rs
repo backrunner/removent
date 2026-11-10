@@ -188,6 +188,24 @@ pub(super) async fn run_connection(
     // Control pump: input injection / clipboard application / adaptive delivery
     // (trimmed by the peer's capabilities).
     let deps = ControlPumpDeps {
+        automation: if !ctx.settings.window_server_capture
+            && established.peer_caps.input
+            && ctx
+                .settings
+                .automation_allowed_peers
+                .split(',')
+                .any(|fp| fp.len() == 64 && fp == established.peer_fp_hex)
+        {
+            match removent_automation::Executor::native(established.cancel.clone()) {
+                Ok(executor) => Some(executor),
+                Err(error) => {
+                    tracing::warn!(code=%error.code, "automation unavailable");
+                    None
+                }
+            }
+        } else {
+            None
+        },
         conn: conn.clone(),
         kf_tx: Some(established.keyframe_req_tx.clone()),
         controller: Some(established.controller.clone()),

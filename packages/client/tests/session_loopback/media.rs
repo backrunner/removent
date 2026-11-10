@@ -93,6 +93,7 @@ async fn full_session_pair_negotiate_media() {
         )));
         {
             let deps = removent_host::ControlPumpDeps {
+                automation: None,
                 conn: conn.clone(),
                 kf_tx: None,
                 controller: Some(controller.clone()),

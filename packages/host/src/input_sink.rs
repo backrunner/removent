@@ -185,7 +185,7 @@ impl InputSink for RealInputSink {
 /// Tracks pressed keys and held mouse buttons so the host can inject the
 /// matching releases when a session tears down — including abrupt network
 /// loss, where the client never gets to send the release events.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct InputReleaseTracker {
     keys: std::collections::HashSet<u16>,
     /// Modifier keys currently held (tracked via FlagsChanged direction
@@ -197,6 +197,12 @@ pub struct InputReleaseTracker {
 }
 
 impl InputReleaseTracker {
+    pub fn has_held_input(&self) -> bool {
+        !self.keys.is_empty()
+            || self.mod_keys.iter().any(|vk| *vk != 0x39)
+            || self.buttons != 0
+            || self.scrolling.is_some()
+    }
     pub fn note_scroll(&mut self, display_id: u64, phase: ScrollPhase) {
         self.scrolling = (phase != ScrollPhase::Ended).then_some(display_id);
     }
@@ -406,6 +412,21 @@ mod tests {
             MouseKind::LeftDown
         );
         assert_eq!(drag_kind_for(0, MouseKind::RightUp), MouseKind::RightUp);
+    }
+
+    #[test]
+    fn takeover_held_state_ignores_latched_caps_lock_but_tracks_gestures() {
+        let mut t = InputReleaseTracker::default();
+        t.note_key(0x39, KeyModifiers::CAPS_LOCK, KeyKind::FlagsChanged);
+        assert!(!t.has_held_input());
+        t.note_key(0x38, KeyModifiers::SHIFT, KeyKind::FlagsChanged);
+        assert!(t.has_held_input());
+        t.note_key(0x38, KeyModifiers::empty(), KeyKind::FlagsChanged);
+        assert!(!t.has_held_input());
+        t.note_scroll(1, ScrollPhase::Began);
+        assert!(t.has_held_input());
+        t.note_scroll(1, ScrollPhase::Ended);
+        assert!(!t.has_held_input());
     }
 
     #[test]

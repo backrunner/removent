@@ -49,6 +49,7 @@ async fn adaptive_recovery_uses_real_static_refreshes_without_reducing_text_size
         source,
         ControlSink::new(send, removent_net::ControlCodec),
         ControlPumpDeps {
+            automation: None,
             conn: host.clone(),
             kf_tx: None,
             controller: Some(Arc::new(std::sync::Mutex::new(controller))),
@@ -191,6 +192,7 @@ async fn displayed_geometry_orders_with_mouse_input_across_resize() {
         ControlSource::new(recv, removent_net::ControlCodec),
         ControlSink::new(send, removent_net::ControlCodec),
         ControlPumpDeps {
+            automation: None,
             conn: host.clone(),
             kf_tx: None,
             controller: None,
@@ -548,6 +550,7 @@ async fn blocked_control_write_releases_inputs_on_cancel_abort_and_timeout() {
             ControlSource::new(recv, removent_net::ControlCodec),
             ControlSink::new(send, removent_net::ControlCodec),
             ControlPumpDeps {
+                automation: None,
                 conn: host.clone(),
                 kf_tx: None,
                 controller: None,

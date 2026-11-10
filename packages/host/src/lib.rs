@@ -23,3 +23,5 @@ pub use session::{
     spawn_audio_loop, spawn_control_pump, spawn_video_loop,
 };
 pub use vnc::{VncConfig, serve_vnc};
+
+mod automation;

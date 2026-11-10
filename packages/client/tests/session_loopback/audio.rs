@@ -87,6 +87,7 @@ async fn audio_disabled_session_uses_single_media_stream() {
             "audio must be negotiated off"
         );
         let deps = removent_host::ControlPumpDeps {
+            automation: None,
             conn: conn.clone(),
             kf_tx: None,
             controller: None,

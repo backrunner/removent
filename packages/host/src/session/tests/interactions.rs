@@ -21,6 +21,7 @@ async fn pump_with_input(
         ControlSource::new(recv, removent_net::ControlCodec),
         ControlSink::new(send, removent_net::ControlCodec),
         ControlPumpDeps {
+            automation: None,
             conn: host.clone(),
             kf_tx: None,
             controller: None,

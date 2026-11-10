@@ -233,6 +233,7 @@ async fn run(
         source,
         sink,
         ControlPumpDeps {
+            automation: None,
             conn: host.clone(),
             kf_tx: None,
             controller: Some(Arc::new(Mutex::new(AdaptationController::new(

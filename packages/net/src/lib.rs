@@ -26,3 +26,5 @@ pub use tls::{ALPN_RVP1, PinState};
 pub use transport::{make_client_endpoint, make_server_endpoint};
 
 pub use trust::{CertificateConfirmation, confirm_quic_peer};
+
+pub mod automation;

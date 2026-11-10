@@ -209,6 +209,7 @@ async fn receiver_stall_drives_host_adaptation_and_keeps_input_live() {
     let (_commands, commands_rx) = mpsc::channel(4);
     let (keyframes, keyframes_rx) = mpsc::channel(4);
     let deps = removent_host::ControlPumpDeps {
+        automation: None,
         conn: peer.conn.clone(),
         kf_tx: None,
         controller: Some(controller.clone()),

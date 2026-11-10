@@ -24,3 +24,5 @@ pub use session::{
     connect_session_with_confirmation, quick_resume,
 };
 pub use vnc::{VncError, VncSession, connect_vnc, connect_vnc_with_credentials};
+
+pub mod automation;

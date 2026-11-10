@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+removent-relay.workspace = true
 removent-core = { workspace = true }
 removent-proto = { workspace = true }
 removent-net = { workspace = true }
@@ -33,6 +34,8 @@ url = "2"
 hex = { workspace = true }
 
 [dev-dependencies]
+removent-input.workspace = true
+removent-automation.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tokio-util.workspace = true
 ironrdp-server = { version = "0.13", default-features = false, features = ["helper"] }
@@ -42,7 +45,6 @@ rustls = { workspace = true }
 tempfile = "3"
 removent-media-capture = { workspace = true }
 removent-host = { workspace = true }
-removent-relay = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]

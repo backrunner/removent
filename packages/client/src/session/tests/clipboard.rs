@@ -205,6 +205,7 @@ async fn real_host_pump_pastes_new_text_and_shares_clipboard_both_ways_without_e
         peer.source,
         peer.sink,
         removent_host::ControlPumpDeps {
+            automation: None,
             conn: peer.conn,
             kf_tx: None,
             controller: None,
@@ -373,6 +374,7 @@ async fn host_write_failure_ends_session_without_acknowledging_or_pasting() {
         peer.source,
         peer.sink,
         removent_host::ControlPumpDeps {
+            automation: None,
             conn: peer.conn,
             kf_tx: None,
             controller: None,

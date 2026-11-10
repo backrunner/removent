@@ -263,6 +263,7 @@ async fn main() -> anyhow::Result<()> {
             }
         };
         let deps = removent_host::ControlPumpDeps {
+            automation: None,
             conn: conn.clone(),
             kf_tx: None,
             controller: None,

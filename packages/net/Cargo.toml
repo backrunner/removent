@@ -22,6 +22,7 @@ thiserror = { workspace = true }
 bytes = { workspace = true }
 postcard = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 ed25519-dalek = { workspace = true }
 tokio-util = { workspace = true }
 zeroize = "1"

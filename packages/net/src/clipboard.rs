@@ -45,6 +45,13 @@ impl Drop for ClipboardReader {
 impl ClipboardReader {
     /// The session must already have accepted its control/pairing streams.
     pub fn new(connection: RvpConnection) -> (Self, ClipboardSender) {
+        Self::with_automation(connection, None)
+    }
+
+    pub fn with_automation(
+        connection: RvpConnection,
+        automation: Option<mpsc::Sender<crate::automation::Incoming>>,
+    ) -> (Self, ClipboardSender) {
         let (outgoing, mut snapshots) = watch::channel(None::<ControlMsg>);
         let (reliable, mut paste) = mpsc::channel::<ControlMsg>(1);
         let (incoming_tx, incoming) = mpsc::channel(1);
@@ -99,32 +106,45 @@ impl ClipboardReader {
             }
         });
         let receiver = tokio::spawn(async move {
-            while let Ok((_send, mut recv)) = connection.inner().accept_bi().await {
-                let read = async {
-                    let mut magic = [0; 4];
-                    recv.read_exact(&mut magic).await.ok()?;
-                    if &magic != MAGIC {
-                        return None;
+            let mut readers = tokio::task::JoinSet::new();
+            let clip_read = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+            loop {
+                tokio::select! {
+                    result = connection.inner().accept_bi(), if readers.len() < 8 => {
+                        let Ok((mut send, mut recv)) = result else { break };
+                        let incoming_tx = incoming_tx.clone();
+                        let automation = automation.clone();
+                        let clip_read = clip_read.clone();
+                        readers.spawn(async move {
+                            let mut magic = [0; 4];
+                            if !matches!(tokio::time::timeout(Duration::from_secs(3), recv.read_exact(&mut magic)).await, Ok(Ok(()))) {
+                                return;
+                            }
+                            if &magic == removent_proto::automation::MAGIC {
+                                if let Some(tx) = automation {
+                                    let _ = tx.try_send(crate::automation::Incoming { send, recv });
+                                } else {
+                                    let _ = send.reset(1u32.into());
+                                    let _ = recv.stop(1u32.into());
+                                }
+                                return;
+                            }
+                            if &magic != MAGIC { return; }
+                            let read = async {
+                                // Serialize complete clipboard snapshots while automation bypasses this lane.
+                                let _guard = clip_read.lock().await;
+                                let wire = recv.read_to_end(MAX_WIRE).await.ok()?;
+                                let (ControlDecodeOutcome::Msg(message), used) = decode_control(&wire).ok()? else { return None };
+                                if used != wire.len() || !valid_snapshot(&message) { return None; }
+                                let _ = incoming_tx.send(*message).await;
+                                Some(())
+                            };
+                            if !matches!(tokio::time::timeout(TIMEOUT, read).await, Ok(Some(()))) {
+                                let _ = recv.stop(0u32.into());
+                            }
+                        });
                     }
-                    let wire = recv.read_to_end(MAX_WIRE).await.ok()?;
-                    let (ControlDecodeOutcome::Msg(message), used) = decode_control(&wire).ok()?
-                    else {
-                        return None;
-                    };
-                    if used != wire.len() || !valid_snapshot(&message) {
-                        return None;
-                    }
-                    Some(*message)
-                };
-                match tokio::time::timeout(TIMEOUT, read).await {
-                    Ok(Some(message)) => {
-                        if incoming_tx.send(message).await.is_err() {
-                            break;
-                        }
-                    }
-                    _ => {
-                        let _ = recv.stop(0u32.into());
-                    }
+                    _ = readers.join_next(), if !readers.is_empty() => {},
                 }
             }
         });

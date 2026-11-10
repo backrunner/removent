@@ -176,3 +176,23 @@ fn enum_aliases_and_host_effects_match_the_catalog() {
     next.host_port += 1;
     assert!(host_changed(&current, &next));
 }
+
+#[test]
+fn automation_grants_require_complete_fingerprints_and_reload_host_on_revocation() {
+    let setting = find("automation_allowed_peers").unwrap();
+    assert!(setting.parse(&"ab".repeat(32)).is_ok());
+    assert!(setting.parse("").is_ok());
+    for invalid in [
+        "*",
+        "abcd",
+        &"AB".repeat(32),
+        &format!("{},", "ab".repeat(32)),
+    ] {
+        assert!(setting.parse(invalid).is_err());
+    }
+    let granted = Settings {
+        automation_allowed_peers: "ab".repeat(32),
+        ..Default::default()
+    };
+    assert!(host_changed(&granted, &Settings::default()));
+}

@@ -152,13 +152,15 @@ fn make_mouse_event(kind: MouseKind, x_pt: f64, y_pt: f64) -> Result<CGEvent, St
         core_graphics::event_source::CGEventSourceStateID::CombinedSessionState,
     )
     .map_err(|_| "event source create failed".to_string())?;
-    CGEvent::new_mouse_event(
+    let event = CGEvent::new_mouse_event(
         source,
         cg_type,
         cg_point(x_pt, y_pt),
         button.unwrap_or(CGMouseButton::Left),
     )
-    .map_err(|_| "mouse event create failed".to_string())
+    .map_err(|_| "mouse event create failed".to_string())?;
+    crate::origin::mark(&event);
+    Ok(event)
 }
 
 fn cg_point(x: f64, y: f64) -> core_graphics::geometry::CGPoint {

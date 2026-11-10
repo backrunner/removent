@@ -79,6 +79,7 @@ pub const SETTINGS: &[Setting] = &[
     setting!("host_port", Kind::Integer(1, 65535), false, true),
     setting!("window_server_capture", Kind::Bool, false, true),
     setting!("paired_only", Kind::Bool, false, true),
+    setting!("automation_allowed_peers", Kind::Text(4096), false, true),
     setting!("vnc_enabled", Kind::Bool, false, true),
     setting!("vnc_port", Kind::Integer(1, 65535), false, true),
     setting!("vnc_password", Kind::Text(1024), true, true),
@@ -166,6 +167,19 @@ impl Setting {
             Kind::Text(max) => {
                 if input.len() > max || input.chars().any(char::is_control) {
                     return Err(invalid());
+                }
+                if self.key == "automation_allowed_peers"
+                    && !input.is_empty()
+                    && !input.split(',').all(|fp| {
+                        fp.len() == 64
+                            && fp
+                                .bytes()
+                                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+                    })
+                {
+                    return Err(self.invalid(
+                        "comma-separated lowercase SHA-256 certificate fingerprints, or empty text",
+                    ));
                 }
                 if self.key == "device_name" && input.trim().is_empty() {
                     return Err(self.invalid("a non-empty device name"));

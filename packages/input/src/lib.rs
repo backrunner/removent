@@ -4,6 +4,7 @@ pub mod clipboard;
 pub mod display;
 pub mod keyboard;
 pub mod mouse;
+pub mod origin;
 
 pub use clipboard::{ClipboardError, change_count, read, read_text, write_text};
 pub use display::DisplayGeometry;

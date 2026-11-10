@@ -58,6 +58,7 @@ fn single_double_triple_clicks_keep_counts_and_matching_up_numbers_for_every_but
             assert!(number > previous_number);
             previous_number = number;
             for event in [down, dragged, up] {
+                assert!(crate::origin::is_our_event(&event));
                 assert_eq!(count(&event), click);
                 assert_eq!(
                     event.get_integer_value_field(EventField::MOUSE_EVENT_NUMBER),

@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+rand.workspace = true
 removent-proto = { workspace = true }
 core-graphics = { workspace = true, features = ["highsierra"] }
 objc2 = { workspace = true }

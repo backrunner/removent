@@ -60,6 +60,9 @@ impl CodecId {
 }
 
 pub mod feature_bits {
+    /// Authenticated, separately authorized Computer Use RPC streams.
+    pub const AUTOMATION: u64 = 1 << 10;
+    pub const AUTOMATION_HANDOVER: u64 = 1 << 11;
     pub const FILE_TRANSFER: u64 = 1 << 0;
     pub const TWO_WAY_AUDIO: u64 = 1 << 1;
     pub const HDR: u64 = 1 << 2;

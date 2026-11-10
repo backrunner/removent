@@ -7,6 +7,7 @@ members = [
     "apps/desktop",
     "apps/relay",
     "packages/client",
+    "packages/automation",
     "packages/core",
     "packages/host",
     "packages/input",
@@ -35,6 +36,7 @@ removent-media-capture = { path = "packages/media-capture" }
 removent-media-codec = { path = "packages/media-codec" }
 removent-input = { path = "packages/input" }
 removent-client = { path = "packages/client" }
+removent-automation = { path = "packages/automation" }
 removent-host = { path = "packages/host" }
 removent-relay = { package = "removent-relay-transport", path = "packages/relay-transport" }
 

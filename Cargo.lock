@@ -7672,6 +7672,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "removent-automation"
+version = "0.1.12"
+dependencies = [
+ "base64 0.22.1",
+ "core-foundation 0.10.1",
+ "core-graphics 0.25.0",
+ "libc",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "png 0.18.1",
+ "rand 0.10.3",
+ "removent-core",
+ "removent-input",
+ "removent-media-capture",
+ "removent-proto",
+ "serde_json",
+ "sha2 0.11.0",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "removent-cli"
 version = "0.1.12"
 dependencies = [
@@ -7820,6 +7843,7 @@ dependencies = [
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
+ "rand 0.10.3",
  "removent-proto",
  "thiserror 2.0.21",
  "tracing",
@@ -7911,6 +7935,7 @@ dependencies = [
  "bitflags 2.13.2",
  "bytes",
  "postcard",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

@@ -51,3 +51,5 @@ mod tests {
         assert_eq!(AUDIO_HEADER_LEN, 14);
     }
 }
+
+pub mod automation;

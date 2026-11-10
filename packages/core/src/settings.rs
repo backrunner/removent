@@ -29,6 +29,8 @@ pub struct Settings {
     pub window_server_capture: bool,
     /// Refuse unknown/untrusted device certificates before RVP negotiation.
     pub paired_only: bool,
+    /// Explicit Computer Use grant, comma-separated full client certificate fingerprints.
+    pub automation_allowed_peers: String,
     /// Optional legacy RFB/VNC listener for Apple Remote Desktop and other
     /// standard VNC clients. Disabled by default because RFB is LAN-only and
     /// its password authentication is intentionally legacy-compatible.
@@ -122,6 +124,7 @@ impl Default for Settings {
             host_port: removent_proto::DEFAULT_PORT,
             window_server_capture: false,
             paired_only: false,
+            automation_allowed_peers: String::new(),
             vnc_enabled: false,
             vnc_port: 5900,
             vnc_password: String::new(),

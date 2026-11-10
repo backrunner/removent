@@ -185,6 +185,7 @@ fn make_key_event(
     };
     let event = CGEvent::new_keyboard_event(source()?, vk, down)
         .map_err(|_| "keyboard event create failed".to_string())?;
+    crate::origin::mark(&event);
     if kind == KeyKind::FlagsChanged {
         event.set_type(core_graphics::event::CGEventType::FlagsChanged);
     }
@@ -253,6 +254,7 @@ fn make_scroll_event(
         0,
     )
     .map_err(|_| "scroll event create failed".to_string())?;
+    crate::origin::mark(&event);
     use core_graphics::event::EventField;
     event.set_flags(flags_of(modifiers));
     // Point-delta fields are integers; writing doubles silently truncates them.
@@ -280,6 +282,28 @@ pub fn build_scroll(dx_px: f64, dy_px: f64, phase: ScrollPhase) -> Result<(), St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unicode_cleanup_can_build_a_matching_marked_key_up() {
+        let event = make_key_event(
+            UNICODE_ONLY_VK,
+            KeyModifiers::empty(),
+            KeyKind::Up,
+            Some('中'),
+            false,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            event.get_type() as u32,
+            core_graphics::event::CGEventType::KeyUp as u32
+        );
+        assert_eq!(
+            event.get_integer_value_field(core_graphics::event::EventField::KEYBOARD_EVENT_KEYCODE),
+            0
+        );
+        assert!(crate::origin::is_our_event(&event));
+    }
 
     #[test]
     fn modifiers_are_flags_changed_and_repeat_resets_after_release() {
@@ -317,6 +341,7 @@ mod tests {
                 .build(vk, mods, KeyKind::FlagsChanged, None)
                 .unwrap()
                 .unwrap();
+            assert!(crate::origin::is_our_event(&down));
             assert_eq!(down.get_type() as u32, CGEventType::FlagsChanged as u32);
             assert!(down.get_flags().contains(flag));
             assert_eq!(keyboard.modifiers, mods);
@@ -324,6 +349,7 @@ mod tests {
                 .build(vk, KeyModifiers::empty(), KeyKind::FlagsChanged, None)
                 .unwrap()
                 .unwrap();
+            assert!(crate::origin::is_our_event(&up));
             assert_eq!(up.get_type() as u32, CGEventType::FlagsChanged as u32);
             assert!(!up.get_flags().contains(flag));
         }
@@ -354,6 +380,7 @@ mod tests {
             (ScrollPhase::Ended, 4),
         ] {
             let event = make_scroll_event(1.25, -2.5, phase, KeyModifiers::CONTROL).unwrap();
+            assert!(crate::origin::is_our_event(&event));
             assert_eq!(event.get_type() as u32, CGEventType::ScrollWheel as u32);
             assert_eq!(
                 event.get_double_value_field(SCROLL_WHEEL_EVENT_FIXED_PT_DELTA_AXIS_1),

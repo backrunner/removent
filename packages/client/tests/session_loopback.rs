@@ -72,3 +72,6 @@ mod invitations;
 
 #[path = "session_loopback/security.rs"]
 mod security;
+
+#[path = "session_loopback/automation.rs"]
+mod automation;

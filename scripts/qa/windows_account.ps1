@@ -1,7 +1,7 @@
 # Run only on an ephemeral Windows CI runner with local administrator rights.
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true') { throw 'Requires an ephemeral GitHub Actions runner' }
-$artifacts = cargo test --locked -p removent-host --lib --no-run --message-format=json
+$artifacts = cargo test --locked -p removent-proto -p removent-core -p removent-input -p removent-client -p removent-host -p removent-media-codec --lib --no-run --message-format=json
 if ($LASTEXITCODE -ne 0) { throw 'Account test build failed' }
 $binary = $artifacts | ForEach-Object { $_ | ConvertFrom-Json } |
     Where-Object { $_.reason -eq 'compiler-artifact' -and $_.profile.test -and $_.executable -and $_.target.name -eq 'removent_host' } |

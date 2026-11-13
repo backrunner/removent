@@ -52,12 +52,8 @@ jobs:
         run: target/release/examples/ipc_smoke
       - name: Daemon IPC admission regression
         run: cargo test --locked -p removent-daemon --test ipc -- --test-threads=1
-      - name: Protocol, codec and session regression tests
-        run: cargo test --locked -p removent-proto -p removent-core -p removent-input -p removent-client -p removent-host -p removent-media-codec --lib -- --test-threads=1
-      - name: Windows native account authentication
-        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
-        run: ./scripts/qa/windows_account.ps1
       - name: Linux native desktop acceptance
+        timeout-minutes: 10
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
         run: |
           xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash -e -c '
@@ -70,20 +66,33 @@ jobs:
             /usr/bin/python3 scripts/qa/linux_tray.py
           '
       - name: Windows native capture and input
+        timeout-minutes: 5
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
         run: python scripts/qa/portable_desktop.py
       - name: Windows native QUIC desktop session
+        timeout-minutes: 5
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
         run: python scripts/qa/portable_desktop.py --probe desktop_session_smoke
       - name: Windows native tray interaction
+        timeout-minutes: 5
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
         run: python scripts/qa/windows_tray.py
       - name: Windows visible desktop application
+        timeout-minutes: 5
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
         run: python scripts/qa/portable_app.py
       - name: Windows credential storage
+        timeout-minutes: 5
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
         run: python scripts/qa/portable_credentials.py
+      - name: Protocol, codec and session regression tests
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' }}
+        timeout-minutes: 30
+        run: cargo test --locked -p removent-proto -p removent-core -p removent-input -p removent-client -p removent-host -p removent-media-codec --lib -- --test-threads=1
+      - name: Windows native account authentication
+        timeout-minutes: 10
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
+        run: ./scripts/qa/windows_account.ps1
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -12,6 +12,10 @@ $password = [Guid]::NewGuid().ToString('N') + 'aA1!'
 $secure = ConvertTo-SecureString $password -AsPlainText -Force
 $created = $false
 $child = $null
+$accountTemp = Join-Path $env:PUBLIC "removent-account-$username"
+$tempCreated = $false
+$previousTemp = $env:TEMP
+$previousTmp = $env:TMP
 $evidence = Join-Path (Get-Location) 'target/qa-evidence'
 New-Item -ItemType Directory -Force $evidence | Out-Null
 try {
@@ -20,6 +24,16 @@ try {
     $created = $true
     $users = Get-LocalGroup -SID 'S-1-5-32-545'
     Add-LocalGroupMember -Group $users -Member $username
+    # Start-Process inherits the runner's private TEMP, which the test user cannot
+    # access. Give the QUIC identity fixture its own directory and explicit ACL.
+    New-Item -ItemType Directory $accountTemp | Out-Null
+    $tempCreated = $true
+    $runnerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $testSid = (Get-LocalUser -Name $username).SID.Value
+    icacls $accountTemp /inheritance:r /grant "*${runnerSid}:(OI)(CI)F" "*${testSid}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot protect account test directory' }
+    $env:TEMP = $accountTemp
+    $env:TMP = $accountTemp
     $env:REMOVENT_AUTH_TEST_USERNAME = $username
     $env:REMOVENT_AUTH_TEST_PASSWORD = $password
     $env:REMOVENT_AUTH_EXPECT_REJECT = '1'
@@ -34,9 +48,12 @@ try {
     if ($child.ExitCode -ne 0) { throw 'Native account authentication failed' }
     Write-Output 'PASS: Windows account/QUIC password, invalid password and desktop-owner SID checks'
 } finally {
+    $env:TEMP = $previousTemp
+    $env:TMP = $previousTmp
     if ($child -and -not $child.HasExited) { Stop-Process -Id $child.Id -Force }
     foreach ($name in @('REMOVENT_AUTH_TEST_USERNAME', 'REMOVENT_AUTH_TEST_PASSWORD', 'REMOVENT_AUTH_EXPECT_REJECT')) {
         Remove-Item "Env:$name" -ErrorAction SilentlyContinue
     }
     if ($created) { Remove-LocalUser -Name $username }
+    if ($tempCreated) { Remove-Item -Recurse -Force $accountTemp }
 }

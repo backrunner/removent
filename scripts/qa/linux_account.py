@@ -41,19 +41,22 @@ os.execve(sys.argv[1], [sys.argv[1], "native_desktop_account_authentication", "-
         binary.chmod(0o755)
         created = False
         try:
-            subprocess.run(["sudo", "useradd", "--create-home", "--shell", "/bin/sh", username],
+            # Hosted runners put complete toolchains in /etc/skel. Copying that
+            # profile can take minutes; PAM needs only the account and password.
+            subprocess.run(["sudo", "-n", "useradd", "--no-log-init", "--no-create-home",
+                            "--home-dir", directory, "--shell", "/bin/sh", username],
                            check=True, timeout=30)
             created = True
-            subprocess.run(["sudo", "chpasswd"],
+            subprocess.run(["sudo", "-n", "chpasswd"],
                            input=f"{username}:{credentials['REMOVENT_AUTH_TEST_PASSWORD']}\n",
                            text=True, check=True, timeout=30)
             subprocess.run([str(binary), "native_desktop_account_authentication", "--ignored"],
                            env=dict(os.environ, **credentials, REMOVENT_AUTH_EXPECT_REJECT="1"),
                            cwd=directory, check=True, timeout=30)
-            run_as_owner = ["sudo", "-u", username, "python3", "-c", child, str(binary)]
+            run_as_owner = ["sudo", "-n", "-u", username, "python3", "-c", child, str(binary)]
             subprocess.run(run_as_owner, input=json.dumps(credentials), text=True,
                            cwd=directory, check=True, timeout=30)
-            subprocess.run(["sudo", "chage", "--expiredate", "0", username],
+            subprocess.run(["sudo", "-n", "chage", "--expiredate", "0", username],
                            check=True, timeout=30)
             subprocess.run(run_as_owner,
                            input=json.dumps(dict(credentials, REMOVENT_AUTH_EXPECT_REJECT="1")),
@@ -61,7 +64,7 @@ os.execve(sys.argv[1], [sys.argv[1], "native_desktop_account_authentication", "-
             print("PASS: Linux PAM/QUIC password, invalid password, owner UID and expired account checks")
         finally:
             if created:
-                subprocess.run(["sudo", "userdel", "--remove", username], check=True, timeout=30)
+                subprocess.run(["sudo", "-n", "userdel", username], check=True, timeout=30)
 
 
 if __name__ == "__main__":

@@ -44,6 +44,16 @@ jobs:
         run: |
           choco install nasm --no-progress -y
           "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Windows concurrent storage regression
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        run: |
+          cargo test --locked -p removent-core --lib settings::tests -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          for ($attempt = 0; $attempt -lt 5; $attempt++) {
+            cargo test --locked -p removent-core --lib settings::tests::concurrent_writers_publish_complete_private_files -- --exact
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Build desktop, host, tray and native probe
         id: native_build
         run: cargo build --locked --release -p removent-app -p removent-daemon -p removent-tray -p removent-host -p removent-client --bins --example desktop_smoke --example ipc_smoke --example desktop_session_smoke --example credential_smoke

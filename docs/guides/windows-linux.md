@@ -9,6 +9,8 @@ access requests. Quitting only the tray does not stop the host.
 
 Windows archives include the Visual C++ runtime DLLs beside the executables;
 keep these files together as well. A separate runtime installation is not needed.
+Keep the data directory on local NTFS storage, which supports atomic replacement
+while other processes read their existing file snapshots.
 Windows requires an interactive signed-in desktop. The host cannot control the
 UAC secure desktop or the sign-in screen. System-account authentication checks
 that the authenticated token belongs to the user running the desktop host.
@@ -35,8 +37,8 @@ the OpenGL software renderer to avoid black Vulkan frames on older Mesa.
 H.264 and AV1 use CPU codecs. New macOS hosts select H.264 when a Windows/Linux
 controller advertises that HEVC is unavailable; older macOS releases that always
 select HEVC need updating. System audio capture, pre-login access, native
-Computer Use, and automatic package installation are not implemented on these
-platforms. Text clipboard sharing is supported. Do not infer feature support
+Computer Use, idle-sleep prevention, and automatic package installation are not
+implemented on these platforms. Text clipboard sharing is supported. Do not infer feature support
 from a successful build; see [the validation report](../validation/windows-linux-2026-11-13.md) for tested scenarios.
 
 Data lives under `%LOCALAPPDATA%/Removent/userdata` on Windows and

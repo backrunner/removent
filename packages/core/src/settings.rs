@@ -262,7 +262,7 @@ pub fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
     let result = (|| -> std::io::Result<()> {
         file.write_all(bytes)?;
         file.sync_all()?;
-        // Do not publish a Windows file while retaining its writable handle.
+        // Finish and close the writer before the platform replacement step.
         drop(file);
         replace_written_file(&tmp, path)
     })();
@@ -280,39 +280,64 @@ fn replace_written_file(from: &std::path::Path, to: &std::path::Path) -> std::io
 #[cfg(windows)]
 fn replace_written_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::GENERIC_WRITE;
     use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        DELETE, FILE_FLAG_WRITE_THROUGH, FILE_RENAME_INFO, FileRenameInfoEx,
+        SetFileInformationByHandle,
     };
     // Canonicalize the existing parent, not the possibly new destination, so
     // Windows extended-length paths and non-ASCII data directories both work.
     let parent = from.parent().filter(|p| !p.as_os_str().is_empty());
     let parent = std::fs::canonicalize(parent.unwrap_or(std::path::Path::new(".")))?;
-    let from: Vec<u16> = parent
-        .join(from.file_name().ok_or(std::io::ErrorKind::InvalidInput)?)
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect();
     let to: Vec<u16> = parent
         .join(to.file_name().ok_or(std::io::ErrorKind::InvalidInput)?)
         .as_os_str()
         .encode_wide()
-        .chain(Some(0))
         .collect();
-    // Readers or another replacement can briefly keep the destination pending
-    // deletion on Windows. Preserve the old file and retry the atomic rename,
-    // never delete the destination first or fall back to a non-atomic copy.
+    let file = std::fs::OpenOptions::new()
+        .access_mode(DELETE | GENERIC_WRITE)
+        .custom_flags(FILE_FLAG_WRITE_THROUGH)
+        .open(from)?;
+    // Unlike MoveFileExW, POSIX replacement keeps existing readers valid and
+    // makes every new open resolve to the new file, without a delete-pending
+    // interval that returns AccessDenied. Both flags are documented in
+    // FILE_RENAME_INFORMATION; they are not exported by windows-sys.
+    const REPLACE_IF_EXISTS: u32 = 1;
+    const POSIX_SEMANTICS: u32 = 2;
+    let size = std::mem::size_of::<FILE_RENAME_INFO>() + to.len() * 2;
+    let size_u32 = u32::try_from(size).map_err(|_| std::io::ErrorKind::InvalidInput)?;
+    // usize storage supplies the HANDLE alignment and room for the variable
+    // UTF-16 tail. Derive its pointer from the entire allocation, not the
+    // struct's one-element FileName array.
+    let mut storage = vec![0usize; size.div_ceil(std::mem::size_of::<usize>())];
+    let information = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    unsafe {
+        (*information).Anonymous.Flags = REPLACE_IF_EXISTS | POSIX_SEMANTICS;
+        (*information).FileNameLength = (to.len() * 2) as u32;
+        let name = storage
+            .as_mut_ptr()
+            .cast::<u8>()
+            .add(std::mem::offset_of!(FILE_RENAME_INFO, FileName))
+            .cast::<u16>();
+        std::ptr::copy_nonoverlapping(to.as_ptr(), name, to.len());
+    }
+    // External software may temporarily open a file without delete sharing.
+    // Retry the same atomic operation; never delete the destination first or
+    // fall back to MoveFileExW's weaker replacement semantics.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
     loop {
         if unsafe {
-            MoveFileExW(
-                from.as_ptr(),
-                to.as_ptr(),
-                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            SetFileInformationByHandle(
+                file.as_raw_handle(),
+                FileRenameInfoEx,
+                information.cast(),
+                size_u32,
             )
         } != 0
         {
-            return Ok(());
+            return file.sync_all();
         }
         let error = std::io::Error::last_os_error();
         if !matches!(error.raw_os_error(), Some(5 | 32 | 33))
@@ -386,7 +411,7 @@ mod tests {
                 scope.spawn(move || {
                     let payload = vec![byte; 64 * 1024];
                     barrier.wait();
-                    for _ in 0..10 {
+                    for _ in 0..50 {
                         atomic_write(path, &payload).unwrap();
                         let visible = std::fs::read(path).unwrap();
                         assert_eq!(visible.len(), payload.len());
@@ -401,6 +426,22 @@ mod tests {
             0o600
         );
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn held_reader_keeps_old_snapshot_during_atomic_replace() {
+        use std::io::Read;
+        let dir = tempdir().unwrap();
+        let parent = dir.path().join("配置目录");
+        std::fs::create_dir(&parent).unwrap();
+        let path = parent.join("设置🪟.toml");
+        atomic_write(&path, b"old snapshot").unwrap();
+        let mut old_reader = std::fs::File::open(&path).unwrap();
+        atomic_write(&path, b"new snapshot").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"new snapshot");
+        let mut retained = Vec::new();
+        old_reader.read_to_end(&mut retained).unwrap();
+        assert_eq!(retained, b"old snapshot");
     }
 
     #[test]

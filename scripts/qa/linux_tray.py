@@ -87,7 +87,7 @@ def main():
                     result = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", "^Pairing code$"], capture_output=True, text=True)
                     return result.stdout.strip().splitlines()[0] if result.returncode == 0 else None
                 window = wait_for(dialog, "Native pairing dialog did not appear")
-                time.sleep(0.3)  # Let the window manager decorate and present it.
+                time.sleep(2)  # Let software rendering present the complete dialog.
                 ImageGrab.grab().save(args.evidence_dir / "tray-pairing.png")
                 subprocess.run(["xdotool", "windowactivate", "--sync", window, "key", "Return"], check=True)
                 wait_for(lambda: not dialog(), "Pairing dialog did not close")

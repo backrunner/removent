@@ -24,17 +24,25 @@ def main():
             child = subprocess.Popen([str(binary), "--desktop-smoke"], env=env,
                                      stdout=log, stderr=subprocess.STDOUT)
             try:
-                time.sleep(4)
-                assert child.poll() is None, "Desktop exited before the render observation"
-                after = ImageGrab.grab().convert("RGB")
-                after.save(args.evidence_dir / "desktop.png")
-                center = after.crop((after.width // 4, after.height // 4,
-                                     after.width * 3 // 4, after.height * 3 // 4))
-                colors = center.getcolors(center.width * center.height)
-                assert colors and len(colors) > 30, "Window content is blank or unrendered"
-                difference = ImageChops.difference(before, after).convert("L")
-                changed = sum(difference.histogram()[24:])
-                assert changed > 20000, f"Desktop did not visibly render ({changed} changed pixels)"
+                # Software GPU discovery can take several seconds on a cold runner.
+                # Observe presented pixels, rather than assuming a fixed startup time.
+                deadline = time.monotonic() + 25
+                while True:
+                    assert child.poll() is None, "Desktop exited before the render observation"
+                    after = ImageGrab.grab().convert("RGB")
+                    after.save(args.evidence_dir / "desktop.png")
+                    center = after.crop((after.width // 4, after.height // 4,
+                                         after.width * 3 // 4, after.height * 3 // 4))
+                    colors = center.getcolors(center.width * center.height)
+                    difference = ImageChops.difference(before, after).convert("L")
+                    changed = sum(difference.histogram()[24:])
+                    if colors and len(colors) > 30 and changed > 20000:
+                        break
+                    assert time.monotonic() < deadline, (
+                        f"Desktop did not visibly render ({len(colors or [])} colors, "
+                        f"{changed} changed pixels)"
+                    )
+                    time.sleep(0.25)
                 assert child.wait(timeout=25) == 0, "Desktop process failed"
                 receipt = Path(data) / "run/update-smoke-ok"
                 assert receipt.is_file() and receipt.read_text().strip(), "No first-frame completion receipt"

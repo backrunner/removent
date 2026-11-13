@@ -32,7 +32,8 @@ Use the login password of the non-root user running the host for system authenti
 Linux verifies both the password and account validity through the system's `login`
 PAM policy. An expired or locked account is not accepted. Authentication does not
 switch users, and another user's valid password cannot authorize this desktop.
-Remembered connection credentials use Windows Credential Manager or the Linux
+Remembered connection credentials use Windows Credential Manager with local-machine
+persistence (not Windows profile roaming), or the Linux
 Secret Service (for example, an unlocked GNOME Keyring). No plaintext fallback
 is used when the credential store is unavailable. The remember switch is off initially;
 credentials are saved only after a successful connection. Later connections reuse

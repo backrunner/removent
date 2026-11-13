@@ -8717,7 +8717,9 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "windows-sys 0.61.2",
  "x509-cert 0.3.0",
+ "zeroize",
 ]
 
 [[package]]

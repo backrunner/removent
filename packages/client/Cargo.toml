@@ -53,5 +53,7 @@ security-framework-sys = "2"
 
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3.6", features = ["windows-native"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials"] }
+zeroize = "1.9"
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3.6", features = ["sync-secret-service", "crypto-rust"] }

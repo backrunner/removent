@@ -72,7 +72,13 @@ fn is_not_found(e: &StoreError) -> bool {
     matches!(e, keyring::Error::NoEntry)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(windows)]
+mod windows;
+
+#[cfg(windows)]
+use windows::store as store_imp;
+
+#[cfg(target_os = "linux")]
 fn store_imp(account: &str, password: &str) -> std::result::Result<(), StoreError> {
     keyring::Entry::new(SERVICE, account)?.set_password(password)
 }

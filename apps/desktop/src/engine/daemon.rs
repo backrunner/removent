@@ -169,7 +169,12 @@ impl Engine {
                         // Take a snapshot right after connecting.
                         let _ = removent_core::ipc::write_msg(&mut w, &IpcRequest::Status).await;
                         let mut reader = removent_core::ipc::MessageReader::default();
-                        let mut tick = tokio::time::interval(std::time::Duration::from_secs(3));
+                        // The snapshot above is already the first poll. An
+                        // immediate interval tick sends a duplicate request and
+                        // can race the final response of a departing daemon.
+                        let period = std::time::Duration::from_secs(3);
+                        let mut tick =
+                            tokio::time::interval_at(tokio::time::Instant::now() + period, period);
                         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                         loop {
                             tokio::select! {

@@ -1,6 +1,55 @@
 use super::*;
 
 #[test]
+fn daemon_link_waits_between_initial_snapshot_and_periodic_poll() {
+    let directory = tempfile::tempdir_in("/tmp").unwrap();
+    let paths = DataPaths {
+        root: directory.path().to_owned(),
+    };
+    paths.ensure_layout().unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let listener = runtime
+        .block_on(async { tokio::net::UnixListener::bind(paths.daemon_socket()) })
+        .unwrap();
+    let engine = Engine::with_state(runtime, paths, Settings::default());
+    let server = engine.rt.spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let (reader, _writer) = socket.into_split();
+        let mut reader = tokio::io::BufReader::new(reader);
+        let request: IpcRequest = removent_core::ipc::read_msg(&mut reader)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(request, IpcRequest::Status));
+        let mut messages = removent_core::ipc::MessageReader::default();
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(250),
+                messages.read::<_, IpcRequest>(&mut reader),
+            )
+            .await
+            .is_err(),
+            "the initial snapshot must not be followed by a duplicate immediate poll"
+        );
+        let request = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            messages.read::<_, IpcRequest>(&mut reader),
+        )
+        .await
+        .expect("periodic status polling must continue")
+        .unwrap()
+        .unwrap();
+        assert!(matches!(request, IpcRequest::Status));
+    });
+    engine.spawn_daemon_link();
+    engine.rt.block_on(server).unwrap();
+}
+
+#[test]
 fn daemon_restart_republishes_unchanged_permissions_and_then_live_changes() {
     let directory = tempfile::tempdir_in("/tmp").unwrap();
     let paths = DataPaths {
@@ -62,10 +111,9 @@ fn daemon_restart_republishes_unchanged_permissions_and_then_live_changes() {
     let mut grants = Vec::new();
     while grants.len() < 3 {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-        match receiver
-            .recv_timeout(remaining)
-            .expect("daemon link must refresh grants after each restart")
-        {
+        match receiver.recv_timeout(remaining).unwrap_or_else(|err| {
+            panic!("daemon link must refresh grants after each restart: {err}; observed {grants:?}")
+        }) {
             UiEvent::DaemonPermissions {
                 screen_recording,
                 accessibility,

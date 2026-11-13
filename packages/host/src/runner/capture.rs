@@ -170,8 +170,6 @@ pub(super) async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(target_os = "macos")]
-    use removent_media_capture::quartz::QuartzCapture;
     #[test]
     fn recovery_is_bounded_and_does_not_restart_user_stopped_capture() {
         let mut budget = RecoveryBudget::default();

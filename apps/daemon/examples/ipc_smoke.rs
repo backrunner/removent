@@ -11,9 +11,11 @@ async fn main() -> anyhow::Result<()> {
         root: root.path().into(),
     };
     paths.ensure_layout()?;
-    let mut settings = Settings::default();
-    settings.host_enabled = false;
-    settings.prevent_idle_sleep = false;
+    let settings = Settings {
+        host_enabled: false,
+        prevent_idle_sleep: false,
+        ..Default::default()
+    };
     settings.save(&paths)?;
     let binary = std::env::current_exe()?
         .parent()

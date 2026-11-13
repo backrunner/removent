@@ -22,7 +22,9 @@ async fn main() -> anyhow::Result<()> {
     // The UI fixture paints red; verify real capture contains the known color.
     anyhow::ensure!(
         pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|p| p[2] > 180 && p[1] < 80 && p[0] < 80),
         "Fixture color absent from capture"
     );
@@ -49,7 +51,9 @@ async fn main() -> anyhow::Result<()> {
     anyhow::ensure!(
         decoded
             .data
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|p| p[2] > 160 && p[1] < 100 && p[0] < 100),
         "Decoded color absent"
     );

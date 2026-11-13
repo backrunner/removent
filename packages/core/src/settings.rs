@@ -262,6 +262,8 @@ pub fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
     let result = (|| -> std::io::Result<()> {
         file.write_all(bytes)?;
         file.sync_all()?;
+        // Do not publish a Windows file while retaining its writable handle.
+        drop(file);
         replace_written_file(&tmp, path)
     })();
     if result.is_err() {
@@ -297,18 +299,28 @@ fn replace_written_file(from: &std::path::Path, to: &std::path::Path) -> std::io
         .encode_wide()
         .chain(Some(0))
         .collect();
-    // Unlike Unix directory fsync, this is available to a regular Windows user.
-    if unsafe {
-        MoveFileExW(
-            from.as_ptr(),
-            to.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    } == 0
-    {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
+    // Readers or another replacement can briefly keep the destination pending
+    // deletion on Windows. Preserve the old file and retry the atomic rename,
+    // never delete the destination first or fall back to a non-atomic copy.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    loop {
+        if unsafe {
+            MoveFileExW(
+                from.as_ptr(),
+                to.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        } != 0
+        {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if !matches!(error.raw_os_error(), Some(5 | 32 | 33))
+            || std::time::Instant::now() >= deadline
+        {
+            return Err(error);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 

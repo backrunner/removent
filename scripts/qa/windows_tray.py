@@ -71,6 +71,7 @@ def window(pid, class_name=None, title=None, visible=False):
 
 
 def main():
+    c.windll.shcore.SetProcessDpiAwareness(2)
     parser = argparse.ArgumentParser()
     parser.add_argument("--bin-dir", type=Path, default=Path("target/release"))
     parser.add_argument("--evidence-dir", type=Path, default=Path("target/qa-evidence"))
@@ -117,6 +118,7 @@ def main():
                 wait_for(lambda: tomllib.loads(settings.read_text())["host_enabled"], "Sharing was not enabled")
                 click("Show pairing code")
                 dialog = wait_for(lambda: window(tray.pid, title="Pairing code", visible=True), "Native pairing dialog missing")
+                time.sleep(0.3)
                 ImageGrab.grab().save(args.evidence_dir / "tray-pairing.png")
                 user.SetForegroundWindow(dialog)
                 user.keybd_event(0x0D, 0, 0, 0)

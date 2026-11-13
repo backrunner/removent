@@ -103,6 +103,17 @@ pub(super) fn verify(credentials: &SystemCredentials) -> bool {
         && client.acct_mgmt(pam_client::Flag::NONE).is_ok()
         && client.user().is_ok_and(|name| name == credentials.username)
 }
+#[cfg(any(windows, test))]
+fn windows_logon_identity(username: &str) -> (Option<&str>, &str) {
+    if let Some((domain, name)) = username.split_once('\\') {
+        (Some(domain), name)
+    } else if username.contains('@') {
+        (None, username)
+    } else {
+        (Some("."), username)
+    }
+}
+
 #[cfg(windows)]
 pub(super) fn verify(credentials: &SystemCredentials) -> bool {
     use windows_sys::Win32::{
@@ -138,23 +149,16 @@ pub(super) fn verify(credentials: &SystemCredentials) -> bool {
         } != 0)
             .then_some(buffer)
     }
-    let (domain, name) = credentials
-        .username
-        .split_once('\\')
-        .unwrap_or((".", &credentials.username));
+    let (domain, name) = windows_logon_identity(&credentials.username);
     let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
     let name = wide(name);
-    let domain = wide(domain);
+    let domain = domain.map(wide);
     let mut password = wide(&credentials.password);
     let mut authenticated = std::ptr::null_mut();
     let ok = unsafe {
         LogonUserW(
             name.as_ptr(),
-            if credentials.username.contains('@') {
-                std::ptr::null()
-            } else {
-                domain.as_ptr()
-            },
+            domain.as_ref().map_or(std::ptr::null(), |d| d.as_ptr()),
             password.as_ptr(),
             LOGON32_LOGON_NETWORK,
             LOGON32_PROVIDER_DEFAULT,
@@ -271,10 +275,29 @@ pub(super) fn verify(credentials: &SystemCredentials) -> bool {
 mod tests {
     use super::*;
     #[test]
+    fn windows_account_names_preserve_explicit_domains() {
+        for (input, domain, name) in [
+            ("alice", Some("."), "alice"),
+            ("WORKGROUP\\alice", Some("WORKGROUP"), "alice"),
+            ("alice@example.com", None, "alice@example.com"),
+            (
+                "MicrosoftAccount\\alice@example.com",
+                Some("MicrosoftAccount"),
+                "alice@example.com",
+            ),
+        ] {
+            assert_eq!(windows_logon_identity(input), (domain, name));
+        }
+    }
+    #[test]
     #[ignore = "requires an isolated OS account with REMOVENT_AUTH_TEST_USERNAME/PASSWORD"]
     fn native_desktop_account_authentication() {
         let username = std::env::var("REMOVENT_AUTH_TEST_USERNAME").unwrap();
         let password = std::env::var("REMOVENT_AUTH_TEST_PASSWORD").unwrap();
+        if std::env::var("REMOVENT_AUTH_EXPECT_REJECT").as_deref() == Ok("1") {
+            assert!(!verify(&SystemCredentials { username, password }));
+            return;
+        }
         assert!(verify(&SystemCredentials {
             username: username.clone(),
             password,

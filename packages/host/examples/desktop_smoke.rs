@@ -67,11 +67,13 @@ async fn main() -> anyhow::Result<()> {
     let mut mouse = removent_input::mouse::MouseInjector::default();
     let mut keyboard = removent_input::keyboard::KeyboardInjector::default();
     // The fixture owns these coordinates and reports events independently.
+    let x = std::env::var("REMOVENT_TEST_X")?.parse::<f64>()?;
+    let y = std::env::var("REMOVENT_TEST_Y")?.parse::<f64>()?;
     mouse
-        .inject(MouseKind::LeftDown, 200., 200., KeyModifiers::empty())
+        .inject(MouseKind::LeftDown, x, y, KeyModifiers::empty())
         .map_err(anyhow::Error::msg)?;
     mouse
-        .inject(MouseKind::LeftUp, 200., 200., KeyModifiers::empty())
+        .inject(MouseKind::LeftUp, x, y, KeyModifiers::empty())
         .map_err(anyhow::Error::msg)?;
     for (vk, mods, kind) in [
         (0x3b, KeyModifiers::CONTROL, KeyKind::FlagsChanged),
@@ -83,22 +85,18 @@ async fn main() -> anyhow::Result<()> {
             .inject(vk, mods, kind, None)
             .map_err(anyhow::Error::msg)?;
     }
-    for ch in "hello".chars() {
+    for ch in "hello中文".chars() {
+        // Exercise both committed IME text and a non-ASCII physical-key payload.
+        let vk = if ch == '文' {
+            0x00
+        } else {
+            removent_input::UNICODE_ONLY_VK
+        };
         keyboard
-            .inject(
-                removent_input::UNICODE_ONLY_VK,
-                KeyModifiers::empty(),
-                KeyKind::Down,
-                Some(ch),
-            )
+            .inject(vk, KeyModifiers::empty(), KeyKind::Down, Some(ch))
             .map_err(anyhow::Error::msg)?;
         keyboard
-            .inject(
-                removent_input::UNICODE_ONLY_VK,
-                KeyModifiers::empty(),
-                KeyKind::Up,
-                Some(ch),
-            )
+            .inject(vk, KeyModifiers::empty(), KeyKind::Up, Some(ch))
             .map_err(anyhow::Error::msg)?;
     }
     println!("capture, H264 encode/decode, clipboard and native input submitted");

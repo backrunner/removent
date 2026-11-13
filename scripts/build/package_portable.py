@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Package built Windows/Linux binaries without modifying the installation."""
-import argparse, hashlib, json, platform, shutil, tarfile, zipfile
+import argparse, hashlib, json, shutil, subprocess, tarfile, tomllib, zipfile
 from pathlib import Path
 
 def main():
@@ -15,8 +15,17 @@ def main():
     suffix = ".exe" if args.target.startswith("windows") else ""
     for name in ("removent", "removentd", "removent-tray"):
         shutil.copy2(args.bin_dir / (name + suffix), out)
-    shutil.copy2(root / "docs/guides/windows-linux.md", out / "README.md")
+    guide = (root / "docs/guides/windows-linux.md").read_text()
+    (out / "README.md").write_text(guide.replace("../validation/windows-linux-2026-11-13.md", "VALIDATION.md"))
+    shutil.copy2(root / "docs/validation/windows-linux-2026-11-13.md", out / "VALIDATION.md")
     shutil.copy2(root / "LICENSE", out)
+    revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True)
+    manifest = tomllib.loads((root / "Cargo.toml").read_text())
+    (out / "BUILD.json").write_text(json.dumps({
+        "version": manifest["workspace"]["package"]["version"],
+        "platform": args.target,
+        "source_commit": revision.stdout.strip() if revision.returncode == 0 else None,
+    }, indent=2) + "\n")
     # Carry explicitly built runtime DLLs if a Windows dependency provides them.
     if suffix:
         for dll in args.bin_dir.glob("*.dll"): shutil.copy2(dll, out)

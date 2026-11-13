@@ -73,6 +73,8 @@ fn key(vk: u16) -> Option<Key> {
 pub struct KeyboardInjector {
     pub modifiers: KeyModifiers,
     pressed: std::collections::HashMap<u16, Key>,
+    #[cfg(windows)]
+    committed_text: std::collections::HashSet<u16>,
 }
 impl KeyboardInjector {
     pub fn inject(
@@ -84,6 +86,34 @@ impl KeyboardInjector {
     ) -> Result<(), String> {
         let previous = self.modifiers;
         self.modifiers = mods;
+        // Committed IME text is an insertion, with no physical key to release.
+        // Enigo's Windows Unicode fallback inserts text even for Key::Release,
+        // which would duplicate characters if called for both wire transitions.
+        #[cfg(windows)]
+        if vk == UNICODE_ONLY_VK {
+            return if kind == KeyKind::Down {
+                match text.filter(|c| !c.is_control()) {
+                    Some(ch) => crate::portable::with(|e| e.text(&ch.to_string())),
+                    None => Ok(()),
+                }
+            } else {
+                Ok(())
+            };
+        }
+        #[cfg(windows)]
+        {
+            if kind == KeyKind::Up && self.committed_text.remove(&vk) {
+                return Ok(());
+            }
+            if kind == KeyKind::Down
+                && !mods.intersects(KeyModifiers::CONTROL | KeyModifiers::COMMAND)
+                && let Some(ch) = text.filter(|c| !c.is_ascii() && !c.is_control())
+            {
+                crate::portable::with(|e| e.text(&ch.to_string()))?;
+                self.committed_text.insert(vk);
+                return Ok(());
+            }
+        }
         if vk == 0x39 && kind == KeyKind::FlagsChanged {
             if previous.contains(KeyModifiers::CAPS_LOCK) != mods.contains(KeyModifiers::CAPS_LOCK)
             {

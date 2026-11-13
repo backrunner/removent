@@ -133,8 +133,10 @@ async fn probe() -> anyhow::Result<()> {
     );
     let display =
         removent_input::DisplayGeometry::main().ok_or_else(|| anyhow::anyhow!("No display"))?;
-    let x = 200. * frame.width as f32 / display.width_px as f32;
-    let y = 200. * frame.height as f32 / display.height_px as f32;
+    let target_x = std::env::var("REMOVENT_TEST_X")?.parse::<f32>()?;
+    let target_y = std::env::var("REMOVENT_TEST_Y")?.parse::<f32>()?;
+    let x = (target_x - display.origin_x as f32) * frame.width as f32 / display.width_px as f32;
+    let y = (target_y - display.origin_y as f32) * frame.height as f32 / display.height_px as f32;
     session
         .send_input_mouse(display.id as u64, x, y, 1, MouseKind::LeftDown)
         .await?;
@@ -149,22 +151,18 @@ async fn probe() -> anyhow::Result<()> {
     ] {
         session.send_input_key(vk, mods, kind, None).await?;
     }
-    for ch in "hello".chars() {
+    for ch in "hello中文".chars() {
+        // Exercise both committed IME text and a non-ASCII physical-key payload.
+        let vk = if ch == '文' {
+            0x00
+        } else {
+            removent_input::UNICODE_ONLY_VK
+        };
         session
-            .send_input_key(
-                removent_input::UNICODE_ONLY_VK,
-                KeyModifiers::empty(),
-                KeyKind::Down,
-                Some(ch),
-            )
+            .send_input_key(vk, KeyModifiers::empty(), KeyKind::Down, Some(ch))
             .await?;
         session
-            .send_input_key(
-                removent_input::UNICODE_ONLY_VK,
-                KeyModifiers::empty(),
-                KeyKind::Up,
-                Some(ch),
-            )
+            .send_input_key(vk, KeyModifiers::empty(), KeyKind::Up, Some(ch))
             .await?;
     }
     clipboard

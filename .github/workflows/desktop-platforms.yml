@@ -49,11 +49,14 @@ jobs:
         run: cargo build --locked --release -p removent-app -p removent-daemon -p removent-tray -p removent-host -p removent-client --bins --example desktop_smoke --example ipc_smoke --example desktop_session_smoke --example credential_smoke
       - name: Daemon IPC and lifecycle
         shell: bash
-        run: |
-          target/release/examples/ipc_smoke
-          cargo test --locked -p removent-daemon --test ipc -- --test-threads=1
+        run: target/release/examples/ipc_smoke
+      - name: Daemon IPC admission regression
+        run: cargo test --locked -p removent-daemon --test ipc -- --test-threads=1
       - name: Protocol, codec and session regression tests
         run: cargo test --locked -p removent-proto -p removent-core -p removent-input -p removent-client -p removent-host -p removent-media-codec --lib -- --test-threads=1
+      - name: Windows native account authentication
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
+        run: ./scripts/qa/windows_account.ps1
       - name: Linux native desktop acceptance
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
         run: |
@@ -66,22 +69,21 @@ jobs:
             python3 scripts/qa/portable_credentials.py
             /usr/bin/python3 scripts/qa/linux_tray.py
           '
-      - name: Windows native desktop acceptance
+      - name: Windows native capture and input
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
-        run: |
-          python scripts/qa/portable_desktop.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python scripts/qa/portable_desktop.py --probe desktop_session_smoke
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $tray = Start-Process target/release/removent-tray.exe -ArgumentList '--smoke' -PassThru
-          if (-not $tray.WaitForExit(15000)) { $tray.Kill(); throw 'Tray failed to exit' }
-          if ($tray.ExitCode -ne 0) { throw 'Tray smoke failed' }
-          python scripts/qa/portable_app.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python scripts/qa/portable_credentials.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python scripts/qa/windows_tray.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        run: python scripts/qa/portable_desktop.py
+      - name: Windows native QUIC desktop session
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
+        run: python scripts/qa/portable_desktop.py --probe desktop_session_smoke
+      - name: Windows native tray interaction
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
+        run: python scripts/qa/windows_tray.py
+      - name: Windows visible desktop application
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
+        run: python scripts/qa/portable_app.py
+      - name: Windows credential storage
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
+        run: python scripts/qa/portable_credentials.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

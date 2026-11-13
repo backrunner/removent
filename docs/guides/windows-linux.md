@@ -12,6 +12,8 @@ UAC secure desktop or the sign-in screen. System-account authentication checks
 that the authenticated token belongs to the user running the desktop host.
 Use the account password, not a Windows Hello PIN. Allow UDP 48688 through the
 firewall on networks where incoming native connections are needed.
+Usernames may be local names, `DOMAIN\name`, or a domain UPN. An explicit domain
+such as `MicrosoftAccount\email@example.com` is preserved during authentication.
 
 Linux hosting currently requires an X11 session. Wayland hosting fails with an
 explicit error because portal-authorized capture/input sessions are not yet
@@ -19,6 +21,9 @@ implemented. The controller may run under X11 or Wayland. A desktop shell with
 AppIndicator support is needed to display the tray (GNOME may require its
 AppIndicator extension). Debian/Ubuntu runtime dependencies include GTK 3,
 Ayatana AppIndicator, ALSA, PAM, PipeWire, X11, xkbcommon, and Vulkan/Mesa.
+The CI Linux x86_64 archive is built on Ubuntu 24.04 and requires glibc 2.39 or
+newer. Build from source for older distributions. Install a CJK font family
+(for example, Noto CJK) to display Chinese text when the system has none.
 Use the login password of the user running the host for system authentication.
 Remembered connection credentials use Windows Credential Manager or the Linux
 Secret Service (for example, an unlocked GNOME Keyring). No plaintext fallback

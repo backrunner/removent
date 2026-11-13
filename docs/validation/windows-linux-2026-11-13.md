@@ -7,7 +7,7 @@ no release tag, merge, system-service installation, or public release was made.
 
 - Native Linux arm64 Debian 12 container, Xvfb 1280x800, Openbox and Mesa software rendering.
 - Actual desktop pixels captured with xcap, H.264 encoded and decoded, matched against the independent red Tk window.
-- Native click, Ctrl+A and exact text received by that independent UI.
+- Native click, Ctrl+A and exact mixed Chinese/English text received by that independent UI, including committed text and a physical-key Unicode payload.
 - Authenticated pinned QUIC host/client session negotiated H.264, delivered real desktop pixels and input, synchronized text clipboard both directions, and shut down cleanly.
 - Real Unix IPC: status, sharing enable/disable, pairing invitation, acknowledged shutdown, successful daemon exit, and persisted stop intent.
 - Actual Xfce panel registration, tray start, sharing enable/disable, native GTK pairing dialog, service stop and tray quit. The test caught and fixed duplicate pairing dialogs and the former external `zenity` dependency.
@@ -17,11 +17,16 @@ no release tag, merge, system-service installation, or public release was made.
 
 ## Native CI
 
-The workflow builds Windows x86_64 and Linux x86_64 desktop, daemon and tray,
-runs native desktop probes, and packages all three executables with checksums.
-The first run built both platforms and exposed a daemon smoke-test setup error;
-the corrected workflow is pending verification. Final run URLs and artifact
-results will be recorded after completion.
+The [Desktop platforms workflow](https://github.com/backrunner/removent/actions/workflows/desktop-platforms.yml)
+builds Windows x86_64 and Linux x86_64 desktop, daemon and tray. It runs native
+desktop probes, IPC/admission tests and protocol/codec/session regressions before
+packaging all three executables with checksums. Windows also checks password and
+desktop-owner SID validation using a disposable local OS account.
+
+Each run attaches desktop/tray screenshots and logs to its exact commit. See
+[PR #2 checks](https://github.com/backrunner/removent/pull/2/checks) for the run
+results and downloadable packages. Earlier failures exposed a daemon fixture
+error and Windows append-only log-lock access; both have regression coverage.
 
 ## Boundaries
 

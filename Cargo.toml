@@ -85,6 +85,12 @@ opt-level = 1
 [profile.dev.package."*"]
 opt-level = 3
 
+# NASM 3.02 crashes on OpenH264's win64 assembly with CodeView debug output
+# (`nasm -fwin64 -g .../intra_pred.asm`). Keep optimized assembly enabled while
+# omitting only this native dependency's debug information, including in tests.
+[profile.dev.package.openh264-sys2]
+debug = 0
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

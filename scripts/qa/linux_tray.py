@@ -57,9 +57,12 @@ def main():
         subprocess.run(["dbus-update-activation-environment", "XDG_CONFIG_HOME"], env=env, check=True)
         with (args.evidence_dir / "tray.log").open("w") as log:
             panel = subprocess.Popen(["xfce4-panel", "--disable-wm-check"], env=env, stdout=log, stderr=log)
+            bus = dbus.SessionBus()
+            # Start against a ready desktop, avoiding AppIndicator's temporary
+            # XEmbed fallback while the test panel is still being initialized.
+            wait_for(lambda: bus.name_has_owner("org.kde.StatusNotifierWatcher"), "Desktop panel did not start")
             tray = subprocess.Popen([str(args.bin_dir.resolve() / "removent-tray")], env=env, stdout=log, stderr=log)
             try:
-                bus = dbus.SessionBus()
                 def items():
                     watcher = bus.get_object("org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher")
                     return watcher.Get("org.kde.StatusNotifierWatcher", "RegisteredStatusNotifierItems", dbus_interface="org.freedesktop.DBus.Properties")
@@ -84,6 +87,7 @@ def main():
                     result = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", "^Pairing code$"], capture_output=True, text=True)
                     return result.stdout.strip().splitlines()[0] if result.returncode == 0 else None
                 window = wait_for(dialog, "Native pairing dialog did not appear")
+                time.sleep(0.3)  # Let the window manager decorate and present it.
                 ImageGrab.grab().save(args.evidence_dir / "tray-pairing.png")
                 subprocess.run(["xdotool", "windowactivate", "--sync", window, "key", "Return"], check=True)
                 wait_for(lambda: not dialog(), "Pairing dialog did not close")

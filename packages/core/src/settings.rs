@@ -247,7 +247,7 @@ impl Settings {
 }
 
 /// Atomic write via tmp + rename to avoid half-written files.
-pub fn atomic_write(path: &PathBuf, bytes: &[u8]) -> Result<()> {
+pub fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
     #[cfg(unix)]
     use std::os::unix::fs::OpenOptionsExt;
@@ -262,12 +262,54 @@ pub fn atomic_write(path: &PathBuf, bytes: &[u8]) -> Result<()> {
     let result = (|| -> std::io::Result<()> {
         file.write_all(bytes)?;
         file.sync_all()?;
-        std::fs::rename(&tmp, path)
+        replace_written_file(&tmp, path)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
     result.map_err(Into::into)
+}
+
+#[cfg(not(windows))]
+fn replace_written_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    std::fs::rename(from, to)
+}
+
+#[cfg(windows)]
+fn replace_written_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+    // Canonicalize the existing parent, not the possibly new destination, so
+    // Windows extended-length paths and non-ASCII data directories both work.
+    let parent = from.parent().filter(|p| !p.as_os_str().is_empty());
+    let parent = std::fs::canonicalize(parent.unwrap_or(std::path::Path::new(".")))?;
+    let from: Vec<u16> = parent
+        .join(from.file_name().ok_or(std::io::ErrorKind::InvalidInput)?)
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let to: Vec<u16> = parent
+        .join(to.file_name().ok_or(std::io::ErrorKind::InvalidInput)?)
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    // Unlike Unix directory fsync, this is available to a regular Windows user.
+    if unsafe {
+        MoveFileExW(
+            from.as_ptr(),
+            to.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

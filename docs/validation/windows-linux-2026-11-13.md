@@ -23,6 +23,16 @@ desktop probes, IPC/admission tests and protocol/codec/session regressions befor
 packaging all three executables with checksums. Windows also checks password and
 desktop-owner SID validation using a disposable local OS account.
 
+The [2026-11-13 native run](https://github.com/backrunner/removent/actions/runs/43462842578)
+passed both platforms and produced both archives. Windows passed 298 library
+tests plus eight IPC tests and native account validation. Its captured desktop
+and Explorer tray were reviewed, including caption glyphs, actual minimize and
+maximize clicks, pairing dialogs, exact `hello中文` input, and both clipboard
+directions through a pinned QUIC session. Both archive checksums and executable
+formats were checked after download. The Windows package check additionally
+launches the extracted desktop, host and tray and verifies that the desktop loads
+its bundled Visual C++ runtime instead of relying on the runner's installation.
+
 Each run attaches desktop/tray screenshots and logs to its exact commit. See
 [PR #2 checks](https://github.com/backrunner/removent/pull/2/checks) for the run
 results and downloadable packages. Earlier failures exposed a daemon fixture

@@ -93,14 +93,23 @@ jobs:
         timeout-minutes: 10
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
         run: ./scripts/qa/windows_account.ps1
+      - name: Package desktop artifacts
+        run: python scripts/build/package_portable.py --target ${{ matrix.platform }}
+      - name: Windows extracted package acceptance
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        run: |
+          Expand-Archive -Path dist/Removent-windows-x86_64.zip -DestinationPath target/package-check
+          python scripts/qa/portable_app.py --bin-dir target/package-check/Removent-windows-x86_64 --evidence-dir target/qa-evidence/package --require-local-runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/qa/windows_tray.py --bin-dir target/package-check/Removent-windows-x86_64 --evidence-dir target/qa-evidence/package
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: desktop-evidence-${{ matrix.platform }}
           path: target/qa-evidence
           if-no-files-found: ignore
-      - name: Package desktop artifacts
-        run: python scripts/build/package_portable.py --target ${{ matrix.platform }}
       - uses: actions/upload-artifact@v4
         with:
           name: Removent-${{ matrix.platform }}

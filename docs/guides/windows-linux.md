@@ -7,6 +7,8 @@ leaves sharing available through the tray. The tray can open the main window,
 start or stop the service, toggle sharing, show a pairing invitation, and answer
 access requests. Quitting only the tray does not stop the host.
 
+Windows archives include the Visual C++ runtime DLLs beside the executables;
+keep these files together as well. A separate runtime installation is not needed.
 Windows requires an interactive signed-in desktop. The host cannot control the
 UAC secure desktop or the sign-in screen. System-account authentication checks
 that the authenticated token belongs to the user running the desktop host.

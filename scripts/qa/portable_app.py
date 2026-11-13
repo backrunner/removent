@@ -11,6 +11,35 @@ import time
 from PIL import ImageChops, ImageGrab
 
 
+def windows_local_runtime(pid, directory, evidence):
+    """Prove the extracted application loads the runtime carried in its archive."""
+    import ctypes as c
+    from ctypes import wintypes as w
+    kernel = c.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [w.DWORD, w.BOOL, w.DWORD]
+    kernel.OpenProcess.restype = w.HANDLE
+    kernel.K32EnumProcessModules.argtypes = [w.HANDLE, c.POINTER(w.HMODULE), w.DWORD, c.POINTER(w.DWORD)]
+    kernel.K32GetModuleFileNameExW.argtypes = [w.HANDLE, w.HMODULE, w.LPWSTR, w.DWORD]
+    kernel.CloseHandle.argtypes = [w.HANDLE]
+    process = kernel.OpenProcess(0x410, False, pid)  # QUERY_INFORMATION | VM_READ
+    assert process, f"Cannot inspect packaged desktop: {c.get_last_error()}"
+    try:
+        modules, needed = (w.HMODULE * 1024)(), w.DWORD()
+        assert kernel.K32EnumProcessModules(process, modules, c.sizeof(modules), c.byref(needed))
+        assert needed.value <= c.sizeof(modules)
+        paths = []
+        for module in modules[:needed.value // c.sizeof(w.HMODULE)]:
+            name = c.create_unicode_buffer(32768)
+            assert kernel.K32GetModuleFileNameExW(process, module, name, len(name))
+            if Path(name.value).name.lower().startswith("vcruntime"):
+                paths.append(Path(name.value))
+        assert paths and all(path.parent.samefile(directory) for path in paths), paths
+        (evidence / "runtime.json").write_text(json.dumps([str(path) for path in paths]))
+    finally:
+        kernel.CloseHandle(process)
+    print("PASS: extracted desktop loads its bundled Visual C++ runtime")
+
+
 def windows_controls(pid, screenshot, evidence):
     """Check visible GPUI caption glyphs and real native minimize/maximize clicks."""
     import ctypes as c
@@ -87,6 +116,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--bin-dir", type=Path, default=Path("target/release"))
     parser.add_argument("--evidence-dir", type=Path, default=Path("target/qa-evidence"))
+    parser.add_argument("--require-local-runtime", action="store_true")
     args = parser.parse_args()
     if os.name == "nt":
         import ctypes
@@ -120,6 +150,8 @@ def main():
                     )
                     time.sleep(0.25)
                 if os.name == "nt":
+                    if args.require_local_runtime:
+                        windows_local_runtime(child.pid, binary.parent, args.evidence_dir)
                     windows_controls(child.pid, after, args.evidence_dir)
                 assert child.wait(timeout=25) == 0, "Desktop process failed"
                 receipt = Path(data) / "run/update-smoke-ok"

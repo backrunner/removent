@@ -246,6 +246,11 @@ pub fn capture_frame_rate(_id: u32) -> u8 {
 #[cfg(not(target_vendor = "apple"))]
 impl DisplayGeometry {
     pub fn all() -> Vec<Self> {
+        #[cfg(target_os = "linux")]
+        if std::env::var_os("DISPLAY").is_none() || std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            return vec![];
+        }
+
         xcap::Monitor::all()
             .unwrap_or_default()
             .into_iter()

@@ -83,6 +83,8 @@ pub struct RealInputSink {
 struct SessionInjection {
     mouse: removent_input::mouse::MouseInjector,
     keyboard: removent_input::keyboard::KeyboardInjector,
+    #[cfg(not(target_os = "macos"))]
+    scroll: removent_input::keyboard::ScrollInjector,
 }
 
 impl RealInputSink {
@@ -165,11 +167,18 @@ impl InputSink for RealInputSink {
             .map(|g| g.dpi())
             .unwrap_or(96.0);
         let px_per_mm = dpi / 25.4;
-        removent_input::keyboard::inject_scroll_with_modifiers(
+        #[cfg(target_os = "macos")]
+        return removent_input::keyboard::inject_scroll_with_modifiers(
             dx_mm as f64 * px_per_mm,
             dy_mm as f64 * px_per_mm,
             phase,
             self.injection.lock().unwrap().keyboard.modifiers,
+        );
+        #[cfg(not(target_os = "macos"))]
+        self.injection.lock().unwrap().scroll.inject(
+            dx_mm as f64 * px_per_mm,
+            dy_mm as f64 * px_per_mm,
+            phase,
         )
     }
 

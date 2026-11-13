@@ -12,7 +12,12 @@ async fn main() -> anyhow::Result<()> {
     };
     paths.ensure_layout()?;
     let settings = Settings {
+        authentication: removent_core::AuthenticationSettings {
+            mode: removent_core::AuthenticationMode::PairingCode,
+            ..Default::default()
+        },
         host_enabled: false,
+        host_port: 0,
         prevent_idle_sleep: false,
         ..Default::default()
     };
@@ -35,6 +40,7 @@ async fn main() -> anyhow::Result<()> {
         };
         for request in [
             IpcRequest::Status,
+            IpcRequest::SetEnabled { on: true },
             IpcRequest::PairingGenerate,
             IpcRequest::SetEnabled { on: false },
             IpcRequest::Shutdown,
@@ -63,6 +69,12 @@ async fn main() -> anyhow::Result<()> {
         Ok::<(), anyhow::Error>(())
     })
     .await;
+    if !matches!(&result, Ok(Ok(()))) {
+        let _ = child.kill();
+        let _ = child.wait();
+        result??;
+        unreachable!();
+    }
     // Always reap the isolated subprocess, including failed IPC tests.
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while child.try_wait()?.is_none() && std::time::Instant::now() < deadline {
@@ -74,6 +86,10 @@ async fn main() -> anyhow::Result<()> {
         anyhow::bail!("Daemon failed to stop");
     }
     result??;
+    anyhow::ensure!(
+        child.wait()?.success(),
+        "Daemon exited with an error after acknowledged shutdown"
+    );
     anyhow::ensure!(
         removent_core::service_intent::is_stopped(&paths)?,
         "Stop intent was not persisted"

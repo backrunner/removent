@@ -46,6 +46,23 @@ fn key(vk: u16) -> Option<Key> {
         0x6d => Key::F10,
         0x67 => Key::F11,
         0x6f => Key::F12,
+        0x69 => Key::F13,
+        0x6b => Key::F14,
+        0x71 => Key::F15,
+        0x6a => Key::F16,
+        0x40 => Key::F17,
+        0x4f => Key::F18,
+        0x50 => Key::F19,
+        0x5a => Key::F20,
+        0x41 => Key::Unicode('.'),
+        0x43 => Key::Unicode('*'),
+        0x45 => Key::Unicode('+'),
+        0x4b => Key::Unicode('/'),
+        0x4e => Key::Unicode('-'),
+        0x51 => Key::Unicode('='),
+        0x52..=0x59 => Key::Unicode(char::from(b'0' + (vk - 0x52) as u8)),
+        0x5b => Key::Unicode('8'),
+        0x5c => Key::Unicode('9'),
         _ => {
             let keys = "asdfhgzxcv\0bqwerty123465=97-80]ou[ip\0lj'k;\\,/nm.\0 \x60";
             Key::Unicode(keys.chars().nth(vk as usize).filter(|c| *c != '\0')?)
@@ -65,7 +82,15 @@ impl KeyboardInjector {
         kind: KeyKind,
         text: Option<char>,
     ) -> Result<(), String> {
+        let previous = self.modifiers;
         self.modifiers = mods;
+        if vk == 0x39 && kind == KeyKind::FlagsChanged {
+            if previous.contains(KeyModifiers::CAPS_LOCK) != mods.contains(KeyModifiers::CAPS_LOCK)
+            {
+                crate::portable::with(|e| e.key(Key::CapsLock, Direction::Click))?;
+            }
+            return Ok(());
+        }
         let down = match kind {
             KeyKind::Down => true,
             KeyKind::Up => false,
@@ -116,18 +141,48 @@ pub fn inject_scroll_pixels(dx: f64, dy: f64, phase: ScrollPhase) -> Result<(), 
 pub fn inject_scroll_with_modifiers(
     dx: f64,
     dy: f64,
-    _phase: ScrollPhase,
+    phase: ScrollPhase,
     _mods: KeyModifiers,
 ) -> Result<(), String> {
-    crate::portable::with(|e| {
-        if dx != 0. {
-            e.scroll((-dx / 16.).round() as i32, Axis::Horizontal)?;
+    ScrollInjector::default().inject(dx, dy, phase)
+}
+
+/// Preserve sub-wheel deltas for a session instead of dropping trackpad motion.
+#[derive(Default)]
+pub struct ScrollInjector {
+    residual: [f64; 2],
+}
+impl ScrollInjector {
+    fn steps(&mut self, dx: f64, dy: f64, phase: ScrollPhase) -> [i32; 2] {
+        if phase == ScrollPhase::Began {
+            self.residual = [0.; 2];
         }
-        if dy != 0. {
-            e.scroll((-dy / 16.).round() as i32, Axis::Vertical)?;
+        let mut steps = [0; 2];
+        for (i, delta) in [dx, dy].into_iter().enumerate() {
+            self.residual[i] -= delta / 16.;
+            steps[i] = self.residual[i].trunc() as i32;
+            self.residual[i] -= steps[i] as f64;
         }
-        Ok(())
-    })
+        if phase == ScrollPhase::Ended {
+            self.residual = [0.; 2];
+        }
+        steps
+    }
+    pub fn inject(&mut self, dx: f64, dy: f64, phase: ScrollPhase) -> Result<(), String> {
+        let [horizontal, vertical] = self.steps(dx, dy, phase);
+        if horizontal == 0 && vertical == 0 {
+            return Ok(());
+        }
+        crate::portable::with(|e| {
+            if horizontal != 0 {
+                e.scroll(horizontal, Axis::Horizontal)?;
+            }
+            if vertical != 0 {
+                e.scroll(vertical, Axis::Vertical)?;
+            }
+            Ok(())
+        })
+    }
 }
 
 pub fn key_text(vk: u16, mods: KeyModifiers, unicode: Option<char>) -> Option<char> {
@@ -137,4 +192,32 @@ pub fn key_text(vk: u16, mods: KeyModifiers, unicode: Option<char>) -> Option<ch
         return None;
     }
     unicode.filter(|c| !c.is_control() && !('\u{f700}'..='\u{f8ff}').contains(c))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn trackpad_deltas_accumulate_and_reset_between_gestures() {
+        let mut scroll = ScrollInjector::default();
+        assert_eq!(scroll.steps(0., 4., ScrollPhase::Began), [0, 0]);
+        for _ in 0..2 {
+            assert_eq!(scroll.steps(0., 4., ScrollPhase::Changed), [0, 0]);
+        }
+        assert_eq!(scroll.steps(0., 4., ScrollPhase::Changed), [0, -1]);
+        assert_eq!(scroll.steps(0., 12., ScrollPhase::Ended), [0, 0]);
+        assert_eq!(scroll.steps(0., 4., ScrollPhase::Began), [0, 0]);
+        assert_eq!(scroll.steps(-32., -20., ScrollPhase::Changed), [2, 1]);
+    }
+    #[test]
+    fn canonical_wire_keys_cover_shortcuts_and_keypad() {
+        assert_eq!(key(0), Some(Key::Unicode('a')));
+        assert_eq!(key(8), Some(Key::Unicode('c')));
+        assert_eq!(key(9), Some(Key::Unicode('v')));
+        assert_eq!(key(0x3b), Some(Key::Control));
+        assert_eq!(key(0x52), Some(Key::Unicode('0')));
+        assert_eq!(key(0x59), Some(Key::Unicode('7')));
+        assert_eq!(key(0x5c), Some(Key::Unicode('9')));
+        assert_eq!(key(0xffff), None);
+    }
 }

@@ -20,13 +20,17 @@ AppIndicator support is needed to display the tray (GNOME may require its
 AppIndicator extension). Debian/Ubuntu runtime dependencies include GTK 3,
 Ayatana AppIndicator, ALSA, PAM, PipeWire, X11, xkbcommon, and Vulkan/Mesa.
 Use the login password of the user running the host for system authentication.
+Remembered connection credentials use Windows Credential Manager or the Linux
+Secret Service (for example, an unlocked GNOME Keyring). No plaintext fallback
+is used when the credential store is unavailable. CPU-only Linux desktops prefer
+the OpenGL software renderer to avoid black Vulkan frames on older Mesa.
 
 H.264 and AV1 use CPU codecs. New macOS hosts select H.264 when a Windows/Linux
 controller advertises that HEVC is unavailable; older macOS releases that always
 select HEVC need updating. System audio capture, pre-login access, native
 Computer Use, and automatic package installation are not implemented on these
 platforms. Text clipboard sharing is supported. Do not infer feature support
-from a successful build; see the validation report for tested scenarios.
+from a successful build; see [the validation report](../validation/windows-linux-2026-11-13.md) for tested scenarios.
 
 Data lives under `%LOCALAPPDATA%/Removent/userdata` on Windows and
 `$XDG_DATA_HOME/removent/userdata` (default `~/.local/share/removent/userdata`) on

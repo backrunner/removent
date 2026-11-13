@@ -79,7 +79,7 @@ pub(super) async fn run(paths: &DataPaths, verbose: bool) -> anyhow::Result<()> 
             if output::interrupted(&error) {
                 return Err(error);
             }
-            output::report(error, verbose);
+            let _ = output::report(error, verbose);
         }
         // Language edits take effect on the next prompt in this process too.
         if let Ok(current) = settings::load(paths) {

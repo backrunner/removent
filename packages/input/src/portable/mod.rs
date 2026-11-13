@@ -12,6 +12,10 @@ pub fn with<T>(f: impl FnOnce(&mut Enigo) -> Result<T, enigo::InputError>) -> Re
                 .into(),
         );
     }
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("DISPLAY").is_none() {
+        return Err("No X11 desktop session is available".into());
+    }
     static INPUT: OnceLock<Mutex<Option<Enigo>>> = OnceLock::new();
     let mut input = INPUT
         .get_or_init(|| Mutex::new(None))

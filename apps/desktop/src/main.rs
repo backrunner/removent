@@ -34,7 +34,8 @@ fn main() -> Result<()> {
 
 fn run(paths: DataPaths) -> Result<()> {
     let started = std::time::Instant::now();
-    let smoke = std::env::args().any(|arg| arg == "--update-smoke");
+    let visible_smoke = std::env::args().any(|arg| arg == "--desktop-smoke");
+    let smoke = visible_smoke || std::env::args().any(|arg| arg == "--update-smoke");
     // Main-window lifetime is an idle-update boundary. Closing it leaves the
     // host running and releases this lease for the independent installer.
     let _activity = removent_core::update_gate::ActivityLease::acquire(&paths)?;
@@ -157,14 +158,17 @@ fn run(paths: DataPaths) -> Result<()> {
             let home_window = cx
                 .open_window(
                     gpui::WindowOptions {
-                        focus: !smoke,
-                        show: !smoke,
+                        focus: !smoke || visible_smoke,
+                        show: !smoke || visible_smoke,
                         window_bounds: Some(gpui::WindowBounds::Windowed(gpui::Bounds::centered(
                             None,
                             gpui::size(gpui::px(1040.), gpui::px(700.)),
                             cx,
                         ))),
-                        titlebar: Some(TitleBar::title_bar_options()),
+                        titlebar: Some(gpui::TitlebarOptions {
+                            title: Some("Removent".into()),
+                            ..TitleBar::title_bar_options()
+                        }),
                         window_min_size: Some(gpui::size(gpui::px(860.), gpui::px(600.))),
                         window_background: gpui::WindowBackgroundAppearance::Opaque,
                         ..Default::default()

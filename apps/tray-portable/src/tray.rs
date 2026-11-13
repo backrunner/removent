@@ -56,7 +56,17 @@ pub fn run() -> anyhow::Result<()> {
     let settings = removent_core::Settings::load_strict(&paths)?;
     let zh = removent_core::resolve_locale(settings.language).starts_with("zh");
     let label = move |en, cn| if zh { cn } else { en };
-    let event_loop = EventLoopBuilder::new().build();
+    let event_loop = EventLoopBuilder::<()>::with_user_event().build();
+    let wake = event_loop.create_proxy();
+    // Tray-only processes have no windows; drive IPC/menu updates explicitly.
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(Duration::from_millis(150));
+            if wake.send_event(()).is_err() {
+                break;
+            }
+        }
+    });
     let menu = Menu::new();
     let status = MenuItem::new(
         label("Connecting to background service", "正在连接后台服务"),
@@ -104,12 +114,12 @@ pub fn run() -> anyhow::Result<()> {
     let smoke = std::env::args().any(|a| a == "--smoke");
     let started = Instant::now();
     event_loop.run(move |event, _, flow| {
-        *flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(150));
+        *flow = ControlFlow::Wait;
         if smoke && started.elapsed() > Duration::from_secs(2) {
             *flow = ControlFlow::Exit;
             return;
         }
-        if !matches!(event, Event::MainEventsCleared) {
+        if !matches!(event, Event::UserEvent(())) {
             return;
         }
         while let Ok(value) = updates.try_recv() {

@@ -120,6 +120,7 @@ pub enum UiEvent {
     },
     /// Auto-update state machine snapshot (release.md §3; apps/desktop/src/updater.rs).
     UpdateStatus(UpdateStatus),
+    #[cfg(target_os = "macos")]
     BackgroundUpdateChanged,
     PairedConnections {
         generation: usize,

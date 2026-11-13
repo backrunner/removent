@@ -6,11 +6,17 @@ from pathlib import Path
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument("--bin-dir",type=Path,default=Path("target/release"))
+    parser.add_argument("--probe",default="desktop_smoke")
     args=parser.parse_args()
-    binary=args.bin_dir.resolve()/"examples"/("desktop_smoke.exe" if os.name=="nt" else "desktop_smoke")
+    binary=args.bin_dir.resolve()/"examples"/(args.probe + (".exe" if os.name=="nt" else ""))
     root=tk.Tk(); root.geometry("640x480+0+0"); root.title("Removent isolated desktop test")
     root.configure(background="#ff0000"); root.attributes("-topmost",True)
     entry=tk.Entry(root,font=("Arial",20)); entry.place(x=50,y=170,width=500,height=60)
+    entry.insert(0,"replace me")
+    def select_all(event):
+        entry.selection_range(0,tk.END)
+        return "break"
+    entry.bind("<Control-a>", select_all)
     clicks=[]; entry.bind("<Button-1>",lambda event:clicks.append((event.x,event.y)))
     outcome=[]
     def worker():
@@ -33,7 +39,7 @@ def main():
             assert result.returncode==0, f"Native probe exited {result.returncode}"
             assert clicks, "No native click reached the independent UI"
             assert entry.get()=="hello", f"Native typing mismatch: {entry.get()!r}"
-            print("PASS: real capture, decode, clipboard, native mouse and keyboard",flush=True)
+            print("PASS: independent UI received native click, Ctrl+A and exact text",flush=True)
         except BaseException as e: outcome.append(e)
         finally: root.destroy()
     root.after(1500,begin); root.mainloop()

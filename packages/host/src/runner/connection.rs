@@ -100,7 +100,7 @@ pub(super) async fn run_connection(
     let host_cfg = HostConfig {
         authentication: ctx.settings.authentication.clone(),
         auth_paths: Some(ctx.paths.clone()),
-        audio_available: !ctx.settings.window_server_capture,
+        audio_available: cfg!(target_os = "macos") && !ctx.settings.window_server_capture,
         preapproved_only: ctx.settings.paired_only,
         device_name: ctx.settings.device_name.clone(),
         admission: ctx.settings.admission,

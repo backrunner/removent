@@ -107,3 +107,6 @@ mdns-sd = { path = "vendor/mdns-sd" }
 # Chinese punctuation must stay attached when GPUI wraps text.
 gpui-pre = { path = "vendor/gpui" }
 gpui-pre-apple = { path = "vendor/gpui-apple" }
+
+# CPU-only Linux desktops need the validated OpenGL software presentation path.
+gpui-pre-wgpu = { path = "vendor/gpui-wgpu" }

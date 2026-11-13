@@ -36,7 +36,7 @@ impl HomeView {
                             .child(icon_16("check").text_color(colors.muted_foreground)),
                     )
                 })
-                .when(granted == Some(false), |el| {
+                .when(granted == Some(false) && cfg!(target_os = "macos"), |el| {
                     el.child(
                         div()
                             .debug_selector(move || format!("permission-settings-{}", kind.slug()))
@@ -57,6 +57,14 @@ impl HomeView {
                                     },
                                 )),
                             ),
+                    )
+                })
+                .when(granted == Some(false) && !cfg!(target_os = "macos"), |el| {
+                    el.child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(colors.warning)
+                            .child(t!("permissions.unavailable").to_string()),
                     )
                 })
                 .when(granted.is_none(), |el| {

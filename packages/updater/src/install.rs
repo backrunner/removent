@@ -140,6 +140,7 @@ pub(super) fn restart_background(
 
 /// Locate the running .app bundle by walking up from the current executable
 /// (`<bundle>.app/Contents/MacOS/removent`); None outside a bundle (dev runs).
+#[cfg(target_os = "macos")]
 pub(super) fn current_bundle() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     exe.ancestors()

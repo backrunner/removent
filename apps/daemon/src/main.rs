@@ -65,11 +65,15 @@ fn start(paths: DataPaths) -> anyhow::Result<()> {
 }
 
 async fn run(paths: DataPaths) -> anyhow::Result<()> {
-    let mut settings = Settings::load_strict(&paths)?;
-    if std::env::args().any(|arg| arg == "--login-window") {
-        #[cfg(target_os = "macos")]
-        removent_daemon::login_window::restrict(&mut settings);
-    }
+    let settings = Settings::load_strict(&paths)?;
+    #[cfg(target_os = "macos")]
+    let settings = {
+        let mut settings = settings;
+        if std::env::args().any(|arg| arg == "--login-window") {
+            removent_daemon::login_window::restrict(&mut settings);
+        }
+        settings
+    };
     let identity = identity::load_or_create(&paths, &settings.device_name)
         .context(t!("error.load_identity"))?;
     let mut state = DaemonState::new(paths, settings, identity.short_fingerprint_hex());
@@ -102,10 +106,12 @@ async fn run(paths: DataPaths) -> anyhow::Result<()> {
         _ = terminate => {},
         _ = state.shutdown.cancelled() => {},
         result = &mut ipc => {
+            let expected = state.shutdown.is_cancelled();
             state.power.lock().unwrap().set_enabled(false);
             state.shutdown.cancel();
             let _ = mgr.await;
             result.context("IPC task failed")??;
+            if expected { return Ok(()); }
             anyhow::bail!("IPC server stopped unexpectedly");
         },
     }

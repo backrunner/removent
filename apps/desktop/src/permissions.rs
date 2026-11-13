@@ -7,6 +7,9 @@ pub enum PermissionKind {
 }
 
 pub fn setup_hint(grants: Option<(bool, bool)>) -> String {
+    if !cfg!(target_os = "macos") {
+        return rust_i18n::t!("permissions.desktop_session_hint").to_string();
+    }
     match grants {
         Some((true, false)) => rust_i18n::t!("permissions.accessibility_setup_hint").to_string(),
         Some((false, true)) => rust_i18n::t!("permissions.screen_capture_setup_hint").to_string(),
@@ -31,6 +34,12 @@ impl PermissionKind {
     }
 
     pub fn title(&self) -> String {
+        if !cfg!(target_os = "macos") {
+            return match self {
+                Self::ScreenCapture => rust_i18n::t!("permissions.portable_capture").to_string(),
+                Self::Accessibility => rust_i18n::t!("permissions.portable_input").to_string(),
+            };
+        }
         match self {
             Self::ScreenCapture => rust_i18n::t!("permissions.screen_capture").to_string(),
             Self::Accessibility => rust_i18n::t!("permissions.accessibility").to_string(),

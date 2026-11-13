@@ -1,9 +1,9 @@
 //! Password storage for saved connections.
 //!
 //! `connections.json` only records that a password exists (`password_hint`);
-//! the secret itself lives in the macOS Keychain as a generic password keyed by
+//! the secret lives in the platform credential store, keyed by
 //! the bookmark's versioned `password_key`. Items created by this app are readable by it
-//! without an interactive prompt.
+//! without an interactive prompt when the credential store is unlocked.
 
 use removent_core::{CoreError, Result};
 
@@ -65,26 +65,28 @@ fn delete_imp(account: &str) -> std::result::Result<(), StoreError> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-type StoreError = String;
+type StoreError = keyring::Error;
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn is_not_found(_: &StoreError) -> bool {
-    false
+fn is_not_found(e: &StoreError) -> bool {
+    matches!(e, keyring::Error::NoEntry)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn store_imp(_: &str, _: &str) -> std::result::Result<(), StoreError> {
-    Err("keychain is only supported on Apple platforms".into())
+fn store_imp(account: &str, password: &str) -> std::result::Result<(), StoreError> {
+    keyring::Entry::new(SERVICE, account)?.set_password(password)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn load_imp(_: &str) -> std::result::Result<Vec<u8>, StoreError> {
-    Err("keychain is only supported on Apple platforms".into())
+fn load_imp(account: &str) -> std::result::Result<Vec<u8>, StoreError> {
+    keyring::Entry::new(SERVICE, account)?
+        .get_password()
+        .map(String::into_bytes)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn delete_imp(_: &str) -> std::result::Result<(), StoreError> {
-    Ok(())
+fn delete_imp(account: &str) -> std::result::Result<(), StoreError> {
+    keyring::Entry::new(SERVICE, account)?.delete_credential()
 }
 
 #[cfg(all(test, target_os = "macos"))]

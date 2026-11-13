@@ -394,6 +394,7 @@ impl HomeView {
             } => {
                 self.daemon_perms = Some((screen_recording, accessibility));
             }
+            #[cfg(target_os = "macos")]
             UiEvent::BackgroundUpdateChanged => {}
             UiEvent::UpdateStatus(st) => {
                 // Events are wakeups: a channel switch may already have

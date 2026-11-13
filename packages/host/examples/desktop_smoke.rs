@@ -71,6 +71,16 @@ async fn main() -> anyhow::Result<()> {
     mouse
         .inject(MouseKind::LeftUp, 200., 200., KeyModifiers::empty())
         .map_err(anyhow::Error::msg)?;
+    for (vk, mods, kind) in [
+        (0x3b, KeyModifiers::CONTROL, KeyKind::FlagsChanged),
+        (0x00, KeyModifiers::CONTROL, KeyKind::Down),
+        (0x00, KeyModifiers::CONTROL, KeyKind::Up),
+        (0x3b, KeyModifiers::empty(), KeyKind::FlagsChanged),
+    ] {
+        keyboard
+            .inject(vk, mods, kind, None)
+            .map_err(anyhow::Error::msg)?;
+    }
     for ch in "hello".chars() {
         keyboard
             .inject(

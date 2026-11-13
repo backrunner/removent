@@ -148,6 +148,10 @@ fn private_dir(path: &Path) -> io::Result<()> {
 fn private_file(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.append(true).create(true);
+    // Windows byte-range locks require read or write access, not append-only.
+    // The same helper opens the log's inter-process lock descriptor.
+    #[cfg(windows)]
+    options.read(true);
     #[cfg(unix)]
     options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     let file = options.open(path)?;

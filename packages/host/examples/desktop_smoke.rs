@@ -3,6 +3,8 @@ use removent_proto::{CodecId, KeyKind, KeyModifiers, MouseKind};
 use std::time::Duration;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    #[cfg(windows)]
+    removent_input::initialize_host_dpi();
     anyhow::ensure!(
         std::env::var("REMOVENT_DESKTOP_TEST").as_deref() == Ok("1"),
         "Requires an isolated desktop and REMOVENT_DESKTOP_TEST=1"

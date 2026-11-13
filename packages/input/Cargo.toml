@@ -20,3 +20,6 @@ objc2-app-kit = { workspace = true }
 enigo = { version = "0.6", default-features = false, features = ["x11rb"] }
 xcap = "0.9"
 arboard = { version = "3", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }

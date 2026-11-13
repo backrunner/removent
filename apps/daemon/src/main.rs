@@ -10,6 +10,8 @@ use std::sync::Arc;
 rust_i18n::i18n!("locales");
 
 fn main() -> anyhow::Result<()> {
+    #[cfg(windows)]
+    removent_input::initialize_host_dpi();
     let login_window = std::env::args().any(|arg| arg == "--login-window");
     let paths = if login_window {
         #[cfg(not(target_os = "macos"))]

@@ -34,12 +34,7 @@ fn launch(name: &str, paths: &DataPaths) -> anyhow::Result<()> {
     });
     Ok(())
 }
-fn alert(title: &str, text: &str) {
-    rfd::MessageDialog::new()
-        .set_title(title)
-        .set_description(text)
-        .show();
-}
+use crate::dialogs::alert;
 
 pub fn run() -> anyhow::Result<()> {
     if std::env::args().any(|a| a == "--version") {
@@ -113,6 +108,7 @@ pub fn run() -> anyhow::Result<()> {
     rt.spawn(link(paths.clone(), rx, events));
     let smoke = std::env::args().any(|a| a == "--smoke");
     let started = Instant::now();
+    let mut displayed_pairing: Option<String> = None;
     event_loop.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
         if smoke && started.elapsed() > Duration::from_secs(2) {
@@ -153,24 +149,30 @@ pub fn run() -> anyhow::Result<()> {
             } else if let Ok(IpcResponse::PairingCode { code, .. }) =
                 serde_json::from_value(value.clone())
             {
-                alert(label("Pairing code", "配对码"), &code);
+                if displayed_pairing.as_deref() != Some(&code) {
+                    displayed_pairing = Some(code.clone());
+                    alert(label("Pairing code", "配对码"), &code);
+                }
             } else if let Ok(IpcResponse::Error { message }) = serde_json::from_value(value.clone())
             {
                 alert("Removent", &message);
             } else if let Ok(IpcEvent::PairingPin { pin }) = serde_json::from_value(value.clone()) {
-                alert(label("Pairing code", "配对码"), &pin);
+                if displayed_pairing.as_deref() != Some(&pin) {
+                    displayed_pairing = Some(pin.clone());
+                    alert(label("Pairing code", "配对码"), &pin);
+                }
+            } else if let Ok(IpcEvent::PairingCleared) = serde_json::from_value(value.clone()) {
+                displayed_pairing = None;
             } else if let Ok(IpcEvent::AdmissionRequest {
                 request_id,
                 peer_name,
                 peer_fp16,
             }) = serde_json::from_value(value)
             {
-                let allow = rfd::MessageDialog::new()
-                    .set_title(label("Remote access request", "远程访问请求"))
-                    .set_description(format!("{peer_name}\n{peer_fp16}"))
-                    .set_buttons(rfd::MessageButtons::YesNo)
-                    .show()
-                    == rfd::MessageDialogResult::Yes;
+                let allow = crate::dialogs::confirm(
+                    label("Remote access request", "远程访问请求"),
+                    &format!("{peer_name}\n{peer_fp16}"),
+                );
                 let _ = requests.send(IpcRequest::AdmissionReply { request_id, allow });
             }
         }

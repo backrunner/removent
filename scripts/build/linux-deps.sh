@@ -8,4 +8,4 @@ apt-get install -y --no-install-recommends build-essential cmake clang libclang-
   libxkbcommon-x11-dev libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxfixes-dev \
   libxtst-dev libxdo-dev libwayland-dev libegl1-mesa-dev libgbm-dev libpipewire-0.3-dev \
   libgtk-3-dev libayatana-appindicator3-dev libdbus-1-dev \
-  xvfb xauth dbus-x11 openbox xdotool python3-tk libvulkan1 mesa-vulkan-drivers gnome-keyring
+  xvfb xauth dbus-x11 openbox xdotool python3-tk python3-pil python3-dbus python3-gi xfce4-panel libvulkan1 mesa-vulkan-drivers gnome-keyring

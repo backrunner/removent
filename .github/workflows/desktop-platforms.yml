@@ -45,14 +45,17 @@ jobs:
           choco install nasm --no-progress -y
           "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Build desktop, host, tray and native probe
+        id: native_build
         run: cargo build --locked --release -p removent-app -p removent-daemon -p removent-tray -p removent-host -p removent-client --bins --example desktop_smoke --example ipc_smoke --example desktop_session_smoke --example credential_smoke
       - name: Daemon IPC and lifecycle
         shell: bash
-        run: target/release/examples/ipc_smoke
-      - name: Core protocol and persistence tests
-        run: cargo test --locked -p removent-proto -p removent-core -p removent-input --lib -- --test-threads=1
+        run: |
+          target/release/examples/ipc_smoke
+          cargo test --locked -p removent-daemon --test ipc -- --test-threads=1
+      - name: Protocol, codec and session regression tests
+        run: cargo test --locked -p removent-proto -p removent-core -p removent-input -p removent-client -p removent-host -p removent-media-codec --lib -- --test-threads=1
       - name: Linux native desktop acceptance
-        if: runner.os == 'Linux'
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
         run: |
           xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash -e -c '
             openbox > /tmp/openbox.log 2>&1 &
@@ -61,9 +64,10 @@ jobs:
             target/release/removent-tray --smoke
             python3 scripts/qa/portable_app.py
             python3 scripts/qa/portable_credentials.py
+            /usr/bin/python3 scripts/qa/linux_tray.py
           '
       - name: Windows native desktop acceptance
-        if: runner.os == 'Windows'
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
         run: |
           python scripts/qa/portable_desktop.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -75,6 +79,8 @@ jobs:
           python scripts/qa/portable_app.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/qa/portable_credentials.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/qa/windows_tray.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         if: always()

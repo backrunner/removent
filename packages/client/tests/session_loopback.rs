@@ -74,4 +74,5 @@ mod invitations;
 mod security;
 
 #[path = "session_loopback/automation.rs"]
+#[cfg(unix)]
 mod automation;

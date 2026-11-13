@@ -84,6 +84,7 @@ pub(super) fn verify(credentials: &SystemCredentials) -> bool {
     } != 0
         || result.is_null()
         || entry.pw_uid != unsafe { libc::geteuid() }
+        || entry.pw_uid == 0
     {
         return false;
     }
@@ -149,7 +150,11 @@ pub(super) fn verify(credentials: &SystemCredentials) -> bool {
     let ok = unsafe {
         LogonUserW(
             name.as_ptr(),
-            domain.as_ptr(),
+            if credentials.username.contains('@') {
+                std::ptr::null()
+            } else {
+                domain.as_ptr()
+            },
             password.as_ptr(),
             LOGON32_LOGON_NETWORK,
             LOGON32_PROVIDER_DEFAULT,
@@ -265,6 +270,24 @@ pub(super) fn verify(credentials: &SystemCredentials) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires an isolated OS account with REMOVENT_AUTH_TEST_USERNAME/PASSWORD"]
+    fn native_desktop_account_authentication() {
+        let username = std::env::var("REMOVENT_AUTH_TEST_USERNAME").unwrap();
+        let password = std::env::var("REMOVENT_AUTH_TEST_PASSWORD").unwrap();
+        assert!(verify(&SystemCredentials {
+            username: username.clone(),
+            password,
+        }));
+        assert!(!verify(&SystemCredentials {
+            username,
+            password: "intentionally-wrong-native-test-password".into(),
+        }));
+        assert!(!verify(&SystemCredentials {
+            username: "removent-nonexistent-test-account".into(),
+            password: "irrelevant".into(),
+        }));
+    }
     #[tokio::test]
     async fn exchange_requires_matching_nonces_and_successful_verification() {
         for (password, replay, expected) in [

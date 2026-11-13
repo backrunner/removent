@@ -15,5 +15,9 @@ tokio.workspace = true
 anyhow.workspace = true
 tray-icon = "0.25"
 tao = "0.34"
-rfd = "0.15"
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+[target.'cfg(windows)'.dependencies]
+rfd = { version = "0.15", default-features = false }
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"

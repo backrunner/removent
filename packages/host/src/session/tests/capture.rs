@@ -18,7 +18,11 @@ async fn capture_restart_refreshes_identical_pixels_and_new_dimensions_on_same_s
         rx,
         kf_rx,
         quality_rx,
-        CodecId::Hevc,
+        if cfg!(target_os = "macos") {
+            CodecId::Hevc
+        } else {
+            CodecId::H264
+        },
         320,
         240,
         3000,
@@ -67,6 +71,7 @@ async fn capture_restart_refreshes_identical_pixels_and_new_dimensions_on_same_s
 
 /// Manual release-mode throughput measurement, independent of CI load. Exercises
 /// production pacing, encode, encrypted QUIC, and decode; excludes SCK and GPUI.
+#[cfg(target_os = "macos")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "manual 1080p60 throughput measurement; run with --release --ignored --nocapture"]
 async fn lan_video_throughput() {
@@ -217,6 +222,7 @@ async fn lan_video_throughput() {
 }
 
 /// IOSurface-backed fixture, filled before it is shared with the encoder.
+#[cfg(target_os = "macos")]
 pub(super) fn native_buffer(w: usize, h: usize, pixels: &[u8]) -> apple_cf::cv::CVPixelBuffer {
     let stride = (w * 4).next_multiple_of(64);
     let surface = apple_cf::iosurface::IOSurface::create_with_properties(

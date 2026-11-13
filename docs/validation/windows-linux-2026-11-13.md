@@ -10,10 +10,10 @@ no release tag, merge, system-service installation, or public release was made.
 - Native click, Ctrl+A and exact text received by that independent UI.
 - Authenticated pinned QUIC host/client session negotiated H.264, delivered real desktop pixels and input, synchronized text clipboard both directions, and shut down cleanly.
 - Real Unix IPC: status, sharing enable/disable, pairing invitation, acknowledged shutdown, successful daemon exit, and persisted stop intent.
-- Tray creation and its event-loop exit on Linux.
+- Actual Xfce panel registration, tray start, sharing enable/disable, native GTK pairing dialog, service stop and tray quit. The test caught and fixed duplicate pairing dialogs and the former external `zenity` dependency.
 - Visible GPUI main window content, first-frame receipt and clean exit. The test checks content pixels, not just window creation. Mesa CPU Vulkan black output was reproduced; the OpenGL preference fixed the default path.
 - Native Secret Service credential create/read/update/delete, including Unicode and missing entries, with an isolated test collection.
-- Core, protocol and portable input library tests passed. macOS workspace strict Clippy passed; Windows GNU cross-check passed including network and credential probes.
+- Linux: core 72, protocol 16, input 11, client 126, host 71 and codec 5 library tests passed. Native PAM authentication separately passed with a temporary non-root OS account (valid and invalid passwords). macOS workspace strict Clippy passed; Windows GNU cross-check passed including network and credential probes.
 
 ## Native CI
 

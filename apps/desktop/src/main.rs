@@ -155,6 +155,17 @@ fn run(paths: DataPaths) -> Result<()> {
                 ),
             ]);
 
+            // Keep caption controls and the footer on small desktop displays.
+            let window_size = cx.primary_display().map_or(
+                gpui::size(gpui::px(1040.), gpui::px(700.)),
+                |display| {
+                    let screen = display.bounds().size;
+                    gpui::size(
+                        (screen.width - gpui::px(48.)).clamp(gpui::px(860.), gpui::px(1040.)),
+                        (screen.height - gpui::px(112.)).clamp(gpui::px(600.), gpui::px(700.)),
+                    )
+                },
+            );
             let home_window = cx
                 .open_window(
                     gpui::WindowOptions {
@@ -162,7 +173,7 @@ fn run(paths: DataPaths) -> Result<()> {
                         show: !smoke || visible_smoke,
                         window_bounds: Some(gpui::WindowBounds::Windowed(gpui::Bounds::centered(
                             None,
-                            gpui::size(gpui::px(1040.), gpui::px(700.)),
+                            window_size,
                             cx,
                         ))),
                         titlebar: Some(gpui::TitlebarOptions {

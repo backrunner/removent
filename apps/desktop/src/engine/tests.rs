@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(unix)]
 #[test]
 fn daemon_link_waits_between_initial_snapshot_and_periodic_poll() {
     let directory = tempfile::tempdir_in("/tmp").unwrap();
@@ -49,6 +50,7 @@ fn daemon_link_waits_between_initial_snapshot_and_periodic_poll() {
     engine.rt.block_on(server).unwrap();
 }
 
+#[cfg(unix)]
 #[test]
 fn daemon_restart_republishes_unchanged_permissions_and_then_live_changes() {
     let directory = tempfile::tempdir_in("/tmp").unwrap();

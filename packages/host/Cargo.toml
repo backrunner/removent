@@ -39,6 +39,7 @@ libc.workspace = true
 pam-client = "0.5"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading"] }
+zeroize = "1.9"
 
 # pam-sys disables bindgen defaults; explicitly load libclang when other build
 # dependencies enable clang-sys runtime loading through feature unification.

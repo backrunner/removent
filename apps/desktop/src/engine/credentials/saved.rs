@@ -1,6 +1,6 @@
 use super::*;
 
-/// A local Keychain snapshot. The scope cannot be changed by the form.
+/// A local credential-store snapshot. The scope cannot be changed by the form.
 #[derive(Clone, Debug)]
 pub struct NativeCredential {
     local: String,
@@ -16,7 +16,7 @@ pub struct NativeCredentialEdit {
 }
 
 impl Engine {
-    // Called on a background executor: DNS, file locks and Keychain can block.
+    // Called on a background executor: DNS, file locks and the credential store can block.
     fn native_credential_host(&self, request: &ConnectionRequest) -> Result<Option<[u8; 32]>> {
         if request.protocol != ConnectionProtocol::Removent || request.pairing_code.is_some() {
             return Ok(None);

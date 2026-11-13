@@ -62,6 +62,8 @@ jobs:
         run: target/release/examples/ipc_smoke
       - name: Daemon IPC admission regression
         run: cargo test --locked -p removent-daemon --test ipc -- --test-threads=1
+      - name: Build desktop credential tests
+        run: cargo test --locked -p removent-app --bin removent --no-run
       - name: Linux native desktop acceptance
         timeout-minutes: 10
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
@@ -72,7 +74,7 @@ jobs:
             python3 scripts/qa/portable_desktop.py --probe desktop_session_smoke
             target/release/removent-tray --smoke
             python3 scripts/qa/portable_app.py
-            python3 scripts/qa/portable_credentials.py
+            python3 scripts/qa/portable_credentials.py --app-tests
             /usr/bin/python3 scripts/qa/linux_tray.py
           '
       - name: Windows native capture and input
@@ -94,7 +96,7 @@ jobs:
       - name: Windows credential storage
         timeout-minutes: 5
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
-        run: python scripts/qa/portable_credentials.py
+        run: python scripts/qa/portable_credentials.py --app-tests
       - name: Protocol, codec and session regression tests
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' }}
         timeout-minutes: 30
@@ -103,6 +105,10 @@ jobs:
         timeout-minutes: 10
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
         run: ./scripts/qa/windows_account.ps1
+      - name: Linux native account authentication
+        timeout-minutes: 10
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
+        run: python3 scripts/qa/linux_account.py
       - name: Package desktop artifacts
         run: python scripts/build/package_portable.py --target ${{ matrix.platform }}
       - name: Windows extracted package acceptance

@@ -406,7 +406,7 @@ auth.credentials_destination_changed: "连接目标已变更，请重新打开�
 auth.saved_credentials_invalid: "请输入有效的用户名和密码，或关闭凭据存储后保存。"
 auth.keychain_edit_failed: "无法读取已保存的凭据，请检查系统凭据库权限后重新打开编辑表单。"
 auth.keychain_loading: "正在读取已保存的凭据…"
-auth.saved_credentials_hint: "凭据存于 系统凭据库，连接时自动使用。修改后点击保存，关闭开关后保存可移除凭据。"
+auth.saved_credentials_hint: "凭据存于系统凭据库，连接时自动使用。修改后点击保存，关闭开关后保存可移除凭据。"
 auth.otp_setup: "绑定验证器"
 auth.otp_setup_hint: "验证码为六位，每 30 秒更新，每个验证码仅可使用一次。"
 auth.copy_secret: "复制绑定密钥"
@@ -470,7 +470,7 @@ auth.otp_manual_hint: "无法扫码时，可复制密钥到验证器中手动添
 
 auth.system: "系统账户"
 auth.system_desc: "输入远程电脑上运行 Removent 的系统用户名和登录密码。"
-auth.system_hint: "由远端操作系统验证运行共享服务的账户，系统登录密码不会保存在 Removent 中。"
+auth.system_hint: "使用运行共享服务的系统账户及登录密码，由远端操作系统验证。共享服务不保存系统登录密码。"
 auth.system_username: "系统用户名"
 auth.system_password: "登录密码"
 
@@ -480,9 +480,9 @@ connection.quality_standard: "标准"
 connection.quality_high: "高（2K）"
 connection.quality_ultra: "超高（4K）"
 
-auth.remember_credentials: "记忆凭据并存入 系统凭据库"
-auth.keychain_read_failed: "无法读取 系统凭据库，请重新输入凭据"
-auth.keychain_save_failed: "连接已建立，但无法更新 系统凭据库 凭据，请检查系统凭据库权限"
+auth.remember_credentials: "记住凭据并存入系统凭据库"
+auth.keychain_read_failed: "无法读取系统凭据库，请重新输入凭据"
+auth.keychain_save_failed: "连接已建立，但无法更新系统凭据库中的凭据，请检查系统凭据库权限"
 connection.native_unreachable: "无法连接 Removent 服务（%{address}）。请在远端开启 Removent 共享，并检查 UDP %{port} 是否可达"
 
 update.err.installing: 正在安装更新，请稍后重新连接。

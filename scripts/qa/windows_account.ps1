@@ -32,7 +32,7 @@ try {
     Get-Content "$evidence/account.log"
     Get-Content "$evidence/account-errors.log"
     if ($child.ExitCode -ne 0) { throw 'Native account authentication failed' }
-    Write-Output 'PASS: Windows account password, invalid password and desktop-owner SID checks'
+    Write-Output 'PASS: Windows account/QUIC password, invalid password and desktop-owner SID checks'
 } finally {
     if ($child -and -not $child.HasExited) { Stop-Process -Id $child.Id -Force }
     foreach ($name in @('REMOVENT_AUTH_TEST_USERNAME', 'REMOVENT_AUTH_TEST_PASSWORD', 'REMOVENT_AUTH_EXPECT_REJECT')) {

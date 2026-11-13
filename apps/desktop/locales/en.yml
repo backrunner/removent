@@ -470,7 +470,7 @@ auth.otp_manual_hint: "If you cannot scan, copy the key into your authenticator.
 
 auth.system: "System account"
 auth.system_desc: "Enter the username and login password of the account running Removent on the remote computer."
-auth.system_hint: "Verifies the account running the sharing service with the remote operating system. Its login password is never stored in Removent."
+auth.system_hint: "Use the username and login password of the account running the sharing service. The remote operating system verifies it; the sharing service does not store the login password."
 auth.system_username: "System username"
 auth.system_password: "Login password"
 
@@ -482,7 +482,7 @@ connection.quality_ultra: "Ultra (4K)"
 
 auth.remember_credentials: "Remember credentials in the system credential store"
 auth.keychain_read_failed: "Cannot read the system credential store. Enter your credentials again."
-auth.keychain_save_failed: "Connected, but could not update the system credential store credentials. Check the system credential store access."
+auth.keychain_save_failed: "Connected, but could not update saved credentials. Check access to the system credential store."
 connection.native_unreachable: "Cannot reach Removent at %{address}. Enable Removent sharing on the host and check UDP port %{port}."
 
 update.err.installing: An update is being installed. Try connecting again shortly.

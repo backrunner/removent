@@ -21,7 +21,7 @@ wait until all sessions end.
 Choose **Settings → Security → Connection authentication** on the desktop host.
 The iPhone/iPad app and desktop controller follow the host's choice automatically:
 
-- **System account** (default): use the username and login password of the account running Removent on the Mac host. System passwords are not stored in Removent settings.
+- **System account** (default): use the username and login password of the account running Removent on the macOS, Windows or Linux host. The host verifies the password through the operating system and does not store it in Removent settings. Windows requires the account password, not a Windows Hello PIN. This authenticates access to the existing desktop session; it does not switch users or sign in at the operating system's login screen.
 - **Pairing code**: enter the six-digit code displayed on the host. Choose **Remember paired devices** or **Pair every connection** in desktop Security settings.
 - **Access password**: set a non-empty host password; every new session requires it, including previously paired devices.
 - **OTP**: copy the setup secret into an authenticator as TOTP / SHA-1 / 6 digits / 30 seconds, then enter its current code. Each code can be used once; adjacent clock steps are tolerated.
@@ -33,6 +33,17 @@ end active sessions and invalidate old resume tokens. Removent access passwords 
 `settings.toml` (0600); they do not sync through iCloud. Relay routing credentials remain separate,
 and the restricted LoginWindow service still requires previously approved device grants.
 System account, password and OTP require updated controllers; the pairing-code wire format remains compatible.
+
+On desktop controllers, **Remember credentials in the system credential store** is
+off initially. Enable it to save a successful system-account or access-password login
+in macOS Keychain, Windows Credential Manager or Linux Secret Service. An unlocked
+Secret Service provider is required on Linux. If storage fails, the connection can
+continue with the entered credentials, but they are not saved to a plaintext fallback.
+Saved credentials are used automatically only for the same local device identity,
+verified host certificate and authentication method. Edit or remove them in the
+saved connection's edit form. Cancelled or failed connections preserve existing
+credentials; OTP and pairing codes are never remembered. Connection files and sync
+data do not contain these remembered usernames or passwords.
 
 ## Connection by code and CLI
 

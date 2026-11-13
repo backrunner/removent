@@ -28,10 +28,17 @@ Ayatana AppIndicator, ALSA, PAM, PipeWire, X11, xkbcommon, and Vulkan/Mesa.
 The CI Linux x86_64 archive is built on Ubuntu 24.04 and requires glibc 2.39 or
 newer. Build from source for older distributions. Install a CJK font family
 (for example, Noto CJK) to display Chinese text when the system has none.
-Use the login password of the user running the host for system authentication.
+Use the login password of the non-root user running the host for system authentication.
+Linux verifies both the password and account validity through the system's `login`
+PAM policy. An expired or locked account is not accepted. Authentication does not
+switch users, and another user's valid password cannot authorize this desktop.
 Remembered connection credentials use Windows Credential Manager or the Linux
 Secret Service (for example, an unlocked GNOME Keyring). No plaintext fallback
-is used when the credential store is unavailable. CPU-only Linux desktops prefer
+is used when the credential store is unavailable. The remember switch is off initially;
+credentials are saved only after a successful connection. Later connections reuse
+them for the same verified host and authentication method. Use the connection's edit
+form to update or remove them. See [authentication and storage](connection-reference.md#unattended-connection-authentication).
+CPU-only Linux desktops prefer
 the OpenGL software renderer to avoid black Vulkan frames on older Mesa.
 
 H.264 and AV1 use CPU codecs. New macOS hosts select H.264 when a Windows/Linux

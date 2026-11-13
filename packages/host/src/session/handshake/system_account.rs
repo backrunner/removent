@@ -1,5 +1,5 @@
 //! Verify the account owning this desktop service, never another user's desktop.
-//! Passwords go directly to Open Directory, without shell arguments or persistence.
+//! Passwords go directly to the OS authentication API, without shell arguments or persistence.
 use removent_proto::SystemCredentials;
 
 use super::*;
@@ -121,6 +121,7 @@ pub(super) fn verify(credentials: &SystemCredentials) -> bool {
         Security::*,
         System::Threading::{GetCurrentProcess, OpenProcessToken},
     };
+    use zeroize::Zeroize;
     if !credentials.valid() {
         return false;
     }
@@ -165,7 +166,8 @@ pub(super) fn verify(credentials: &SystemCredentials) -> bool {
             &mut authenticated,
         )
     };
-    password.fill(0);
+    // Volatile writes prevent the optimizer from removing the password wipe.
+    password.zeroize();
     if ok == 0 {
         return false;
     }
@@ -289,27 +291,77 @@ mod tests {
             assert_eq!(windows_logon_identity(input), (domain, name));
         }
     }
-    #[test]
+    #[tokio::test]
     #[ignore = "requires an isolated OS account with REMOVENT_AUTH_TEST_USERNAME/PASSWORD"]
-    fn native_desktop_account_authentication() {
+    async fn native_desktop_account_authentication() {
         let username = std::env::var("REMOVENT_AUTH_TEST_USERNAME").unwrap();
         let password = std::env::var("REMOVENT_AUTH_TEST_PASSWORD").unwrap();
         if std::env::var("REMOVENT_AUTH_EXPECT_REJECT").as_deref() == Ok("1") {
-            assert!(!verify(&SystemCredentials { username, password }));
+            assert!(!authenticate_over_quic(SystemCredentials { username, password }).await);
             return;
         }
-        assert!(verify(&SystemCredentials {
-            username: username.clone(),
-            password,
-        }));
-        assert!(!verify(&SystemCredentials {
-            username,
-            password: "intentionally-wrong-native-test-password".into(),
-        }));
-        assert!(!verify(&SystemCredentials {
-            username: "removent-nonexistent-test-account".into(),
-            password: "irrelevant".into(),
-        }));
+        assert!(
+            authenticate_over_quic(SystemCredentials {
+                username: username.clone(),
+                password,
+            })
+            .await
+        );
+        assert!(
+            !authenticate_over_quic(SystemCredentials {
+                username,
+                password: "intentionally-wrong-native-test-password".into(),
+            })
+            .await
+        );
+        assert!(
+            !authenticate_over_quic(SystemCredentials {
+                username: "removent-nonexistent-test-account".into(),
+                password: "irrelevant".into(),
+            })
+            .await
+        );
+    }
+    async fn authenticate_over_quic(credentials: SystemCredentials) -> bool {
+        let (_endpoints, client, host) = crate::session::tests::quic_pair().await;
+        let peer = hex::encode(host.peer_fingerprint().unwrap());
+        let client_fp = peer.clone();
+        let server = host.clone();
+        let task = tokio::spawn(async move {
+            let (mut sink, mut source) = server.accept_pairing().await.unwrap();
+            let begin = source.next().await.unwrap().unwrap();
+            exchange(begin, &peer, &mut sink, &mut source, verify).await
+        });
+        let (mut sink, mut source) = client.open_pairing().await.unwrap();
+        let nonce_c = [9; 16];
+        sink.send(PairingMsg::Begin {
+            nonce_c,
+            fp_c: client_fp,
+        })
+        .await
+        .unwrap();
+        let PairingMsg::SystemChallenge { nonce_h } = source.next().await.unwrap().unwrap() else {
+            panic!("system challenge");
+        };
+        sink.send(PairingMsg::SystemVerify {
+            nonce_c,
+            nonce_h,
+            credentials,
+        })
+        .await
+        .unwrap();
+        let PairingMsg::SystemConfirm {
+            nonce_c: confirmed_c,
+            nonce_h: confirmed_h,
+            ok,
+        } = source.next().await.unwrap().unwrap()
+        else {
+            panic!("system confirmation");
+        };
+        assert_eq!(confirmed_c, nonce_c);
+        assert_eq!(confirmed_h, nonce_h);
+        assert_eq!(task.await.unwrap().is_ok(), ok);
+        ok
     }
     #[tokio::test]
     async fn exchange_requires_matching_nonces_and_successful_verification() {

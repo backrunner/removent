@@ -1,4 +1,4 @@
-//! Native host credentials stay in Keychain, scoped to both device identities
+//! Native host credentials stay in the OS credential store, scoped to both device identities
 //! and the host's authentication method. Never use a relay token or an IP as a key.
 use super::*;
 use removent_core::AuthenticationMode;
@@ -19,11 +19,14 @@ impl std::fmt::Debug for AuthenticationAnswer {
 }
 
 pub fn can_remember(mode: AuthenticationMode) -> bool {
-    cfg!(target_os = "macos")
-        && matches!(
-            mode,
-            AuthenticationMode::SystemAccount | AuthenticationMode::Password
-        )
+    cfg!(any(
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "linux"
+    )) && matches!(
+        mode,
+        AuthenticationMode::SystemAccount | AuthenticationMode::Password
+    )
 }
 
 fn account(local: &str, host: [u8; 32], mode: AuthenticationMode) -> Option<String> {
@@ -98,9 +101,11 @@ fn prompt_with_loader(
                         }
                         Ok(Ok(_)) => None,
                         _ => {
-                            let _ = attempt
-                                .events
-                                .send(UiEvent::Notice(t!("auth.keychain_read_failed").to_string()));
+                            if !pin_tx.is_closed() {
+                                let _ = attempt.events.send(UiEvent::Notice(
+                                    t!("auth.keychain_read_failed").to_string(),
+                                ));
+                            }
                             None
                         }
                     }
@@ -110,7 +115,7 @@ fn prompt_with_loader(
             } else {
                 None
             };
-            // If the connection was cancelled during a Keychain read, do not open a dialog.
+            // If the connection was cancelled during a credential read, do not open a dialog.
             if pin_tx.is_closed() {
                 return;
             }
@@ -148,7 +153,7 @@ fn prompt_with_loader(
                         answer.remember &= can_remember(mode);
                         let value = answer.value.clone();
                         // Record before waking the handshake. Failed/cancelled handshakes
-                        // drop this in-memory value without changing Keychain.
+                        // drop this in-memory value without changing the credential store.
                         if can_remember(mode) {
                             *pending.lock().unwrap() = Some(PendingAuthentication { mode, answer, reused: false });
                         }

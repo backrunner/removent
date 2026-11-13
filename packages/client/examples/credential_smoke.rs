@@ -5,6 +5,15 @@ fn main() -> anyhow::Result<()> {
         "Requires an isolated test desktop"
     );
     let account = format!("desktop-ci-{:032x}", rand::random::<u128>());
+    if std::env::args().any(|arg| arg == "--expect-unavailable") {
+        anyhow::ensure!(removent_client::keychain::load(&account).is_err());
+        anyhow::ensure!(
+            removent_client::keychain::store(&account, "must-not-reach-a-file").is_err()
+        );
+        anyhow::ensure!(removent_client::keychain::delete(&account).is_err());
+        println!("PASS: unavailable native credential store fails closed");
+        return Ok(());
+    }
     let result = (|| -> anyhow::Result<()> {
         anyhow::ensure!(removent_client::keychain::load(&account)?.is_none());
         removent_client::keychain::store(&account, "test password 一")?;

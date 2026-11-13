@@ -1,6 +1,7 @@
 use super::*;
 
 /// Hand off a verified update to the independent agent. The UI can then quit.
+#[cfg(target_os = "macos")]
 pub fn run_install(
     generation: u64,
     shared: Arc<Mutex<UpdateShared>>,
@@ -144,4 +145,18 @@ pub(super) fn current_bundle() -> Option<PathBuf> {
     exe.ancestors()
         .find(|p| p.extension().is_some_and(|e| e == "app"))
         .map(|p| p.to_path_buf())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn run_install(
+    _generation: u64,
+    shared: Arc<Mutex<UpdateShared>>,
+    events: std::sync::mpsc::Sender<UiEvent>,
+    _paths: DataPaths,
+) {
+    set_status(
+        &shared,
+        &events,
+        UpdateStatus::Failed("Install the Windows or Linux package manually".into()),
+    );
 }

@@ -69,7 +69,7 @@ pub(super) fn release_codesign_requirement() -> String {
 
 pub(super) fn codesign_verify(app: &Path) -> Result<(), String> {
     let requirement = release_codesign_requirement();
-    let ok = crate::agent::io::run(
+    let ok = removent_core::process::run_bounded(
         Command::new("/usr/bin/codesign")
             .args(["--verify", "--deep", "--strict", "-R", &requirement])
             .arg(app),

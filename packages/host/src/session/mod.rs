@@ -81,7 +81,7 @@ pub struct HostConfig {
 
 impl HostConfig {
     fn available_caps(&self, mut caps: Caps) -> Caps {
-        caps.audio &= self.audio_available;
+        caps.audio &= self.audio_available && cfg!(target_os = "macos");
         caps.input &= self.input_sink.is_some();
         caps.clipboard &= self.local_clip.is_some();
         // No file-transfer implementation is offered by this host.

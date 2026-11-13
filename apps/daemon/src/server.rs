@@ -7,13 +7,15 @@ use removent_core::ipc::{IpcRequest, IpcResponse, read_msg, write_msg};
 use rust_i18n::t;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use tokio::net::{UnixListener, UnixStream};
+#[cfg(unix)]
+use tokio::net::UnixListener;
 use tokio::sync::broadcast;
 
 use crate::state::DaemonState;
 
 /// Listen on and serve IPC connections until the shutdown token is cancelled;
 /// removes the socket file on exit.
+#[cfg(unix)]
 pub async fn serve(state: Arc<DaemonState>) -> anyhow::Result<()> {
     let sock = state.paths.daemon_socket();
     // A previous abnormal exit may have left a stale socket behind.
@@ -52,9 +54,12 @@ pub async fn serve(state: Arc<DaemonState>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_conn(state: Arc<DaemonState>, stream: UnixStream) {
+async fn handle_conn<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static>(
+    state: Arc<DaemonState>,
+    stream: S,
+) {
     state.tray_connections.fetch_add(1, Ordering::SeqCst);
-    let (r, w) = stream.into_split();
+    let (r, w) = tokio::io::split(stream);
     let mut r = tokio::io::BufReader::new(r);
     let w = Arc::new(tokio::sync::Mutex::new(w));
 
@@ -403,5 +408,21 @@ mod invitation_tests {
             handle_request(&state, IpcRequest::PairingGenerate),
             IpcResponse::Error { .. }
         ));
+    }
+}
+
+#[cfg(windows)]
+pub async fn serve(state: Arc<DaemonState>) -> anyhow::Result<()> {
+    let mut pending = removent_core::ipc::windows::server(&state.paths, true)?;
+    loop {
+        tokio::select! {
+            _ = state.shutdown.cancelled() => return Ok(()),
+            result = pending.connect() => {
+                result?;
+                let next = removent_core::ipc::windows::server(&state.paths, false)?;
+                let stream = std::mem::replace(&mut pending, next);
+                tokio::spawn(handle_conn(state.clone(), stream));
+            }
+        }
     }
 }

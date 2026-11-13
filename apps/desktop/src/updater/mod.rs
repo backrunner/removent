@@ -1,7 +1,7 @@
 //! Desktop event bridge. Download, validation and recovery live outside the UI.
 use crate::engine::UiEvent;
 use removent_core::DataPaths;
-pub use removent_updater::{UpdatePolicy, UpdateShared, UpdateStatus, refresh_stale_tray};
+pub use removent_updater::{UpdatePolicy, UpdateShared, UpdateStatus};
 use std::sync::{Arc, Mutex, mpsc::Sender};
 
 fn forward(events: Sender<UiEvent>, action: impl FnOnce(Sender<removent_updater::UpdateEvent>)) {
@@ -38,3 +38,6 @@ pub fn run_install(
         removent_updater::run_install(generation, shared, tx, paths)
     });
 }
+
+#[cfg(target_os = "macos")]
+pub use removent_updater::refresh_stale_tray;

@@ -360,7 +360,7 @@ pub struct Engine {
     startup: Arc<Mutex<StartupSettings>>,
     /// Auto-update shared state (status + manifest + staged bundle).
     update: Arc<Mutex<UpdateShared>>,
-    background_update: Arc<Mutex<Option<removent_updater::agent::AgentStatus>>>,
+    background_update: Arc<Mutex<Option<removent_updater::AgentStatus>>>,
     /// Live controlled-side sessions (daemon IpcEvent SessionStarted/Ended,
     /// reconciled against StatusReport.sessions on every poll);
     /// an update install is deferred while any session runs.
@@ -430,6 +430,7 @@ impl Engine {
         if !std::env::args().any(|arg| arg == "--update-smoke") {
             engine.spawn_daemon_link();
             engine.spawn_update_scheduler();
+            #[cfg(target_os = "macos")]
             engine.spawn_background_update_status();
             crate::cloud_sync::start(&engine);
         }

@@ -1,4 +1,5 @@
 //! removentd entry point: data-dir lock + tokio runtime + IPC server + host manager + signal shutdown.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use anyhow::Context;
 use removent_core::{DataDirLock, DataPaths, Settings, identity, logging};
@@ -11,6 +12,9 @@ rust_i18n::i18n!("locales");
 fn main() -> anyhow::Result<()> {
     let login_window = std::env::args().any(|arg| arg == "--login-window");
     let paths = if login_window {
+        #[cfg(not(target_os = "macos"))]
+        anyhow::bail!("Pre-login hosting is only available on macOS");
+        #[cfg(target_os = "macos")]
         removent_daemon::login_window::paths()?
     } else {
         DataPaths::resolve()
@@ -63,6 +67,7 @@ fn start(paths: DataPaths) -> anyhow::Result<()> {
 async fn run(paths: DataPaths) -> anyhow::Result<()> {
     let mut settings = Settings::load_strict(&paths)?;
     if std::env::args().any(|arg| arg == "--login-window") {
+        #[cfg(target_os = "macos")]
         removent_daemon::login_window::restrict(&mut settings);
     }
     let identity = identity::load_or_create(&paths, &settings.device_name)
@@ -80,11 +85,21 @@ async fn run(paths: DataPaths) -> anyhow::Result<()> {
     removent_daemon::tcc::request_initial_permissions(&state);
 
     // SIGTERM / SIGINT / IPC Shutdown all trigger graceful shutdown.
-    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        .context(t!("error.register_sigterm"))?;
+    let terminate = async {
+        #[cfg(unix)]
+        {
+            if let Ok(mut signal) =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            {
+                signal.recv().await;
+            }
+        }
+        #[cfg(windows)]
+        std::future::pending::<()>().await;
+    };
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {},
-        _ = sigterm.recv() => {},
+        _ = terminate => {},
         _ = state.shutdown.cancelled() => {},
         result = &mut ipc => {
             state.power.lock().unwrap().set_enabled(false);

@@ -161,14 +161,21 @@ fn default_device_name() -> String {
     if let Ok(name) = std::env::var("REMOVENT_DEVICE_NAME") {
         return normalized_default_device_name(&name);
     }
-    // System hostname (macOS: same source as `scutil --get LocalHostName`).
-    let mut buf = [0u8; 256];
-    let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
-    if rc == 0 {
-        let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-        return normalized_default_device_name(&String::from_utf8_lossy(&buf[..end]));
+    #[cfg(windows)]
+    return normalized_default_device_name(
+        &std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows PC".into()),
+    );
+    #[cfg(unix)]
+    {
+        // System hostname (macOS: same source as `scutil --get LocalHostName`).
+        let mut buf = [0u8; 256];
+        let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
+        if rc == 0 {
+            let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+            return normalized_default_device_name(&String::from_utf8_lossy(&buf[..end]));
+        }
+        "Removent".to_string()
     }
-    "Mac".to_string()
 }
 
 impl Settings {
@@ -242,15 +249,16 @@ impl Settings {
 /// Atomic write via tmp + rename to avoid half-written files.
 pub fn atomic_write(path: &PathBuf, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
+    #[cfg(unix)]
     use std::os::unix::fs::OpenOptionsExt;
     // Each writer owns a separate sibling file. A shared .tmp can be renamed
     // while another writer is still modifying it, corrupting the final file.
     let tmp = path.with_extension(format!("{:032x}.tmp", rand::random::<u128>()));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&tmp)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(&tmp)?;
     let result = (|| -> std::io::Result<()> {
         file.write_all(bytes)?;
         file.sync_all()?;
@@ -311,6 +319,7 @@ mod tests {
 
     #[test]
     fn concurrent_writers_publish_complete_private_files() {
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         use std::sync::{Arc, Barrier};
         let dir = tempdir().unwrap();
@@ -332,6 +341,7 @@ mod tests {
                 });
             }
         });
+        #[cfg(unix)]
         assert_eq!(
             std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600

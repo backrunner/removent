@@ -99,14 +99,22 @@ impl Engine {
         if let Ok(exe) = std::env::current_exe()
             && let Some(dir) = exe.parent()
         {
-            let candidate = dir.join("removentd");
+            let candidate = dir.join(if cfg!(windows) {
+                "removentd.exe"
+            } else {
+                "removentd"
+            });
             if candidate.is_file() {
                 return Some(candidate);
             }
         }
         std::env::var_os("PATH").and_then(|paths| {
             std::env::split_paths(&paths).find_map(|dir| {
-                let candidate = dir.join("removentd");
+                let candidate = dir.join(if cfg!(windows) {
+                    "removentd.exe"
+                } else {
+                    "removentd"
+                });
                 candidate.is_file().then_some(candidate)
             })
         })

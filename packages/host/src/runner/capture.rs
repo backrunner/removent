@@ -1,13 +1,14 @@
 //! Rebuild capture without replacing the authenticated control/media session.
 use super::*;
-use removent_media_capture::{
-    AudioFrame, CaptureError, CapturedVideoFrame, SckCapture, quartz::QuartzCapture,
-};
+#[cfg(target_os = "macos")]
+use removent_media_capture::quartz::QuartzCapture;
+use removent_media_capture::{AudioFrame, CaptureError, CapturedVideoFrame, SckCapture};
 use removent_proto::DisplayInfo;
 use tokio::sync::mpsc;
 
 enum RunningCapture {
     Sck(SckCapture, mpsc::Receiver<CaptureError>),
+    #[cfg(target_os = "macos")]
     Quartz(QuartzCapture, mpsc::Receiver<String>),
 }
 
@@ -18,6 +19,7 @@ impl RunningCapture {
                 .recv()
                 .await
                 .unwrap_or_else(|| CaptureError::Sc("capture delegate closed".into())),
+            #[cfg(target_os = "macos")]
             Self::Quartz(_, rx) => CaptureError::Sc(
                 rx.recv()
                     .await
@@ -28,6 +30,7 @@ impl RunningCapture {
     fn health_failure(&self) -> Option<&'static str> {
         match self {
             Self::Sck(capture, _) => capture.health_failure(),
+            #[cfg(target_os = "macos")]
             Self::Quartz(capture, _) => capture.health_failure(),
         }
     }
@@ -72,12 +75,16 @@ pub(super) async fn run(
         let video = video.clone();
         let audio = audio.clone();
         let start = tokio::task::spawn_blocking(move || {
-            if legacy {
-                let mut stream = removent_media_capture::quartz::start(id as u32, w, h, video)
-                    .map_err(CaptureError::Sc)?;
-                let stopped = stream.take_stopped_rx().expect("new stream");
-                Ok(RunningCapture::Quartz(stream, stopped))
-            } else {
+            if legacy && cfg!(target_os = "macos") {
+                #[cfg(target_os = "macos")]
+                {
+                    let mut stream = removent_media_capture::quartz::start(id as u32, w, h, video)
+                        .map_err(CaptureError::Sc)?;
+                    let stopped = stream.take_stopped_rx().expect("new stream");
+                    return Ok(RunningCapture::Quartz(stream, stopped));
+                }
+            }
+            {
                 let mut stream = removent_media_capture::sck::start_remote_capture(
                     id as u32, w, h, video, audio, fps,
                 )?;
@@ -163,6 +170,8 @@ pub(super) async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "macos")]
+    use removent_media_capture::quartz::QuartzCapture;
     #[test]
     fn recovery_is_bounded_and_does_not_restart_user_stopped_capture() {
         let mut budget = RecoveryBudget::default();

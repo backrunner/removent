@@ -105,7 +105,7 @@ fn resolve_root() -> PathBuf {
         Some(dir) if !dir.is_empty() => return PathBuf::from(dir),
         _ => {}
     }
-    if cfg!(debug_assertions) && workspace_root().is_some() {
+    if cfg!(debug_assertions) && workspace_root().is_some_and(|p| p.join("Cargo.toml").is_file()) {
         return workspace_root().unwrap().join("userdata");
     }
     fallback_library_dir()
@@ -117,6 +117,21 @@ fn workspace_root() -> Option<PathBuf> {
 }
 
 fn fallback_library_dir() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(dir) = std::env::var_os("LOCALAPPDATA") {
+        return PathBuf::from(dir).join("Removent/userdata");
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(dir) = std::env::var_os("XDG_DATA_HOME").filter(|p| Path::new(p).is_absolute())
+        {
+            return PathBuf::from(dir).join("removent/userdata");
+        }
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(".local/share/removent/userdata");
+        }
+    }
+
     if let Some(home) = std::env::var_os("HOME") {
         return PathBuf::from(home).join("Library/Application Support/removent/userdata");
     }

@@ -1,10 +1,25 @@
 //! removent-input: keyboard/mouse injection, clipboard, and display geometry (macOS).
 
+#[cfg(target_vendor = "apple")]
+pub mod clipboard;
+#[cfg(not(target_vendor = "apple"))]
+#[path = "portable/clipboard.rs"]
 pub mod clipboard;
 pub mod display;
+#[cfg(target_vendor = "apple")]
 pub mod keyboard;
+#[cfg(not(target_vendor = "apple"))]
+#[path = "portable/keyboard.rs"]
+pub mod keyboard;
+#[cfg(target_vendor = "apple")]
 pub mod mouse;
+#[cfg(not(target_vendor = "apple"))]
+#[path = "portable/mouse.rs"]
+pub mod mouse;
+#[cfg(target_vendor = "apple")]
 pub mod origin;
+#[cfg(not(target_vendor = "apple"))]
+mod portable;
 
 pub use clipboard::{ClipboardError, change_count, read, read_text, write_text};
 pub use display::DisplayGeometry;
@@ -29,7 +44,7 @@ unsafe extern "C" {
 // The crate is macOS-only in practice; the stub keeps it compiling elsewhere.
 #[cfg(not(target_os = "macos"))]
 pub fn accessibility_trusted() -> bool {
-    true
+    portable::available()
 }
 
 use removent_proto::DisplayInfo as ProtoDisplay;

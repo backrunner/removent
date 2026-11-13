@@ -82,12 +82,13 @@ fn create_and_store(paths: &DataPaths, _device_name: &str) -> Result<String> {
         .map_err(|e| CoreError::Crypto(e.to_string()))?;
     let path = paths.device_key();
     use std::io::Write;
+    #[cfg(unix)]
     use std::os::unix::fs::OpenOptionsExt;
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&path)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(&path)?;
     file.write_all(pem.as_bytes())?;
     restrict_0600(&path)?;
     Ok(pem.to_string())
@@ -140,6 +141,7 @@ fn issue_self_signed(key: &SigningKey, device_name: &str) -> Result<(Vec<u8>, [u
     Ok((der, fp))
 }
 
+#[cfg(unix)]
 fn restrict_0600(path: &std::path::Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let mut perm = std::fs::metadata(path)?.permissions();
@@ -198,13 +200,16 @@ mod tests {
             &Signature::from_bytes(&bad)
         ));
 
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(p.device_key())
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777;
-        assert_eq!(mode, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(p.device_key())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600);
+        }
     }
 
     #[test]
@@ -227,4 +232,9 @@ mod tests {
         .unwrap();
         assert_ne!(a.fingerprint, b.fingerprint);
     }
+}
+
+#[cfg(windows)]
+fn restrict_0600(_path: &std::path::Path) -> Result<()> {
+    Ok(())
 }

@@ -45,7 +45,10 @@ pub struct ViewerView {
     engine: Engine,
     session_generation: usize,
     current: Option<Arc<RenderImage>>,
+    #[cfg(target_os = "macos")]
     surface: Option<core_video::pixel_buffer::CVPixelBuffer>,
+    #[cfg(not(target_os = "macos"))]
+    surface: Option<()>,
     surface_pts: i64,
     presentation: Arc<removent_client::presentation::PresentationTelemetry>,
     width: u32,

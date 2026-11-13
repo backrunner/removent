@@ -9,7 +9,12 @@
 rust_i18n::i18n!("locales");
 
 pub mod hostmgr;
+#[cfg(target_os = "macos")]
 pub mod login_window;
+#[cfg(target_os = "macos")]
+pub mod power;
+#[cfg(not(target_os = "macos"))]
+#[path = "power_portable.rs"]
 pub mod power;
 pub mod server;
 pub mod state;

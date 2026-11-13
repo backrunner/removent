@@ -207,6 +207,7 @@ mod verify;
 pub use check::run_check;
 #[cfg(test)]
 use check::{GithubRelease, fetch_update, release_candidate};
+#[cfg(any(target_os = "macos", test))]
 use download::bundle_version;
 pub use download::run_download;
 use fetch::curl_get;
@@ -225,3 +226,11 @@ use verify::release_codesign_requirement;
 use verify::{codesign_verify, curl_download, find_app_bundle, sha256_file};
 
 rust_i18n::i18n!("locales");
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentStatus {
+    pub state: String,
+    pub version: Option<String>,
+    pub detail: String,
+    pub updated_at: u64,
+}

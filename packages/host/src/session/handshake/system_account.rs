@@ -61,9 +61,120 @@ pub(super) async fn exchange(
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-pub(super) fn verify(_: &SystemCredentials) -> bool {
-    false
+#[cfg(target_os = "linux")]
+pub(super) fn verify(credentials: &SystemCredentials) -> bool {
+    if !credentials.valid() {
+        return false;
+    }
+    // Require the UID of the running desktop, not an arbitrary valid account.
+    let Ok(name) = std::ffi::CString::new(credentials.username.as_str()) else {
+        return false;
+    };
+    let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut result = std::ptr::null_mut();
+    let mut storage = vec![0; 65536];
+    if unsafe {
+        libc::getpwnam_r(
+            name.as_ptr(),
+            &mut entry,
+            storage.as_mut_ptr(),
+            storage.len(),
+            &mut result,
+        )
+    } != 0
+        || result.is_null()
+        || entry.pw_uid != unsafe { libc::geteuid() }
+    {
+        return false;
+    }
+    let conversation = pam_client::conv_mock::Conversation::with_credentials(
+        &credentials.username,
+        &credentials.password,
+    );
+    let Ok(mut client) =
+        pam_client::Context::new("login", Some(&credentials.username), conversation)
+    else {
+        return false;
+    };
+    client
+        .authenticate(pam_client::Flag::DISALLOW_NULL_AUTHTOK)
+        .is_ok()
+        && client.acct_mgmt(pam_client::Flag::NONE).is_ok()
+        && client.user().is_ok_and(|name| name == credentials.username)
+}
+#[cfg(windows)]
+pub(super) fn verify(credentials: &SystemCredentials) -> bool {
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, HANDLE},
+        Security::*,
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+    if !credentials.valid() {
+        return false;
+    }
+    struct Token(HANDLE);
+    impl Drop for Token {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+    fn user(token: HANDLE) -> Option<Vec<usize>> {
+        let mut needed = 0;
+        unsafe {
+            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+        }
+        let mut buffer = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
+        (unsafe {
+            GetTokenInformation(
+                token,
+                TokenUser,
+                buffer.as_mut_ptr().cast(),
+                needed,
+                &mut needed,
+            )
+        } != 0)
+            .then_some(buffer)
+    }
+    let (domain, name) = credentials
+        .username
+        .split_once('\\')
+        .unwrap_or((".", &credentials.username));
+    let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
+    let name = wide(name);
+    let domain = wide(domain);
+    let mut password = wide(&credentials.password);
+    let mut authenticated = std::ptr::null_mut();
+    let ok = unsafe {
+        LogonUserW(
+            name.as_ptr(),
+            domain.as_ptr(),
+            password.as_ptr(),
+            LOGON32_LOGON_NETWORK,
+            LOGON32_PROVIDER_DEFAULT,
+            &mut authenticated,
+        )
+    };
+    password.fill(0);
+    if ok == 0 {
+        return false;
+    }
+    let authenticated = Token(authenticated);
+    let mut current = std::ptr::null_mut();
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut current) } == 0 {
+        return false;
+    }
+    let current = Token(current);
+    let (Some(a), Some(b)) = (user(authenticated.0), user(current.0)) else {
+        return false;
+    };
+    unsafe {
+        EqualSid(
+            (*(a.as_ptr().cast::<TOKEN_USER>())).User.Sid,
+            (*(b.as_ptr().cast::<TOKEN_USER>())).User.Sid,
+        ) != 0
+    }
 }
 
 #[cfg(target_os = "macos")]

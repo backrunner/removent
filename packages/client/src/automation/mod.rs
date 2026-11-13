@@ -8,6 +8,10 @@ use removent_net::{PinState, make_client_endpoint};
 use removent_proto::{AuthenticationMode, Caps};
 use std::time::Duration;
 
+#[cfg(unix)]
+pub mod broker;
+#[cfg(windows)]
+#[path = "broker_windows.rs"]
 pub mod broker;
 pub struct Connection {
     session: Option<ClientSession>,

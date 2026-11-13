@@ -136,10 +136,11 @@ impl Engine {
         client_live || self.host_sessions.load(Ordering::SeqCst) > 0
     }
 
-    pub fn background_update_status(&self) -> Option<removent_updater::agent::AgentStatus> {
+    pub fn background_update_status(&self) -> Option<removent_updater::AgentStatus> {
         self.background_update.lock().unwrap().clone()
     }
 
+    #[cfg(target_os = "macos")]
     pub(super) fn spawn_background_update_status(&self) {
         let paths = self.paths.clone();
         let shared = self.background_update.clone();

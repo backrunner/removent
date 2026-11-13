@@ -6,6 +6,7 @@ members = [
     "apps/mcp",
     "apps/daemon",
     "apps/desktop",
+    "apps/tray-portable",
     "apps/relay",
     "packages/client",
     "packages/automation",

@@ -186,7 +186,7 @@ WSS 容器冷启动时，仅允许凭据唯一定位一个离线房间的控制�
 Hello{ app_version, device_name, os_ver, caps[] }
 HelloAck{ proto_version, caps[], resume_token_opt }
 ```
-- `feature_bits`：按位声明扩展（bit0=file-transfer, bit1=two-way-audio, bit2=hdr, bit5=software AV1 temporal units, bit9=dynamic video profiles, bit10=automation RPC, …）。
+- `feature_bits`：按位声明扩展（bit0=file-transfer, bit1=two-way-audio, bit2=hdr, bit5=software AV1 temporal units, bit9=dynamic video profiles, bit10=automation RPC, bit11=automation handover, bit12=H264_ONLY（无 HEVC 解码器）, …）。
 - 版本不兼容且无公共特性集 → `Error{code=VersionMismatch}` 后关流。
 
 ### 5.2 会话协商
@@ -224,7 +224,7 @@ offset  size  字段
 - 参数集变化必须随关键帧内联，客户端据此热重置解码器（支持运行中改分辨率）。
 - host 对完整 BGRA 内容做逐字节去重：首帧、像素有变化的帧和强制关键帧必须编码发送；与最近一次**成功写入**完全相同的普通帧直接跳过。去重状态在编码失败、SendGate 丢帧或分辨率重建时不提交/重置，避免把接收端落后的画面误认为已同步。关键帧请求可复用最近缓存帧，因此静止画面也能立即恢复。
 - H.264/HEVC 的帧间预测已经压缩了未变化区域；RVP/1 不额外传 raw pixel delta，避免破坏硬件编码器的全局预测和 QUIC 有序流语义。
-- `codec_id=0x03` 使用完整 rav1e temporal-unit OBU payload。关键 temporal unit 自带 sequence-header OBU，不发送单独 `av1C`；只有双方握手都声明 `feature_bits::SOFTWARE_AV1` 时才可选择。AV1 默认 opt-in（`REMOVENT_VIDEO_CODEC=av1`）；协商前的软件 encoder 探测失败时回退 HEVC，已建立会话中的不可恢复编码错误按 `InternalError` 结束会话。
+- `codec_id=0x03` 使用完整 rav1e temporal-unit OBU payload。关键 temporal unit 自带 sequence-header OBU，不发送单独 `av1C`；只有双方握手都声明 `feature_bits::SOFTWARE_AV1` 时才可选择。AV1 默认 opt-in（`REMOVENT_VIDEO_CODEC=av1`）；协商前的软件 encoder 探测失败时回退平台默认编码（Apple 默认为 HEVC，非 Apple 或对端声明 H264_ONLY 时为 H.264），已建立会话中的不可恢复编码错误按 `InternalError` 结束会话。
 
 ### 6.2 音频包（uni-stream）
 

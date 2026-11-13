@@ -1,4 +1,7 @@
+#[cfg(target_vendor = "apple")]
 use apple_cf::cv::CVPixelBuffer;
+#[cfg(not(target_vendor = "apple"))]
+pub use removent_media_codec::NativePixelBuffer as CVPixelBuffer;
 use std::borrow::Cow;
 
 /// Native buffers retain the capture pool's pixel buffer until encoding ends.
@@ -15,6 +18,9 @@ impl CapturedPixels {
             Self::Bgra(bytes) => {
                 width.checked_mul(height).and_then(|n| n.checked_mul(4)) == Some(bytes.len())
             }
+            #[cfg(not(target_vendor = "apple"))]
+            Self::Native(buffer) => match *buffer {},
+            #[cfg(target_vendor = "apple")]
             Self::Native(buffer) => {
                 buffer.width() == width
                     && buffer.height() == height
@@ -34,36 +40,41 @@ impl CapturedPixels {
             };
             return Ok(Cow::Borrowed(bytes));
         };
-        let guard = buffer
-            .lock_read_only()
-            .map_err(|e| format!("capture readback lock: {e}"))?;
-        let stride = guard.bytes_per_row();
-        let row_bytes = width * 4;
-        let base = guard.base_address();
-        if base.is_null() || stride < row_bytes {
-            return Err("invalid capture readback stride".into());
-        }
-        let mut bytes = vec![0; row_bytes * height];
-        // SAFETY: a retained, read-locked BGRA pixel buffer owns each source
-        // row; the destination is exclusively owned and sized above.
-        unsafe {
-            if stride == row_bytes {
-                std::ptr::copy_nonoverlapping(base, bytes.as_mut_ptr(), bytes.len());
-            } else {
-                for row in 0..height {
-                    std::ptr::copy_nonoverlapping(
-                        base.add(row * stride),
-                        bytes.as_mut_ptr().add(row * row_bytes),
-                        row_bytes,
-                    );
+        #[cfg(not(target_vendor = "apple"))]
+        match *buffer {}
+        #[cfg(target_vendor = "apple")]
+        {
+            let guard = buffer
+                .lock_read_only()
+                .map_err(|e| format!("capture readback lock: {e}"))?;
+            let stride = guard.bytes_per_row();
+            let row_bytes = width * 4;
+            let base = guard.base_address();
+            if base.is_null() || stride < row_bytes {
+                return Err("invalid capture readback stride".into());
+            }
+            let mut bytes = vec![0; row_bytes * height];
+            // SAFETY: a retained, read-locked BGRA pixel buffer owns each source
+            // row; the destination is exclusively owned and sized above.
+            unsafe {
+                if stride == row_bytes {
+                    std::ptr::copy_nonoverlapping(base, bytes.as_mut_ptr(), bytes.len());
+                } else {
+                    for row in 0..height {
+                        std::ptr::copy_nonoverlapping(
+                            base.add(row * stride),
+                            bytes.as_mut_ptr().add(row * row_bytes),
+                            row_bytes,
+                        );
+                    }
                 }
             }
+            Ok(Cow::Owned(bytes))
         }
-        Ok(Cow::Owned(bytes))
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_vendor = "apple"))]
 mod tests {
     use super::*;
 

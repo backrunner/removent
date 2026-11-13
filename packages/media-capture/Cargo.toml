@@ -7,12 +7,19 @@ license.workspace = true
 [dependencies]
 removent-core = { workspace = true }
 removent-proto = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
 screencapturekit = "11.0"
 core-media-rs = "0.3"
 core-foundation = "0.10"
 core-video-rs = "0.3"
-tokio = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
 block = "0.1"
 apple-cf = "0.11"
+
+[target.'cfg(not(target_vendor = "apple"))'.dependencies]
+xcap = "0.9"
+image = "0.25"
+removent-media-codec.workspace = true

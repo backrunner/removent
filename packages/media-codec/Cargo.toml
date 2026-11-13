@@ -6,12 +6,18 @@ license.workspace = true
 
 [dependencies]
 removent-proto = { workspace = true }
-videotoolbox = "0.21"
-apple-cf = "0.11"
 opus = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-metal = "0.33"
-objc = "0.2"
 rav1e = { version = "0.8.1", default-features = false, features = ["asm", "threading"] }
 rusty_av1d = { version = "1.2.0", default-features = false, features = ["bitdepth_8"] }
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+videotoolbox = "0.21"
+apple-cf = "0.11"
+metal = "0.33"
+objc = "0.2"
+
+[target.'cfg(not(target_vendor = "apple"))'.dependencies]
+openh264 = "0.9"
+image = { version = "0.25", default-features = false }

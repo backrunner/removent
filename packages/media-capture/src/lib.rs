@@ -2,12 +2,30 @@
 
 pub mod health;
 mod pixels;
+#[cfg(target_vendor = "apple")]
 pub mod quartz;
+#[cfg(target_vendor = "apple")]
 pub mod sck;
+#[cfg(target_vendor = "apple")]
 pub mod sck_ffi;
 
 pub use pixels::CapturedPixels;
 
+#[cfg(not(target_vendor = "apple"))]
+#[path = "portable.rs"]
+pub mod sck;
+#[cfg(not(target_vendor = "apple"))]
+pub mod quartz {
+    pub type QuartzCapture = super::sck::SckCapture;
+    pub fn start(
+        id: u32,
+        w: u32,
+        h: u32,
+        video: removent_core::latest::Sender<super::CapturedVideoFrame>,
+    ) -> Result<QuartzCapture, String> {
+        super::sck::start_remote_capture(id, w, h, video, None, 30).map_err(|e| e.to_string())
+    }
+}
 pub use sck::{AudioFrame, CaptureError, SckCapture, start_display_capture};
 
 /// Dimensions travel with pixels, including the first frame after display changes.

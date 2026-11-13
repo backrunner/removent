@@ -1,6 +1,7 @@
 //! Wake and retain the capture display for an admitted remote session.
 
 use crate::session::HostError;
+#[cfg(target_os = "macos")]
 use core_foundation::{
     base::TCFType,
     string::{CFString, CFStringRef},
@@ -8,6 +9,7 @@ use core_foundation::{
 use removent_proto::DisplayInfo;
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
 #[link(name = "IOKit", kind = "framework")]
 unsafe extern "C" {
     fn IOPMAssertionDeclareUserActivity(name: CFStringRef, user_type: u32, id: *mut u32) -> i32;
@@ -22,8 +24,10 @@ unsafe extern "C" {
 
 /// Power assertions are scoped to the session, including failed negotiation,
 /// peer disconnect, and cancellation. This never changes Energy Saver settings.
+#[cfg(target_os = "macos")]
 pub(super) struct DisplayAwake(Vec<u32>);
 
+#[cfg(target_os = "macos")]
 impl DisplayAwake {
     pub(super) fn new() -> Self {
         let name = CFString::new("Removent remote desktop capture");
@@ -57,6 +61,7 @@ impl DisplayAwake {
     }
 }
 
+#[cfg(target_os = "macos")]
 impl Drop for DisplayAwake {
     fn drop(&mut self) {
         for id in &self.0 {
@@ -155,5 +160,14 @@ mod tests {
     async fn absent_display_times_out_without_fabricating_id_one() {
         let result = wait_for_display_with(Vec::new, Duration::from_millis(20)).await;
         assert!(matches!(result, Err(HostError::Timeout(_))));
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) struct DisplayAwake;
+#[cfg(not(target_os = "macos"))]
+impl DisplayAwake {
+    pub(super) fn new() -> Self {
+        Self
     }
 }

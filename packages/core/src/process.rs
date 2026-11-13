@@ -1,5 +1,6 @@
 //! Time-bounded system commands used by service management and recovery.
 use anyhow::{Result, bail};
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::{
     io::Read,
@@ -12,6 +13,7 @@ pub fn run_bounded(command: &mut Command, timeout: Duration) -> Result<Output> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    #[cfg(unix)]
     unsafe {
         command.pre_exec(|| {
             if libc::setpgid(0, 0) == -1 {
@@ -24,9 +26,12 @@ pub fn run_bounded(command: &mut Command, timeout: Duration) -> Result<Output> {
     impl Drop for Child {
         fn drop(&mut self) {
             if self.0.try_wait().ok().flatten().is_none() {
+                #[cfg(unix)]
                 unsafe {
                     libc::kill(-(self.0.id() as i32), libc::SIGKILL);
                 }
+                #[cfg(windows)]
+                let _ = self.0.kill();
                 let _ = self.0.wait();
             }
         }
@@ -96,7 +101,7 @@ fn drain(mut stream: Box<dyn Read + Send>) -> std::io::Result<Vec<u8>> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     #[test]

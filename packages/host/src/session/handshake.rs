@@ -124,8 +124,12 @@ where
                     | removent_proto::feature_bits::AUTH_METHODS
                     | removent_proto::feature_bits::SYSTEM_ACCOUNT_AUTH
                     | removent_proto::feature_bits::DYNAMIC_VIDEO
-                    | removent_proto::feature_bits::AUTOMATION_HANDOVER
-                    | removent_proto::feature_bits::AUTOMATION,
+                    | if cfg!(target_os = "macos") {
+                        removent_proto::feature_bits::AUTOMATION_HANDOVER
+                            | removent_proto::feature_bits::AUTOMATION
+                    } else {
+                        0
+                    },
                 device_name: cfg.device_name.clone(),
                 // Honest resume verdict (§7.4): Some(true) only when the presented token
                 // validated; Some(false) tells the client to fall back to full

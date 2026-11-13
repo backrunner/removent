@@ -139,6 +139,7 @@ impl DaemonState {
         let mut settings = self.settings.lock().unwrap();
         let mut next = Settings::update(&self.paths, |s| s.host_enabled = on)?;
         if self.login_window {
+            #[cfg(target_os = "macos")]
             crate::login_window::restrict(&mut next);
         }
         self.apply_settings(&mut settings, next);
@@ -155,6 +156,7 @@ impl DaemonState {
             .validate()
             .map_err(removent_core::CoreError::Serialization)?;
         if self.login_window {
+            #[cfg(target_os = "macos")]
             crate::login_window::restrict(&mut next);
         }
         self.apply_settings(&mut current, next);

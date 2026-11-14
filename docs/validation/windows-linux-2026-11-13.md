@@ -45,6 +45,9 @@ lifecycle harness. They click the shell's actual icon, select native menu items,
 and click native dialog buttons. Xfce menu labels and enabled state are read from
 D-Bus, but selection uses keyboard input in the visible popup rather than invoking
 its exported callbacks. Windows uses Explorer icon bounds and actual pointer input.
+Each Linux tray scenario uses an isolated X11/D-Bus session, with the accessibility
+bridge enabled and its registry started before Xfce creates the embedded tray plugin.
+This prevents earlier GTK probes from affecting native control discovery.
 
 The harness covers duplicate tray startup, opening/restoring one real main window,
 reopening pairing dialogs, desktop-first approval, competing answers, default denial,

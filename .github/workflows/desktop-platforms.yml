@@ -78,12 +78,35 @@ jobs:
             target/release/removent-tray --smoke
             python3 scripts/qa/portable_app.py
             python3 scripts/qa/portable_credentials.py --app-tests
+          '
+      - name: Linux native tray interaction
+        timeout-minutes: 25
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
+        env:
+          GTK_MODULES: gail:atk-bridge
+          NO_AT_BRIDGE: '0'
+        run: |
+          xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash -e -c '
+            openbox > /tmp/openbox-tray.log 2>&1 &
             /usr/bin/python3 scripts/qa/linux_tray.py --soak-seconds 600 --evidence-dir target/qa-evidence/tray-en
+          '
+      - name: Linux dark native tray presentation
+        timeout-minutes: 5
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
+        env:
+          GTK_MODULES: gail:atk-bridge
+          NO_AT_BRIDGE: '0'
+        run: |
+          xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash -e -c '
+            openbox > /tmp/openbox-tray-dark.log 2>&1 &
             /usr/bin/python3 scripts/qa/linux_tray.py --presentation-only --locale ZhCn --theme dark --evidence-dir target/qa-evidence/tray-zh-dark
           '
       - name: Linux scaled native tray presentation
         timeout-minutes: 5
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
+        env:
+          GTK_MODULES: gail:atk-bridge
+          NO_AT_BRIDGE: '0'
         run: |
           xvfb-run -a -s '-screen 0 2560x1600x24 -dpi 192' dbus-run-session -- bash -e -c '
             openbox > /tmp/openbox-scaled.log 2>&1 &
@@ -92,6 +115,9 @@ jobs:
       - name: Linux logical monitor reactivation
         timeout-minutes: 5
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
+        env:
+          GTK_MODULES: gail:atk-bridge
+          NO_AT_BRIDGE: '0'
         run: |
           xvfb-run -a -s '-screen 0 2560x900x24 -noreset' dbus-run-session -- bash -e -c '
             xrandr --setmonitor LEFT 1280/338x900/238+0+0 screen

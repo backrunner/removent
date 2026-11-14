@@ -69,6 +69,9 @@ class LinuxDesktop:
     def __enter__(self):
         subprocess.run(["dbus-update-activation-environment", "XDG_CONFIG_HOME", "GTK_MODULES", "NO_AT_BRIDGE", "GDK_SCALE", "GTK_THEME"], env=self.env, check=True)
         self.bus = dbus.SessionBus()
+        # Start the accessibility registry before Xfce creates its embedded
+        # systray plugin. Otherwise its visible icon can have no AT-SPI node.
+        list(self.nodes())
         self.start_panel()
         return self
 

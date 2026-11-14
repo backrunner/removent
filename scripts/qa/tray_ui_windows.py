@@ -120,18 +120,44 @@ class WindowsDesktop:
     def click(self, label):
         # Start from the actual Explorer icon, including its overflow UI. No
         # synthetic tray callback or menu command is used.
-        rect = wait_for(self.icon_rect, "Explorer icon missing")
-        pointer(rect, "right")
-        time.sleep(0.25)
-        if not self.popup():
-            taskbar = Desktop(backend="uia").window(class_name="Shell_TrayWnd")
-            buttons = taskbar.descendants(control_type="Button")
-            overflow = next((b for b in buttons if "hidden icons" in b.window_text().lower()), None)
-            assert overflow is not None, [(b.window_text(), str(b.rectangle())) for b in buttons]
-            overflow.click_input()
+        observed = []
+        def open_menu():
+            if self.popup():
+                return self.popup()
+            rect = self.icon_rect()
+            if rect is None:
+                return None
+            pointer(rect, "right")
             time.sleep(0.25)
-            pointer(wait_for(self.icon_rect, "Overflow icon missing"), "right")
-        popup = wait_for(self.popup, "Tray icon pointer click did not open menu")
+            if self.popup():
+                return self.popup()
+            # Explorer may publish the icon rectangle while its notification
+            # area is still being constructed, or while the icon is hidden.
+            # Dismiss any taskbar menu before reading the actual chevron.
+            user.keybd_event(0x1B, 0, 0, 0)
+            user.keybd_event(0x1B, 0, 2, 0)
+            observed.clear()
+            for backend in ("uia", "win32"):
+                taskbar = Desktop(backend=backend).window(class_name="Shell_TrayWnd")
+                if not taskbar.exists(timeout=0.2):
+                    continue
+                for control in taskbar.descendants():
+                    name = control.window_text().lower()
+                    observed.append((backend, name, str(control.rectangle())))
+                    if ("hidden icons" in name or "notification chevron" in name) and control.is_visible():
+                        pointer(control.rectangle())
+                        time.sleep(0.25)
+                        rect = self.icon_rect()
+                        if rect is not None:
+                            pointer(rect, "right")
+                            time.sleep(0.25)
+                        return self.popup()
+            return None
+        try:
+            popup = wait_for(open_menu, "Tray icon pointer click did not open menu after Explorer became ready", 25)
+        except AssertionError:
+            self.log.write(f"Taskbar controls: {observed!r}\n")
+            raise
         menu = user.SendMessageW(popup, 0x1E1, 0, 0)
         def item():
             for index in range(user.GetMenuItemCount(menu)):

@@ -49,6 +49,8 @@ its exported callbacks. Windows uses Explorer icon bounds and actual pointer inp
 The harness covers duplicate tray startup, opening/restoring one real main window,
 reopening pairing dialogs, desktop-first approval, competing answers, default denial,
 explicit denial/approval, controller cancellation, and the real 30-second timeout.
+Opening, moving and restoring the main window also require visibly rendered content;
+window bounds and focus alone are not sufficient, and screenshots wait for paint.
 An accepted pinned QUIC session must keep delivering decoded desktop frames after
 the tray quits and after Explorer/Xfce restarts. A ten-minute CI soak records tray
 RSS, handles/file descriptors and threads. Killing the daemon must dismiss pending

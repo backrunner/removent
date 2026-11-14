@@ -14,6 +14,7 @@ import time
 import traceback
 
 import psutil
+from PIL import ImageGrab
 
 
 def wait_for(check, message, seconds=15):
@@ -24,6 +25,22 @@ def wait_for(check, message, seconds=15):
             return value
         time.sleep(0.1)
     raise AssertionError(message)
+
+
+def visible_app(ui, window, name):
+    """A mapped/focused window can still have an unpainted or lost surface."""
+    def rendered():
+        shot = ImageGrab.grab().convert("RGB")
+        left, top, right, bottom = ui.app_rect(window)
+        width, height = right - left, bottom - top
+        # Exclude the native frame and title bar, including resize artifacts.
+        content = shot.crop((left + width // 8, top + height // 4,
+                             right - width // 8, bottom - height // 8))
+        colors = content.getcolors(content.width * content.height)
+        low, high = content.convert("L").getextrema()
+        shot.save(ui.args.evidence_dir / f"{name}.png")
+        return colors and len(colors) > 30 and high - low > 50
+    wait_for(rendered, f"Desktop content was not visibly rendered: {name}", 25)
 
 
 class Stream:
@@ -180,10 +197,10 @@ def run(desktop_type):
                     passed("real icon clicks, sharing and repeatable native pairing dialogs")
                     ui.click(labels["open"])
                     window = wait_for(ui.app_window, "Tray failed to open the real desktop", 30)
-                    ui.snapshot("desktop-open")
+                    visible_app(ui, window, "desktop-open")
                     if args.second_monitor:
                         position = ui.move_to_secondary(window)
-                        ui.snapshot("desktop-secondary")
+                        visible_app(ui, window, "desktop-secondary")
                     ui.minimize(window)
                     ui.click(labels["open"])
                     wait_for(lambda: ui.app_active(window), "Existing desktop was not restored and activated")
@@ -191,8 +208,10 @@ def run(desktop_type):
                     if args.second_monitor:
                         wait_for(lambda: ui.app_position(window) == position,
                                  f"Reactivation did not restore the desktop position {position}", 5)
-                        ui.snapshot("desktop-secondary-restored")
+                        visible_app(ui, window, "desktop-secondary-restored")
                         passed("reactivation preserves the desktop position on a second logical monitor")
+                    else:
+                        visible_app(ui, window, "desktop-restored")
                     passed("open and reactivate a single real desktop window")
                     if args.presentation_only:
                         ui.close_app(window)

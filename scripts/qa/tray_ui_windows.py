@@ -186,6 +186,11 @@ class WindowsDesktop:
     def app_count(self):
         return len(self.app_windows())
 
+    def app_rect(self, hwnd):
+        rect = w.RECT()
+        assert user.GetWindowRect(hwnd, c.byref(rect))
+        return rect.left, rect.top, rect.right, rect.bottom
+
     def minimize(self, hwnd):
         user.ShowWindow(hwnd, 6)
         wait_for(lambda: user.IsIconic(hwnd), "Desktop did not minimize")

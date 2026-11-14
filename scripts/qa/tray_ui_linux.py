@@ -204,6 +204,11 @@ class LinuxDesktop:
         geometry = dict(line.split("=", 1) for line in xdo("getwindowgeometry", "--shell", window).stdout.splitlines())
         return int(geometry["X"]), int(geometry["Y"])
 
+    def app_rect(self, window):
+        geometry = dict(line.split("=", 1) for line in xdo("getwindowgeometry", "--shell", window).stdout.splitlines())
+        x, y, width, height = (int(geometry[key]) for key in ["X", "Y", "WIDTH", "HEIGHT"])
+        return x, y, x + width, y + height
+
     def move_to_secondary(self, window):
         result = subprocess.run(["xrandr", "--listmonitors"], capture_output=True, text=True, check=True)
         (self.args.evidence_dir / "monitors.txt").write_text(result.stdout)

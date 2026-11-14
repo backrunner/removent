@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Require a successful main push CI run for the exact checked-out release SHA."""
 import json
+import os
 import subprocess
 import time
 
@@ -22,7 +23,7 @@ def wait_for_workflow(sha, workflow):
                 if run['conclusion'] != 'success':
                     raise SystemExit('{} did not pass: {}'.format(workflow, run['databaseId']))
                 print('Verified {} run {} for {}'.format(workflow, run['databaseId'], sha), flush=True)
-                return
+                return run['databaseId']
         print('Waiting for {} on main for {}'.format(workflow, sha), flush=True)
         time.sleep(30)
     raise SystemExit('Timed out waiting for {}; release is blocked'.format(workflow))
@@ -30,8 +31,11 @@ def wait_for_workflow(sha, workflow):
 
 def main():
     sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-    for workflow in ('ci.yml', 'relay.yml'):
-        wait_for_workflow(sha, workflow)
+    for workflow in ('ci.yml', 'relay.yml', 'desktop-platforms.yml'):
+        run_id = wait_for_workflow(sha, workflow)
+        if workflow == 'desktop-platforms.yml' and os.environ.get('GITHUB_OUTPUT'):
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                output.write(f'desktop_run_id={run_id}\n')
 
 
 if __name__ == '__main__':

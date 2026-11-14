@@ -8593,7 +8593,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "removent-app"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8630,7 +8630,7 @@ dependencies = [
 
 [[package]]
 name = "removent-automation"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "core-foundation 0.10.1",
@@ -8653,7 +8653,7 @@ dependencies = [
 
 [[package]]
 name = "removent-cli"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "console",
@@ -8675,7 +8675,7 @@ dependencies = [
 
 [[package]]
 name = "removent-client"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "aes 0.9.3",
  "anyhow",
@@ -8724,7 +8724,7 @@ dependencies = [
 
 [[package]]
 name = "removent-core"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "der 0.8.2",
@@ -8753,7 +8753,7 @@ dependencies = [
 
 [[package]]
 name = "removent-daemon"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "core-foundation 0.10.1",
@@ -8773,7 +8773,7 @@ dependencies = [
 
 [[package]]
 name = "removent-host"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "apple-cf",
@@ -8805,7 +8805,7 @@ dependencies = [
 
 [[package]]
 name = "removent-input"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "arboard",
  "core-graphics 0.25.0",
@@ -8823,7 +8823,7 @@ dependencies = [
 
 [[package]]
 name = "removent-mcp"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "hex",
@@ -8845,7 +8845,7 @@ dependencies = [
 
 [[package]]
 name = "removent-media-capture"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "apple-cf",
  "block",
@@ -8865,7 +8865,7 @@ dependencies = [
 
 [[package]]
 name = "removent-media-codec"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "apple-cf",
  "image",
@@ -8883,7 +8883,7 @@ dependencies = [
 
 [[package]]
 name = "removent-mobile"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "hex",
@@ -8900,7 +8900,7 @@ dependencies = [
 
 [[package]]
 name = "removent-net"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "ed25519-dalek 2.2.0",
@@ -8930,7 +8930,7 @@ dependencies = [
 
 [[package]]
 name = "removent-proto"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "bitflags 2.13.2",
  "bytes",
@@ -8943,7 +8943,7 @@ dependencies = [
 
 [[package]]
 name = "removent-relay"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -8985,7 +8985,7 @@ dependencies = [
 
 [[package]]
 name = "removent-relay-transport"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -9019,7 +9019,7 @@ dependencies = [
 
 [[package]]
 name = "removent-tray"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "gtk",
@@ -9035,7 +9035,7 @@ dependencies = [
 
 [[package]]
 name = "removent-updater"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",

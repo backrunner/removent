@@ -44,6 +44,10 @@ Removent、VNC 和 RDP 的 Bonjour 发现可分别开启。发现仅使用服务
 
 ## 安装
 
+**Windows 和 Linux：** 从 0.2.0 起，[GitHub Releases](https://github.com/backrunner/removent/releases)
+提供 x86_64 便携包和 SHA-256 文件。参阅[运行要求和使用指南](docs/guides/windows-linux.md)。
+Windows 包未签名；Linux 被控端需要 X11 和 glibc 2.39+。这两个平台需要手动更新。
+
 **Mac 应用要求：** macOS 26 或更高版本，Apple Silicon。
 
 从 [GitHub Releases](https://github.com/backrunner/removent/releases) 下载 DMG，打开后选择

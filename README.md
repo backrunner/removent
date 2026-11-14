@@ -45,6 +45,11 @@ manually by address.
 
 ## Install
 
+**Windows and Linux:** From 0.2.0, x86_64 portable archives and SHA-256 files are
+available in [GitHub Releases](https://github.com/backrunner/removent/releases).
+See [requirements and setup](docs/guides/windows-linux.md). Windows builds are
+unsigned; Linux hosting requires X11 and glibc 2.39+. Updates are manual.
+
 **Mac app:** macOS 26 or later on Apple Silicon.
 
 Download the DMG from [GitHub Releases](https://github.com/backrunner/removent/releases).

@@ -1,6 +1,6 @@
 # Removent 发布指南
 
-首发版本：`0.1.2`，协议 v1，当前桌面 App 支持 Apple Silicon、macOS 26+；独立 relay 同时支持 Linux x86_64 / ARM64 和 macOS Universal。分发采用 Developer ID 签名、公证的 GitHub Releases；这不是 Mac App Store 提交流程。商店提交还需要独立评估沙盒、权限及审核要求，并使用商店更新渠道。
+首发版本：`0.1.2`，协议 v1。macOS App 支持 Apple Silicon、macOS 26+，采用 Developer ID 签名、公证的 GitHub Releases 分发；从 0.2.0 起也发布 Windows/Linux x86_64 便携包。独立 relay 支持 Linux x86_64 / ARM64 和 macOS Universal。这不是 Mac App Store 提交流程。商店提交还需要独立评估沙盒、权限及审核要求，并使用商店更新渠道。
 
 ```mermaid
 flowchart LR
@@ -74,6 +74,8 @@ bash scripts/release/publish_release.sh
 打包及发布验收逐一检查主程序、Desktop、CLI、独立更新器、RemoventHost、托盘和 CloudKit helper 的签名，要求各组件使用同一个 Developer ID 身份、固定的组件标识、hardened runtime 和安全时间戳。任何组件身份不一致都会阻止发布；外层 bundle 验签不能替代嵌套组件检查。
 
 CI 使用 `macos-26` arm64 runner、锁定的 Cargo.lock、串行测试、失败即停止。发布任务要求同一提交在 main 的 CI 和 Relay 两个工作流中完整通过检查、开发打包、官网构建及浏览器测试、跨平台 relay 和真实服务验收，再复用构建缓存进行签名构建；不会使用其他提交的检查结果。普通 CI 的 ZIP 明确标记 development/not-notarized，不能替代公开安装包。官网静态文件以 `Removent-website` artifact 保存，托管发布单独进行。
+
+从 0.2.0 起，发布还要求同一 main 提交的 Desktop platforms 工作流完整通过。Release 按其 run ID 下载 Windows/Linux x86_64 便携包，验证 SHA-256、BUILD.json 的版本及源码 SHA、可执行文件格式、Linux 执行权限和 Windows 运行库后，与 macOS 和 relay 一起发布。发布保留便携包原名 `Removent-windows-x86_64.zip`、`Removent-linux-x86_64.tar.gz` 及各自 `.sha256`，版本由不可变 tag 和包内 BUILD.json 标识。本机发布需先将同一提交的这四个文件放入 `dist/portable`。Windows 便携包没有代码签名，Linux 包不由发行版包管理器管理，均需要手动更新；macOS 的签名、公证及自动更新要求继续适用。运行依赖和功能范围见 [Windows/Linux 指南](windows-linux.md)。
 
 ## 自动更新
 

@@ -12,12 +12,19 @@ REMOTE_SHA=$(git ls-remote --tags origin "refs/tags/$TAG^{}" "refs/tags/$TAG" | 
 test "$REMOTE_SHA" = "$(git rev-parse HEAD)" || { echo 'error: push the matching tag before publishing' >&2; exit 1; }
 python3 scripts/release/verify_release.py
 python3 scripts/release/package_relay.py --version "$TAG" --verify
+python3 scripts/release/verify_portable.py
 python3 scripts/release/gen_relay_updates.py --version "$VERSION" --key "${UPDATE_SIGNING_KEY_FILE:-$HOME/.config/removent/update-signing-key.pem}"
 RELAY_ASSETS=()
 for RELAY_PLATFORM in linux-x86_64 linux-aarch64 macos-universal; do
     RELAY_ASSET="dist/relay/removent-relay-${TAG}-${RELAY_PLATFORM}.tar.gz"
     RELAY_ASSETS+=("$RELAY_ASSET" "$RELAY_ASSET.sha256" "dist/relay/relay-latest-${RELAY_PLATFORM}.json")
 done
+PORTABLE_ASSETS=(
+    dist/portable/Removent-windows-x86_64.zip
+    dist/portable/Removent-windows-x86_64.zip.sha256
+    dist/portable/Removent-linux-x86_64.tar.gz
+    dist/portable/Removent-linux-x86_64.tar.gz.sha256
+)
 RELEASE_FLAGS=(--latest)
 if [[ "$CHANNEL" == beta ]]; then
     RELEASE_FLAGS=(--prerelease --latest=false)
@@ -27,5 +34,6 @@ gh release create "$TAG" --repo backrunner/removent \
     "dist/Removent-${VERSION}-macos-arm64.zip" \
     dist/latest.json dist/SHA256SUMS \
     "${RELAY_ASSETS[@]}" \
+    "${PORTABLE_ASSETS[@]}" \
     --verify-tag --title "Removent $TAG" \
     --notes-file "docs/releases/${TAG}.md" "${RELEASE_FLAGS[@]}"

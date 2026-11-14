@@ -1,5 +1,10 @@
 # Windows and Linux desktop builds
 
+From 0.2.0, portable archives and SHA-256 files are available in
+[GitHub Releases](https://github.com/backrunner/removent/releases).
+Windows builds are unsigned and may show a publisher warning. Linux archives
+are not distribution-managed packages. Updates require manual replacement.
+
 Extract the complete archive to a writable installation directory. Run `removent`
 (`removent.exe` on Windows). The desktop launches the sibling `removentd` and
 `removent-tray` executables; keep all three together. Closing the main window

@@ -36,6 +36,9 @@ jobs:
           python-version: '3.12'
       - name: Desktop observation dependency
         run: python -m pip install Pillow
+      - name: Windows desktop observation dependencies
+        if: runner.os == 'Windows'
+        run: python -m pip install pywinauto psutil
       - name: Linux dependencies
         if: runner.os == 'Linux'
         run: sudo bash scripts/build/linux-deps.sh
@@ -56,7 +59,7 @@ jobs:
           }
       - name: Build desktop, host, tray and native probe
         id: native_build
-        run: cargo build --locked --release -p removent-app -p removent-daemon -p removent-tray -p removent-host -p removent-client --bins --example desktop_smoke --example ipc_smoke --example desktop_session_smoke --example credential_smoke
+        run: cargo build --locked --release -p removent-app -p removent-daemon -p removent-tray -p removent-host -p removent-client --bins --example desktop_smoke --example ipc_smoke --example desktop_session_smoke --example credential_smoke --example tray_probe --example tray_session
       - name: Daemon IPC and lifecycle
         shell: bash
         run: target/release/examples/ipc_smoke
@@ -65,7 +68,7 @@ jobs:
       - name: Build desktop credential tests
         run: cargo test --locked -p removent-app --bin removent --no-run
       - name: Linux native desktop acceptance
-        timeout-minutes: 10
+        timeout-minutes: 25
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
         run: |
           xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash -e -c '
@@ -75,7 +78,16 @@ jobs:
             target/release/removent-tray --smoke
             python3 scripts/qa/portable_app.py
             python3 scripts/qa/portable_credentials.py --app-tests
-            /usr/bin/python3 scripts/qa/linux_tray.py
+            /usr/bin/python3 scripts/qa/linux_tray.py --soak-seconds 600 --evidence-dir target/qa-evidence/tray-en
+            /usr/bin/python3 scripts/qa/linux_tray.py --presentation-only --locale ZhCn --theme dark --evidence-dir target/qa-evidence/tray-zh-dark
+          '
+      - name: Linux scaled native tray presentation
+        timeout-minutes: 5
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
+        run: |
+          xvfb-run -a -s '-screen 0 2560x1600x24 -dpi 192' dbus-run-session -- bash -e -c '
+            openbox > /tmp/openbox-scaled.log 2>&1 &
+            /usr/bin/python3 scripts/qa/linux_tray.py --presentation-only --locale ZhCn --theme light --scale 2 --evidence-dir target/qa-evidence/tray-zh-scale2
           '
       - name: Windows native capture and input
         timeout-minutes: 5
@@ -86,9 +98,13 @@ jobs:
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
         run: python scripts/qa/portable_desktop.py --probe desktop_session_smoke
       - name: Windows native tray interaction
-        timeout-minutes: 5
+        timeout-minutes: 25
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
-        run: python scripts/qa/windows_tray.py
+        run: |
+          python scripts/qa/windows_tray.py --soak-seconds 600 --evidence-dir target/qa-evidence/tray-en
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/qa/windows_tray.py --presentation-only --locale ZhCn --theme dark --evidence-dir target/qa-evidence/tray-zh-dark
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Windows visible desktop application
         timeout-minutes: 5
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
@@ -118,7 +134,7 @@ jobs:
           Expand-Archive -Path dist/Removent-windows-x86_64.zip -DestinationPath target/package-check
           python scripts/qa/portable_app.py --bin-dir target/package-check/Removent-windows-x86_64 --evidence-dir target/qa-evidence/package --require-local-runtime
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python scripts/qa/windows_tray.py --bin-dir target/package-check/Removent-windows-x86_64 --evidence-dir target/qa-evidence/package
+          python scripts/qa/windows_tray.py --presentation-only --bin-dir target/package-check/Removent-windows-x86_64 --evidence-dir target/qa-evidence/package/tray
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         if: always()

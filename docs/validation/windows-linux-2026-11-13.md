@@ -38,6 +38,28 @@ Each run attaches desktop/tray screenshots and logs to its exact commit. See
 results and downloadable packages. Earlier failures exposed a daemon fixture
 error and Windows append-only log-lock access; both have regression coverage.
 
+## Expanded tray acceptance
+
+`scripts/qa/windows_tray.py` and `scripts/qa/linux_tray.py` now share a real-daemon
+lifecycle harness. They click the shell's actual icon, select native menu items,
+and click native dialog buttons. Xfce menu labels and enabled state are read from
+D-Bus, but selection uses keyboard input in the visible popup rather than invoking
+its exported callbacks. Windows uses Explorer icon bounds and actual pointer input.
+
+The harness covers duplicate tray startup, opening/restoring one real main window,
+reopening pairing dialogs, desktop-first approval, competing answers, default denial,
+explicit denial/approval, controller cancellation, and the real 30-second timeout.
+An accepted pinned QUIC session must keep delivering decoded desktop frames after
+the tray quits and after Explorer/Xfce restarts. A ten-minute CI soak records tray
+RSS, handles/file descriptors and threads. Killing the daemon must dismiss pending
+prompts and recover sharing; a deliberate stop must survive watchdog polling and
+tray restart. Chinese dark presentation and Linux 2x presentation run separately.
+
+Screenshots, JSON results and daemon/desktop logs are retained in the workflow's
+`desktop-evidence-*` artifacts, including on failure. Passing compilation or only
+part of this harness does not establish that the whole lifecycle passed; use the
+exact PR head's checks and `results.json` when evaluating a development package.
+
 ## Boundaries
 
 The virtual desktop exercises the real capture/input APIs and real QUIC loopback

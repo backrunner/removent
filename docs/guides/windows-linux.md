@@ -6,6 +6,13 @@ Extract the complete archive to a writable installation directory. Run `removent
 leaves sharing available through the tray. The tray can open the main window,
 start or stop the service, toggle sharing, show a pairing invitation, and answer
 access requests. Quitting only the tray does not stop the host.
+Opening the desktop again restores its existing window for the same data directory.
+Access prompts default to rejection and expire after 30 seconds. The main desktop
+gets the first opportunity to answer; the tray presents an unanswered request after
+eight seconds when that desktop is open. Cancellation, an answer in another window,
+or losing the background service dismisses the tray prompt.
+After connecting to the background service, the tray restarts it if it crashes.
+An explicit service stop persists across tray restarts until you choose Start again.
 
 Windows archives include the Visual C++ runtime DLLs beside the executables;
 keep these files together as well. A separate runtime installation is not needed.

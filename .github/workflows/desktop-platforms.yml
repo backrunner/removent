@@ -89,6 +89,16 @@ jobs:
             openbox > /tmp/openbox-scaled.log 2>&1 &
             /usr/bin/python3 scripts/qa/linux_tray.py --presentation-only --locale ZhCn --theme light --scale 2 --evidence-dir target/qa-evidence/tray-zh-scale2
           '
+      - name: Linux logical monitor reactivation
+        timeout-minutes: 5
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
+        run: |
+          xvfb-run -a -s '-screen 0 2560x900x24 -noreset' dbus-run-session -- bash -e -c '
+            xrandr --setmonitor LEFT 1280/338x900/238+0+0 screen
+            xrandr --setmonitor RIGHT 1280/338x900/238+1280+0 none
+            openbox > /tmp/openbox-monitors.log 2>&1 &
+            /usr/bin/python3 scripts/qa/linux_tray.py --presentation-only --second-monitor --evidence-dir target/qa-evidence/tray-monitors
+          '
       - name: Windows native capture and input
         timeout-minutes: 5
         if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}

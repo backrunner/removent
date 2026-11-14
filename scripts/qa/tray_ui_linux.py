@@ -1,4 +1,4 @@
-"""Physical X11 pointer input with AT-SPI used only to locate native controls."""
+"""X11 pointer input with AT-SPI used only to locate native controls."""
 import os
 import re
 from pathlib import Path
@@ -35,10 +35,10 @@ def showing(node):
         return False
 
 
-def press(node):
+def press(node, scale):
     rect = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
     assert rect.width > 0 and rect.height > 0, (node.name, rect)
-    xdo("mousemove", rect.x + rect.width // 2, rect.y + rect.height // 2, "click", 1)
+    xdo("mousemove", (rect.x + rect.width // 2) * scale, (rect.y + rect.height // 2) * scale, "click", 1)
 
 
 class LinuxDesktop:
@@ -131,7 +131,9 @@ class LinuxDesktop:
             self.log.flush()
             raise
         rect = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
-        xdo("mousemove", rect.x + rect.width // 2, rect.y + rect.height // 2, "click", 3)
+        # GTK's AT-SPI screen coordinates are logical pixels under GDK_SCALE.
+        xdo("mousemove", (rect.x + rect.width // 2) * self.args.scale,
+            (rect.y + rect.height // 2) * self.args.scale, "click", 3)
         # Xfce's exported dbusmenu popup is not included in its AT-SPI tree.
         # Read labels/state only, then navigate the visible GTK menu with actual
         # keyboard input. Never invoke dbusmenu.Event or a widget callback.
@@ -174,7 +176,7 @@ class LinuxDesktop:
         buttons = [node for node in descendants(dialog) if node.getRole() == pyatspi.ROLE_PUSH_BUTTON and showing(node)]
         button = next((node for node in buttons if (node.name or "").replace("_", "") in expected), None)
         assert button is not None, [node.name for node in buttons]
-        press(button)
+        press(button, self.args.scale)
 
     def accept_default(self, title):
         window = xdo("search", "--onlyvisible", "--pid", self.pid,
@@ -183,13 +185,35 @@ class LinuxDesktop:
 
     def app_windows(self):
         value = xdo("search", "--onlyvisible", "--name", "^Removent$", check=False)
-        return value.stdout.strip().splitlines() if value.returncode == 0 else []
+        found = []
+        for window in value.stdout.strip().splitlines() if value.returncode == 0 else []:
+            result = xdo("getwindowgeometry", "--shell", window, check=False)
+            if result.returncode == 0:
+                geometry = dict(line.split("=", 1) for line in result.stdout.splitlines())
+                if int(geometry["WIDTH"]) > 500 and int(geometry["HEIGHT"]) > 400:
+                    found.append(window)
+        return found
 
     def app_window(self):
         return next(iter(self.app_windows()), None)
 
     def app_count(self):
         return len(self.app_windows())
+
+    def app_position(self, window):
+        geometry = dict(line.split("=", 1) for line in xdo("getwindowgeometry", "--shell", window).stdout.splitlines())
+        return int(geometry["X"]), int(geometry["Y"])
+
+    def move_to_secondary(self, window):
+        result = subprocess.run(["xrandr", "--listmonitors"], capture_output=True, text=True, check=True)
+        (self.args.evidence_dir / "monitors.txt").write_text(result.stdout)
+        monitors = re.findall(r"(\d+)/\d+x(\d+)/\d+\+(\d+)\+(\d+)", result.stdout)
+        assert len(monitors) == 2, result.stdout
+        x, y = map(int, monitors[1][2:])
+        xdo("windowsize", window, 1000, 680, "windowmove", window, x + 40, y + 40)
+        wait_for(lambda: self.app_position(window)[0] >= x, "Desktop did not move to the second monitor")
+        time.sleep(0.5)
+        return self.app_position(window)
 
     def minimize(self, window):
         xdo("windowminimize", "--sync", window)

@@ -53,7 +53,9 @@ An accepted pinned QUIC session must keep delivering decoded desktop frames afte
 the tray quits and after Explorer/Xfce restarts. A ten-minute CI soak records tray
 RSS, handles/file descriptors and threads. Killing the daemon must dismiss pending
 prompts and recover sharing; a deliberate stop must survive watchdog polling and
-tray restart. Chinese dark presentation and Linux 2x presentation run separately.
+tray restart. Chinese dark presentation, Linux 2x presentation, and restoring a
+window on the second of two logical RandR monitors run separately. Logical monitors
+do not validate physical monitor hotplug or mixed-DPI transitions.
 
 Screenshots, JSON results and daemon/desktop logs are retained in the workflow's
 `desktop-evidence-*` artifacts, including on failure. Passing compilation or only

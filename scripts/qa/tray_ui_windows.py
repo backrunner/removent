@@ -1,4 +1,4 @@
-"""Physical pointer operations on Explorer icons, native menus and dialog buttons."""
+"""OS pointer input on Explorer icons, native menus and dialog buttons."""
 import ctypes as c
 from ctypes import wintypes as w
 import os
@@ -27,11 +27,9 @@ for name, args in {
     "GetMenuStringW": [w.HMENU, w.UINT, w.LPWSTR, c.c_int, w.UINT],
     "GetMenuState": [w.HMENU, w.UINT, w.UINT],
     "GetMenuItemRect": [w.HWND, w.HMENU, w.UINT, c.POINTER(w.RECT)],
-    "GetDlgItem": [w.HWND, c.c_int],
 }.items():
     getattr(user, name).argtypes = args
 user.SendMessageW.restype = w.LPARAM
-user.GetDlgItem.restype = w.HWND
 user.GetForegroundWindow.restype = w.HWND
 
 
@@ -133,7 +131,7 @@ class WindowsDesktop:
             overflow.click_input()
             time.sleep(0.25)
             pointer(wait_for(self.icon_rect, "Overflow icon missing"), "right")
-        popup = wait_for(self.popup, "Physical tray icon click did not open menu")
+        popup = wait_for(self.popup, "Tray icon pointer click did not open menu")
         menu = user.SendMessageW(popup, 0x1E1, 0, 0)
         def item():
             for index in range(user.GetMenuItemCount(menu)):
@@ -154,11 +152,24 @@ class WindowsDesktop:
 
     def answer(self, title, allow):
         hwnd = wait_for(lambda: self.dialog(title), "Native dialog missing")
-        button = user.GetDlgItem(hwnd, 1 if allow is None else 6 if allow else 7)
-        assert button
-        rect = w.RECT()
-        assert user.GetWindowRect(button, c.byref(rect))
-        pointer(rect)
+        expected = {"ok", "确定"} if allow is None else {"yes", "是"} if allow else {"no", "否"}
+        observed = []
+        def button():
+            controls = Desktop(backend="uia").window(handle=hwnd).descendants(control_type="Button")
+            observed[:] = [(item.window_text(), item.element_info.automation_id) for item in controls]
+            for item in controls:
+                name = item.window_text().replace("&", "").split("(")[0].strip().lower()
+                if name in expected and item.is_visible() and item.is_enabled():
+                    return item
+            return None
+        try:
+            control = wait_for(button, "Native dialog button missing")
+        except AssertionError:
+            self.log.write(f"Dialog buttons: {observed!r}\n")
+            raise
+        # MessageBox return values are not a portable way to locate its child
+        # controls. Use UIA bounds, then exercise the actual pointer input path.
+        pointer(control.rectangle())
 
     def accept_default(self, title):
         hwnd = wait_for(lambda: self.dialog(title), "Native dialog missing")

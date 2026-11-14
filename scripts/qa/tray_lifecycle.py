@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 
 import psutil
 
@@ -73,7 +74,10 @@ def run(desktop_type):
     parser.add_argument("--theme", choices=["light", "dark"], default="light")
     parser.add_argument("--scale", type=int, choices=[1, 2], default=1)
     parser.add_argument("--presentation-only", action="store_true")
+    parser.add_argument("--second-monitor", action="store_true")
     args = parser.parse_args()
+    if args.second_monitor and os.name == "nt":
+        parser.error("--second-monitor requires the isolated Linux RandR fixture")
     args.evidence_dir.mkdir(parents=True, exist_ok=True)
     suffix = ".exe" if os.name == "nt" else ""
     binary = args.bin_dir.resolve() / ("removent-tray" + suffix)
@@ -126,10 +130,33 @@ def run(desktop_type):
                 ui.attach(process.pid)
                 wait_for(ui.registered, "Tray icon was not registered")
                 return process
-            def connect():
-                stream = Stream([str(session_binary), str(port)], env, log)
-                streams.append(stream)
-                return stream
+            def connect(watcher):
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    stream = Stream([str(session_binary), str(port)], env, log)
+                    streams.append(stream)
+                    while time.monotonic() < deadline:
+                        try:
+                            event = watcher.events.get(timeout=0.1)
+                            if event.get("type") == "admission_request":
+                                return stream, event
+                        except queue.Empty:
+                            pass
+                        try:
+                            event = stream.events.get_nowait()
+                        except queue.Empty:
+                            continue
+                        # A rejection reaches the client just before the host's
+                        # connection teardown releases its single-session slot.
+                        # Wait for that boundary, without retrying any denial or
+                        # masking a host that never releases the slot.
+                        assert event == {"event": "rejected", "reason": "rejected: Busy"}, event
+                        assert stream.process.wait(timeout=5) == 0
+                        log.write("Waiting for the previous host admission to finish teardown\n")
+                        log.flush()
+                        time.sleep(0.1)
+                        break
+                raise AssertionError("Host did not admit a new request within 10 seconds")
             try:
                 subprocess.run([str(session_binary), "prepare"], env=env, check=True,
                                stdout=log, stderr=log, timeout=15)
@@ -154,10 +181,18 @@ def run(desktop_type):
                     ui.click(labels["open"])
                     window = wait_for(ui.app_window, "Tray failed to open the real desktop", 30)
                     ui.snapshot("desktop-open")
+                    if args.second_monitor:
+                        position = ui.move_to_secondary(window)
+                        ui.snapshot("desktop-secondary")
                     ui.minimize(window)
                     ui.click(labels["open"])
                     wait_for(lambda: ui.app_active(window), "Existing desktop was not restored and activated")
                     assert ui.app_count() == 1, "Tray created duplicate desktop windows"
+                    if args.second_monitor:
+                        wait_for(lambda: ui.app_position(window) == position,
+                                 f"Reactivation did not restore the desktop position {position}", 5)
+                        ui.snapshot("desktop-secondary-restored")
+                        passed("reactivation preserves the desktop position on a second logical monitor")
                     passed("open and reactivate a single real desktop window")
                     if args.presentation_only:
                         ui.close_app(window)
@@ -166,8 +201,7 @@ def run(desktop_type):
                         watcher = Stream([str(probe), "watch"], env, log)
                         streams.append(watcher)
                         watcher.event(lambda e: e.get("type") == "status")
-                        pending = connect()
-                        request = watcher.event(lambda e: e.get("type") == "admission_request")
+                        pending, request = connect(watcher)
                         time.sleep(1)
                         assert not ui.dialog(labels["admit"]), "Tray duplicated the desktop's prompt immediately"
                         assert ipc({"type": "admission_reply", "request_id": request["request_id"], "allow": False})["type"] == "ok"
@@ -177,23 +211,20 @@ def run(desktop_type):
                         ui.close_app(window)
                         wait_for(lambda: not ui.app_window(), "Desktop did not close")
                         passed("desktop-first admission and resolution by another management client")
-                        pending = connect()
-                        watcher.event(lambda e: e.get("type") == "admission_request")
+                        pending, _ = connect(watcher)
                         wait_for(lambda: ui.dialog(labels["admit"]), "Default-answer prompt missing")
                         ui.accept_default(labels["admit"])
                         pending.event(lambda e: e.get("event") == "rejected")
                         wait_for(lambda: not ui.dialog(labels["admit"]), "Default-denied prompt remained visible")
                         passed("pressing Enter defaults to denying remote access")
-                        pending = connect()
-                        request = watcher.event(lambda e: e.get("type") == "admission_request")
+                        pending, request = connect(watcher)
                         wait_for(lambda: ui.dialog(labels["admit"]), "Competing-answer prompt missing")
                         assert ipc({"type": "admission_reply", "request_id": request["request_id"], "allow": False})["type"] == "ok"
                         pending.event(lambda e: e.get("event") == "rejected")
                         wait_for(lambda: not ui.dialog(labels["admit"]), "Another client's answer did not dismiss the prompt")
                         passed("another management client's answer dismisses an already visible prompt")
                         for decision in (False, True):
-                            pending = connect()
-                            watcher.event(lambda e: e.get("type") == "admission_request")
+                            pending, _ = connect(watcher)
                             wait_for(lambda: ui.dialog(labels["admit"]), "Admission dialog missing")
                             ui.snapshot("admission-allow" if decision else "admission-deny")
                             ui.answer(labels["admit"], decision)
@@ -247,21 +278,18 @@ def run(desktop_type):
                             else:
                                 assert pending.process.wait(timeout=5) == 0
                         passed("native denial and approval produce the corresponding real remote-session result")
-                        pending = connect()
-                        watcher.event(lambda e: e.get("type") == "admission_request")
+                        pending, _ = connect(watcher)
                         wait_for(lambda: ui.dialog(labels["admit"]), "Cancellation prompt missing")
                         pending.send("cancel")
                         pending.event(lambda e: e.get("event") == "cancelled")
                         wait_for(lambda: not ui.dialog(labels["admit"]), "Remote cancellation did not close prompt", 5)
                         passed("controller cancellation dismisses the native approval dialog")
-                        pending = connect()
-                        watcher.event(lambda e: e.get("type") == "admission_request")
+                        pending, _ = connect(watcher)
                         wait_for(lambda: ui.dialog(labels["admit"]), "Timeout prompt missing")
                         pending.event(lambda e: e.get("event") == "rejected", seconds=35)
                         wait_for(lambda: not ui.dialog(labels["admit"]), "Expired approval dialog remained visible")
                         passed("real 30-second admission timeout rejects and dismisses the prompt")
-                        pending = connect()
-                        watcher.event(lambda e: e.get("type") == "admission_request")
+                        pending, _ = connect(watcher)
                         wait_for(lambda: ui.dialog(labels["admit"]), "Disconnect prompt missing")
                         psutil.Process(daemon_pid).kill()
                         wait_for(lambda: not ui.dialog(labels["admit"]), "Lost-daemon prompt remained visible")
@@ -277,6 +305,9 @@ def run(desktop_type):
                     assert (data / "run/service-stopped").exists()
                     time.sleep(6)
                     assert not health(), "Watchdog overrode an explicit stop"
+                    delayed = subprocess.run([str(args.bin_dir.resolve() / ("removentd" + suffix)), "--background"],
+                                             env=env, stdout=log, stderr=log, timeout=5)
+                    assert delayed.returncode == 0 and not health(), "Delayed background launch overrode an explicit stop"
                     ui.click(labels["quit"])
                     assert tray.wait(timeout=5) == 0
                     tray = start_tray(ui)
@@ -291,6 +322,9 @@ def run(desktop_type):
                     passed("manual stop survives watchdog and tray restart; explicit start remains usable")
                     completed = True
             finally:
+                if sys.exc_info()[0] is not None:
+                    traceback.print_exc(file=log)
+                    log.flush()
                 if stimulus and stimulus.poll() is None:
                     stimulus.terminate()
                     stimulus.wait(timeout=5)
@@ -311,4 +345,5 @@ def run(desktop_type):
                 if (data / "logs").is_dir():
                     shutil.copytree(data / "logs", args.evidence_dir / "logs", dirs_exist_ok=True)
                 (args.evidence_dir / "results.json").write_text(json.dumps({"completed": completed, "passed": results, "resources": resources,
-                    "locale": args.locale, "theme": args.theme, "scale": args.scale}, indent=2), encoding="utf-8")
+                    "locale": args.locale, "theme": args.theme, "scale": args.scale,
+                    "second_monitor": args.second_monitor}, indent=2), encoding="utf-8")

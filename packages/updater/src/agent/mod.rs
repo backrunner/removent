@@ -21,13 +21,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AgentStatus {
-    pub state: String,
-    pub version: Option<String>,
-    pub detail: String,
-    pub updated_at: u64,
-}
+pub use crate::AgentStatus;
 #[derive(Serialize, Deserialize)]
 struct Request {
     manifest: UpdateManifest,

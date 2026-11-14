@@ -5,12 +5,18 @@ async fn uhd_to_540p_and_back_decodes_without_replacing_the_stream() {
     dynamic_resolution(false).await;
 }
 
+#[cfg(target_os = "macos")]
 #[tokio::test]
 async fn native_uhd_to_540p_and_back_decodes_without_cpu_readback() {
     dynamic_resolution(true).await;
 }
 
 async fn dynamic_resolution(native: bool) {
+    let codec = if cfg!(target_os = "macos") {
+        CodecId::Hevc
+    } else {
+        CodecId::H264
+    };
     let (_endpoints, client, host) = quic_pair().await;
     let (tx, rx) = removent_core::latest::channel();
     let (_kf, kf_rx) = mpsc::channel(1);
@@ -27,7 +33,7 @@ async fn dynamic_resolution(native: bool) {
         rx,
         kf_rx,
         quality_rx,
-        CodecId::Hevc,
+        codec,
         3840,
         2160,
         100_000,
@@ -38,17 +44,24 @@ async fn dynamic_resolution(native: bool) {
         None,
         None,
     );
-    let mut frame = removent_media_capture::CapturedVideoFrame::new(
+    let frame = removent_media_capture::CapturedVideoFrame::new(
         [40, 90, 160, 255].repeat(3840 * 2160),
         3840,
         2160,
         1,
     );
-    if native {
-        frame.pixels = removent_media_capture::CapturedPixels::Native(
-            super::capture::native_buffer(3840, 2160, &frame.pixels.bgra(3840, 2160).unwrap()),
-        );
-    }
+    #[cfg(target_os = "macos")]
+    let frame = {
+        let mut frame = frame;
+        if native {
+            frame.pixels = removent_media_capture::CapturedPixels::Native(
+                super::capture::native_buffer(3840, 2160, &frame.pixels.bgra(3840, 2160).unwrap()),
+            );
+        }
+        frame
+    };
+    #[cfg(not(target_os = "macos"))]
+    assert!(!native);
     tx.send(frame).unwrap();
     let mut stream = client.accept_media_stream().await.unwrap();
     let mut previous_pts = 0;
@@ -65,10 +78,10 @@ async fn dynamic_resolution(native: bool) {
         assert!(header.pts_us > previous_pts);
         previous_pts = header.pts_us;
         let decoder = removent_media_codec::VideoDecoder::new(
-            CodecId::Hevc,
+            codec,
             w as usize,
             h as usize,
-            &removent_media_codec::extract_param_sets(&payload, true),
+            &removent_media_codec::extract_param_sets(&payload, codec == CodecId::Hevc),
         )
         .unwrap();
         decoder.decode_annexb(&payload, header.pts_us).unwrap();

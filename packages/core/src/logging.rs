@@ -3,7 +3,8 @@
 use crate::paths::DataPaths;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
-use std::os::unix::{fs::OpenOptionsExt, fs::PermissionsExt, io::AsRawFd};
+#[cfg(unix)]
+use std::os::unix::{fs::OpenOptionsExt, fs::PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tracing::field::{Field, Visit};
@@ -139,16 +140,22 @@ impl<'writer> FormatFields<'writer> for SafeFields {
 
 fn private_dir(path: &Path) -> io::Result<()> {
     fs::create_dir_all(path)?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    Ok(())
 }
 
 fn private_file(path: &Path) -> io::Result<File> {
-    let file = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
+    let mut options = OpenOptions::new();
+    options.append(true).create(true);
+    // Windows byte-range locks require read or write access, not append-only.
+    // The same helper opens the log's inter-process lock descriptor.
+    #[cfg(windows)]
+    options.read(true);
+    #[cfg(unix)]
+    options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    let file = options.open(path)?;
+    #[cfg(unix)]
     file.set_permissions(fs::Permissions::from_mode(0o600))?;
     Ok(file)
 }
@@ -156,16 +163,8 @@ fn private_file(path: &Path) -> io::Result<File> {
 /// A fresh descriptor per acquisition also serializes independent threads in one process.
 fn lock_file(path: &Path) -> io::Result<File> {
     let file = private_file(path)?;
-    loop {
-        // SAFETY: file owns a valid descriptor and remains alive for the lock's lifetime.
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
-            return Ok(file);
-        }
-        let error = io::Error::last_os_error();
-        if error.kind() != io::ErrorKind::Interrupted {
-            return Err(error);
-        }
-    }
+    file.lock()?;
+    Ok(file)
 }
 
 struct RollingLog {
@@ -469,10 +468,12 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().starts_with("panic-"))
             .collect::<Vec<_>>();
         assert_eq!(reports.len(), MAX_PANIC_REPORTS);
+        #[cfg(unix)]
         assert_eq!(
             fs::metadata(&panics).unwrap().permissions().mode() & 0o777,
             0o700
         );
+        #[cfg(unix)]
         for report in reports {
             assert_eq!(
                 report.metadata().unwrap().permissions().mode() & 0o777,

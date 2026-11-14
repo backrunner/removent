@@ -1,4 +1,5 @@
 //! Removent app entry: GPUI interface + tokio engine bridge.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod assets;
 mod audio;
@@ -33,7 +34,17 @@ fn main() -> Result<()> {
 
 fn run(paths: DataPaths) -> Result<()> {
     let started = std::time::Instant::now();
-    let smoke = std::env::args().any(|arg| arg == "--update-smoke");
+    let visible_smoke = std::env::args().any(|arg| arg == "--desktop-smoke");
+    let smoke = visible_smoke || std::env::args().any(|arg| arg == "--update-smoke");
+    #[cfg(any(windows, target_os = "linux"))]
+    let instance = if smoke {
+        None
+    } else {
+        match removent_core::desktop_instance::DesktopInstance::claim(&paths)? {
+            Some(instance) => Some(instance),
+            None => return Ok(()),
+        }
+    };
     // Main-window lifetime is an idle-update boundary. Closing it leaves the
     // host running and releases this lease for the independent installer.
     let _activity = removent_core::update_gate::ActivityLease::acquire(&paths)?;
@@ -96,26 +107,88 @@ fn run(paths: DataPaths) -> Result<()> {
             cx.bind_keys([
                 KeyBinding::new("tab", ConnectionTab, Some("ConnectionDialog")),
                 KeyBinding::new("shift-tab", ConnectionTabPrev, Some("ConnectionDialog")),
-                KeyBinding::new("ctrl-cmd-escape", ViewerEscape, Some("Viewer")),
-                KeyBinding::new("ctrl-cmd-f", ViewerToggleFullscreen, Some("Viewer")),
-                KeyBinding::new("ctrl-cmd-i", ViewerToggleInfo, Some("Viewer")),
+                KeyBinding::new(
+                    if cfg!(target_os = "macos") {
+                        "ctrl-cmd-escape"
+                    } else {
+                        "ctrl-alt-escape"
+                    },
+                    ViewerEscape,
+                    Some("Viewer"),
+                ),
+                KeyBinding::new(
+                    if cfg!(target_os = "macos") {
+                        "ctrl-cmd-f"
+                    } else {
+                        "ctrl-alt-f"
+                    },
+                    ViewerToggleFullscreen,
+                    Some("Viewer"),
+                ),
+                KeyBinding::new(
+                    if cfg!(target_os = "macos") {
+                        "ctrl-cmd-i"
+                    } else {
+                        "ctrl-alt-i"
+                    },
+                    ViewerToggleInfo,
+                    Some("Viewer"),
+                ),
                 KeyBinding::new("escape", HomeEscape, Some("Home")),
-                KeyBinding::new("cmd-,", HomeSettings, Some("Home")),
-                KeyBinding::new("cmd-l", HomeConnect, Some("Home")),
-                KeyBinding::new("cmd-f", HomeSearch, Some("Home")),
+                KeyBinding::new(
+                    if cfg!(target_os = "macos") {
+                        "cmd-,"
+                    } else {
+                        "ctrl-,"
+                    },
+                    HomeSettings,
+                    Some("Home"),
+                ),
+                KeyBinding::new(
+                    if cfg!(target_os = "macos") {
+                        "cmd-l"
+                    } else {
+                        "ctrl-l"
+                    },
+                    HomeConnect,
+                    Some("Home"),
+                ),
+                KeyBinding::new(
+                    if cfg!(target_os = "macos") {
+                        "cmd-f"
+                    } else {
+                        "ctrl-f"
+                    },
+                    HomeSearch,
+                    Some("Home"),
+                ),
             ]);
 
+            // Keep caption controls and the footer on small desktop displays.
+            let window_size = cx.primary_display().map_or(
+                gpui::size(gpui::px(1040.), gpui::px(700.)),
+                |display| {
+                    let screen = display.bounds().size;
+                    gpui::size(
+                        (screen.width - gpui::px(48.)).clamp(gpui::px(860.), gpui::px(1040.)),
+                        (screen.height - gpui::px(112.)).clamp(gpui::px(600.), gpui::px(700.)),
+                    )
+                },
+            );
             let home_window = cx
                 .open_window(
                     gpui::WindowOptions {
-                        focus: !smoke,
-                        show: !smoke,
+                        focus: !smoke || visible_smoke,
+                        show: !smoke || visible_smoke,
                         window_bounds: Some(gpui::WindowBounds::Windowed(gpui::Bounds::centered(
                             None,
-                            gpui::size(gpui::px(1040.), gpui::px(700.)),
+                            window_size,
                             cx,
                         ))),
-                        titlebar: Some(TitleBar::title_bar_options()),
+                        titlebar: Some(gpui::TitlebarOptions {
+                            title: Some("Removent".into()),
+                            ..TitleBar::title_bar_options()
+                        }),
                         window_min_size: Some(gpui::size(gpui::px(860.), gpui::px(600.))),
                         window_background: gpui::WindowBackgroundAppearance::Opaque,
                         ..Default::default()
@@ -157,6 +230,27 @@ fn run(paths: DataPaths) -> Result<()> {
                     },
                 )
                 .expect("open home window");
+            #[cfg(any(windows, target_os = "linux"))]
+            if let Some(instance) = instance {
+                cx.spawn(async move |cx| {
+                    loop {
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_millis(150))
+                            .await;
+                        if instance.take_activation()
+                            && home_window
+                                .update(cx, |_, window, cx| {
+                                    window.activate_window();
+                                    cx.activate(true);
+                                })
+                                .is_err()
+                        {
+                            break;
+                        }
+                    }
+                })
+                .detach();
+            }
             // The menu bar app and hosting daemon are independent processes.
             // Leaving this process alive without its home window makes Dock/tray
             // activation a no-op, because the event receiver belongs to that view.
@@ -185,6 +279,7 @@ fn run(paths: DataPaths) -> Result<()> {
 /// The tray is an independent process: the main app exiting does not take it down; only the
 /// user can quit it explicitly from the tray menu. Not launched again when already running.
 /// `REMOVENT_NO_TRAY=1` disables this (escape hatch for automated tests).
+#[cfg(target_os = "macos")]
 fn autostart_tray(paths: DataPaths) {
     if std::env::var("REMOVENT_NO_TRAY").as_deref() == Ok("1") {
         return;
@@ -281,4 +376,28 @@ fn autostart_tray(paths: DataPaths) {
         }
     }
     tracing::warn!("RemoventTray not found; tray not started");
+}
+
+#[cfg(not(target_os = "macos"))]
+fn autostart_tray(paths: DataPaths) {
+    if std::env::var("REMOVENT_NO_TRAY").as_deref() == Ok("1") {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(dir) = exe.parent() else { return };
+    let result = std::process::Command::new(
+        dir.join(format!("removent-tray{}", std::env::consts::EXE_SUFFIX)),
+    )
+    .env("REMOVENT_DATA_DIR", paths.root)
+    .spawn();
+    match result {
+        Ok(mut child) => {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+        Err(error) => tracing::warn!(%error,"Could not launch tray"),
+    }
 }

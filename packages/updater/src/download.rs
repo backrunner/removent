@@ -105,7 +105,7 @@ pub(super) fn download_and_stage(
     let _ = std::fs::remove_dir_all(&stage);
     std::fs::create_dir_all(&stage)
         .map_err(|e| t!("update.err.unpack", err = e.to_string()).to_string())?;
-    let unpacked = crate::agent::io::run(
+    let unpacked = removent_core::process::run_bounded(
         Command::new("/usr/bin/ditto")
             .arg("-x")
             .arg("-k")

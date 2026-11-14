@@ -2,6 +2,11 @@ mod clipboard;
 use super::*;
 use removent_net::{ControlCodec, PinState, make_client_endpoint, make_server_endpoint};
 use removent_proto::{AudioParams, CodecId, VideoParams};
+const TEST_CODEC: CodecId = if cfg!(target_os = "macos") {
+    CodecId::Hevc
+} else {
+    CodecId::H264
+};
 
 struct Peer {
     _endpoints: [removent_net::quinn::Endpoint; 2],
@@ -53,7 +58,7 @@ async fn fixture(
     source.next().await.unwrap().unwrap();
     let ack = NegotiateAck {
         video: VideoParams {
-            codec: CodecId::Hevc,
+            codec: TEST_CODEC,
             max_fps: 30,
             max_bitrate_kbps: 3000,
             initial_scale: 1.,
@@ -98,7 +103,7 @@ async fn missing_late_and_closed_audio_do_not_stop_video() {
         AudioPacketHeader, VideoFrameHeader, build_audio_packet, build_video_frame, video_flags,
     };
     let (mut session, peer) = fixture(Caps::all(), None).await;
-    let mut encoder = VideoEncoder::new(CodecId::Hevc, 64, 64, 3000, 30).unwrap();
+    let mut encoder = VideoEncoder::new(TEST_CODEC, 64, 64, 3000, 30).unwrap();
     let encoded = encoder
         .encode_bgra(&[40, 80, 160, 255].repeat(64 * 64), 0)
         .unwrap()
@@ -111,7 +116,7 @@ async fn missing_late_and_closed_audio_do_not_stop_video() {
                     frame_id: n,
                     pts_us: n as i64 * 100_000,
                     flags: video_flags::KEYFRAME,
-                    codec: CodecId::Hevc,
+                    codec: TEST_CODEC,
                     width: 64,
                     height: 64,
                     payload_len: encoded.data.len() as u32,
@@ -191,7 +196,7 @@ async fn missing_video_still_closes_media_at_the_startup_deadline() {
 async fn receiver_stall_drives_host_adaptation_and_keeps_input_live() {
     use removent_core::{AdaptationController, QualityPreset};
     use removent_media_codec::VideoEncoder;
-    use removent_proto::{CodecId, KeyKind, VideoFrameHeader, build_video_frame, video_flags};
+    use removent_proto::{KeyKind, VideoFrameHeader, build_video_frame, video_flags};
     let caps = Caps {
         audio: false,
         ..Caps::all()
@@ -288,7 +293,7 @@ async fn receiver_stall_drives_host_adaptation_and_keeps_input_live() {
             ..
         }
     ));
-    let mut encoder = VideoEncoder::new(CodecId::Hevc, 320, 240, 3000, 30).unwrap();
+    let mut encoder = VideoEncoder::new(TEST_CODEC, 320, 240, 3000, 30).unwrap();
     let raw = [40, 80, 160, 255].repeat(320 * 240);
     let frame = encoder.encode_bgra(&raw, 0).unwrap().remove(0);
     let packet = build_video_frame(
@@ -296,7 +301,7 @@ async fn receiver_stall_drives_host_adaptation_and_keeps_input_live() {
             frame_id: 0,
             pts_us: 0,
             flags: video_flags::KEYFRAME,
-            codec: CodecId::Hevc,
+            codec: TEST_CODEC,
             width: 320,
             height: 240,
             payload_len: frame.data.len() as u32,
@@ -315,7 +320,7 @@ async fn receiver_stall_drives_host_adaptation_and_keeps_input_live() {
         frames_rx,
         keyframes_rx,
         quality_rx,
-        CodecId::Hevc,
+        TEST_CODEC,
         320,
         240,
         3000,

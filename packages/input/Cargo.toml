@@ -7,9 +7,19 @@ license.workspace = true
 [dependencies]
 rand.workspace = true
 removent-proto = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
 core-graphics = { workspace = true, features = ["highsierra"] }
 objc2 = { workspace = true }
 objc2-foundation = { workspace = true }
 objc2-app-kit = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
+
+[target.'cfg(not(target_vendor = "apple"))'.dependencies]
+enigo = { version = "0.6", default-features = false, features = ["x11rb"] }
+xcap = "0.9"
+arboard = { version = "3", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }

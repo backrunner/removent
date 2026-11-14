@@ -99,14 +99,22 @@ impl Engine {
         if let Ok(exe) = std::env::current_exe()
             && let Some(dir) = exe.parent()
         {
-            let candidate = dir.join("removentd");
+            let candidate = dir.join(if cfg!(windows) {
+                "removentd.exe"
+            } else {
+                "removentd"
+            });
             if candidate.is_file() {
                 return Some(candidate);
             }
         }
         std::env::var_os("PATH").and_then(|paths| {
             std::env::split_paths(&paths).find_map(|dir| {
-                let candidate = dir.join("removentd");
+                let candidate = dir.join(if cfg!(windows) {
+                    "removentd.exe"
+                } else {
+                    "removentd"
+                });
                 candidate.is_file().then_some(candidate)
             })
         })
@@ -161,7 +169,12 @@ impl Engine {
                         // Take a snapshot right after connecting.
                         let _ = removent_core::ipc::write_msg(&mut w, &IpcRequest::Status).await;
                         let mut reader = removent_core::ipc::MessageReader::default();
-                        let mut tick = tokio::time::interval(std::time::Duration::from_secs(3));
+                        // The snapshot above is already the first poll. An
+                        // immediate interval tick sends a duplicate request and
+                        // can race the final response of a departing daemon.
+                        let period = std::time::Duration::from_secs(3);
+                        let mut tick =
+                            tokio::time::interval_at(tokio::time::Instant::now() + period, period);
                         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                         loop {
                             tokio::select! {

@@ -31,11 +31,18 @@ pub(super) fn preferred_video_codec(
     bitrate_kbps: u32,
     fps: u8,
 ) -> CodecId {
+    let fallback = if cfg!(not(target_vendor = "apple"))
+        || peer_features & removent_proto::feature_bits::H264_ONLY != 0
+    {
+        CodecId::H264
+    } else {
+        CodecId::Hevc
+    };
     let requested = std::env::var("REMOVENT_VIDEO_CODEC")
         .ok()
         .is_some_and(|v| v.eq_ignore_ascii_case("av1") || v.eq_ignore_ascii_case("software-av1"));
     if !requested || peer_features & removent_proto::feature_bits::SOFTWARE_AV1 == 0 {
-        return CodecId::Hevc;
+        return fallback;
     }
     let (w, h) = fit_capture_dims(display_w, display_h);
     if removent_media_codec::VideoEncoder::new(
@@ -50,6 +57,6 @@ pub(super) fn preferred_video_codec(
         CodecId::Av1
     } else {
         tracing::warn!("software AV1 probe failed; falling back to HEVC");
-        CodecId::Hevc
+        fallback
     }
 }

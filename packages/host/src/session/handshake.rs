@@ -124,8 +124,12 @@ where
                     | removent_proto::feature_bits::AUTH_METHODS
                     | removent_proto::feature_bits::SYSTEM_ACCOUNT_AUTH
                     | removent_proto::feature_bits::DYNAMIC_VIDEO
-                    | removent_proto::feature_bits::AUTOMATION_HANDOVER
-                    | removent_proto::feature_bits::AUTOMATION,
+                    | if cfg!(target_os = "macos") {
+                        removent_proto::feature_bits::AUTOMATION_HANDOVER
+                            | removent_proto::feature_bits::AUTOMATION
+                    } else {
+                        0
+                    },
                 device_name: cfg.device_name.clone(),
                 // Honest resume verdict (§7.4): Some(true) only when the presented token
                 // validated; Some(false) tells the client to fall back to full
@@ -351,9 +355,12 @@ where
             let short = peer_fp.chars().take(16).collect::<String>();
             // protocol.md §4.4: an admission prompt with no response within 30s is treated as a rejection.
             let prompt = (interactions.admission_prompt)(hello.hello.device_name.clone(), short);
-            let allowed = tokio::time::timeout(Duration::from_secs(30), prompt)
-                .await
-                .unwrap_or(false);
+            let allowed = tokio::select! {
+                // Drop the daemon's pending admission immediately, broadcasting
+                // resolution to every UI when the controller cancels.
+                _ = conn.inner().closed() => return Err(HostError::Rejected("controller disconnected during admission".into())),
+                result = tokio::time::timeout(Duration::from_secs(30), prompt) => result.unwrap_or(false),
+            };
             if !allowed {
                 sink.send(ControlMsg::SessionReject {
                     reason: removent_proto::RejectReason::Denied,

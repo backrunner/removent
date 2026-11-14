@@ -31,6 +31,13 @@ pub struct Executor {
 }
 
 impl Executor {
+    #[cfg(not(target_os = "macos"))]
+    pub fn native(_session: CancellationToken) -> Result<Self, Failure> {
+        Err(Failure::new(
+            "unsupported",
+            "Native Computer Use is not implemented on this platform",
+        ))
+    }
     /// At most one native worker per host process, including a stalled previous session.
     /// A cancelled native OS call cannot be killed safely; never accumulate threads.
     #[cfg(target_os = "macos")]

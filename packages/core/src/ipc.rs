@@ -6,7 +6,11 @@
 
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt};
+#[cfg(unix)]
 use tokio::net::UnixStream;
+#[cfg(windows)]
+#[path = "ipc_windows.rs"]
+pub mod windows;
 
 /// Protocol version (bump on incompatible changes).
 pub const IPC_VERSION: u32 = 1;
@@ -229,6 +233,7 @@ impl MessageReader {
 }
 
 /// Connect to the daemon's UDS (shared entry point for management clients).
+#[cfg(unix)]
 pub async fn connect(
     paths: &crate::paths::DataPaths,
 ) -> std::io::Result<(
@@ -281,9 +286,9 @@ mod tests {
 
     #[tokio::test]
     async fn json_lines_roundtrip() {
-        let (a, b) = UnixStream::pair().unwrap();
-        let (ar, mut aw) = a.into_split();
-        let (br, mut bw) = b.into_split();
+        let (a, b) = tokio::io::duplex(4096);
+        let (ar, mut aw) = tokio::io::split(a);
+        let (br, mut bw) = tokio::io::split(b);
         let mut ar = tokio::io::BufReader::new(ar);
         let mut br = tokio::io::BufReader::new(br);
 
@@ -336,10 +341,10 @@ mod tests {
 
     #[tokio::test]
     async fn blank_lines_are_skipped_not_eof() {
-        let (a, b) = UnixStream::pair().unwrap();
-        let (ar, _aw) = a.into_split();
+        let (a, b) = tokio::io::duplex(4096);
+        let (ar, _aw) = tokio::io::split(a);
         let mut ar = tokio::io::BufReader::new(ar);
-        let (_br, mut bw) = b.into_split();
+        let (_br, mut bw) = tokio::io::split(b);
 
         bw.write_all(b"\n  \n").await.unwrap();
         write_msg(&mut bw, &IpcResponse::Ok).await.unwrap();
@@ -349,10 +354,10 @@ mod tests {
 
     #[tokio::test]
     async fn oversized_line_is_rejected() {
-        let (a, b) = UnixStream::pair().unwrap();
-        let (ar, _aw) = a.into_split();
+        let (a, b) = tokio::io::duplex(4096);
+        let (ar, _aw) = tokio::io::split(a);
         let mut ar = tokio::io::BufReader::new(ar);
-        let (_br, mut bw) = b.into_split();
+        let (_br, mut bw) = tokio::io::split(b);
 
         // The payload far exceeds the socket buffer, so the write must be driven
         // concurrently with the read (writing first would deadlock).
@@ -389,4 +394,27 @@ fn permission_requests_remain_compatible_and_can_target_one_grant() {
         )
         .is_err()
     );
+}
+
+#[cfg(windows)]
+pub async fn connect(
+    paths: &crate::DataPaths,
+) -> std::io::Result<(
+    tokio::io::BufReader<tokio::io::ReadHalf<tokio::net::windows::named_pipe::NamedPipeClient>>,
+    tokio::io::WriteHalf<tokio::net::windows::named_pipe::NamedPipeClient>,
+)> {
+    let name = windows::pipe_name(paths);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match tokio::net::windows::named_pipe::ClientOptions::new().open(&name) {
+            Ok(stream) => {
+                let (r, w) = tokio::io::split(stream);
+                return Ok((tokio::io::BufReader::new(r), w));
+            }
+            Err(e) if e.raw_os_error() == Some(231) && tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await
+            }
+            Err(e) => return Err(e),
+        }
+    }
 }

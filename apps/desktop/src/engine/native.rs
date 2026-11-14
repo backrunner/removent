@@ -210,10 +210,10 @@ pub(super) async fn run_client(
     let submitted_auth = pending_auth.lock().unwrap().take();
     if let Some(submitted) = submitted_auth {
         let events = attempt.events.clone();
-        // A locked Keychain must not delay frame/audio forwarding.
+        // A locked credential store must not delay frame/audio forwarding.
         tokio::spawn(async move {
             if let Err(error) = submitted.commit(local_identity, peer_pin).await {
-                tracing::warn!(%error, "could not update native host credentials in Keychain");
+                tracing::warn!(%error, "could not update native host credentials in the system store");
                 let _ = events.send(UiEvent::Notice(t!("auth.keychain_save_failed").to_string()));
             }
         });

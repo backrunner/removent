@@ -1,11 +1,16 @@
-//! UDS IPC integration tests: status / set_enabled / admission reply and timeout.
+//! Native IPC integration tests: status / set_enabled / admission reply and timeout.
 
 use removent_core::ipc::{IpcEvent, IpcRequest, IpcResponse, connect, read_msg, write_msg};
 use removent_core::{DataPaths, Settings};
 use removent_daemon::{server, state::DaemonState};
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(unix)]
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
+#[cfg(windows)]
+type OwnedReadHalf = tokio::io::ReadHalf<tokio::net::windows::named_pipe::NamedPipeClient>;
+#[cfg(windows)]
+type OwnedWriteHalf = tokio::io::WriteHalf<tokio::net::windows::named_pipe::NamedPipeClient>;
 
 struct TestDaemon {
     state: Arc<DaemonState>,
@@ -48,13 +53,6 @@ async fn spawn_daemon_with(admission_timeout: Option<Duration>) -> TestDaemon {
             server::serve(st).await.unwrap();
         }
     });
-    // Wait for the socket to appear before connecting, avoiding a startup race.
-    for _ in 0..100 {
-        if paths.daemon_socket().exists() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
     TestDaemon {
         state,
         paths,
@@ -70,8 +68,13 @@ struct Client {
 
 impl Client {
     async fn connect(paths: &DataPaths) -> Self {
-        let (r, w) = connect(paths).await.unwrap();
-        Self { r, w }
+        for _ in 0..100 {
+            if let Ok((r, w)) = connect(paths).await {
+                return Self { r, w };
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("Native IPC server did not become available");
     }
 
     async fn request(&mut self, req: IpcRequest) -> IpcResponse {
@@ -267,6 +270,7 @@ async fn admission_reply_resolves() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn power_policy_applies_over_ipc_without_restarting_active_sharing() {
     let d = spawn_daemon_with(None).await;
     let mut host_changes = d.state.enabled_watch.subscribe();

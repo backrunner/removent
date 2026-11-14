@@ -175,10 +175,14 @@ impl ViewerView {
         if frame.width == 0 || frame.height == 0 {
             return;
         }
+        #[cfg(target_os = "macos")]
         use core_foundation::base::TCFType;
+        #[cfg(target_os = "macos")]
         let surface = frame.surface.map(|buffer| unsafe {
             core_video::pixel_buffer::CVPixelBuffer::wrap_under_get_rule(buffer.as_ptr().cast())
         });
+        #[cfg(not(target_os = "macos"))]
+        let surface: Option<()> = None;
         let next = if surface.is_none() {
             let Some(buf) = image::RgbaImage::from_raw(frame.width, frame.height, frame.data)
             else {
@@ -188,7 +192,10 @@ impl ViewerView {
         } else {
             None
         };
-        self.surface = surface;
+        #[cfg(target_os = "macos")]
+        {
+            self.surface = surface;
+        }
         self.surface_pts = frame.pts_us;
         {
             let epoch = self.recovery.connection_epoch();

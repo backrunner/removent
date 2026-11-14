@@ -105,7 +105,11 @@ pub async fn connect_session_with_confirmation(
             magic: removent_proto::MAGIC,
             proto_version: removent_proto::PROTO_VERSION,
             // Honest declaration: file-transfer/two-way-audio are both unimplemented.
-            feature_bits: removent_proto::feature_bits::SOFTWARE_AV1
+            feature_bits: (if cfg!(target_vendor = "apple") {
+                0
+            } else {
+                removent_proto::feature_bits::H264_ONLY
+            }) | removent_proto::feature_bits::SOFTWARE_AV1
                 | removent_proto::feature_bits::AUTH_METHODS
                 | removent_proto::feature_bits::SYSTEM_ACCOUNT_AUTH
                 | removent_proto::feature_bits::DYNAMIC_VIDEO

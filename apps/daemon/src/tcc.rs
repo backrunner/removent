@@ -245,23 +245,19 @@ unsafe extern "C" {
     static kAXTrustedCheckOptionPrompt: core_foundation::string::CFStringRef;
 }
 
-// The daemon is macOS-only in practice; stubs keep the lib compiling elsewhere.
 #[cfg(not(target_os = "macos"))]
 pub fn screen_recording_granted() -> bool {
-    true
+    !removent_input::display_list().is_empty()
 }
-
 #[cfg(not(target_os = "macos"))]
 pub fn accessibility_granted() -> bool {
-    true
+    removent_input::accessibility_trusted()
 }
-
 #[cfg(not(target_os = "macos"))]
 pub fn request_screen_recording() -> bool {
-    true
+    screen_recording_granted()
 }
-
 #[cfg(not(target_os = "macos"))]
 pub fn request_accessibility() -> bool {
-    true
+    accessibility_granted()
 }

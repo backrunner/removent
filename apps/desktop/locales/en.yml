@@ -92,7 +92,7 @@ device.address: Address
 device.fingerprint: Fingerprint
 device.trust: Trust
 
-sharing.title: Share this Mac
+sharing.title: Share this computer
 sharing.enabled: Sharing on
 sharing.disabled: Sharing off
 device.copy_fingerprint: Copy fingerprint
@@ -129,7 +129,7 @@ settings.vnc_enabled: Enable VNC compatibility service
 settings.tcp_port: "TCP port"
 settings.vnc_password: VNC Password
 settings.vnc_password_placeholder: "Optional"
-settings.vnc_hint: This password is for sharing this Mac over VNC (port 5900). Enter remote credentials in Add connection.
+settings.vnc_hint: This password is for sharing this computer over VNC (port 5900). Enter remote credentials in Add connection.
 settings.data: Data
 settings.data_dir: Data Directory
 
@@ -245,7 +245,7 @@ viewer.close_window: Close Window
 
 device.section: "Devices"
 device.nearby: "LAN discovery"
-device.this_mac: "This Mac"
+device.this_mac: "This computer"
 saved.section: "Saved"
 action.more: "More actions"
 saved.empty: "No saved connections"
@@ -276,24 +276,24 @@ permissions.granted: "Allowed"
 settings.subtitle: "Make your connections and workspace feel at home."
 settings.sharing: "Sharing"
 settings.system: "System"
-settings.general_description: "Make this Mac easy to find on your network."
+settings.general_description: "Make this computer easy to find on your network."
 settings.device_name_hint: "The name other Removent devices see on your network."
 settings.language_hint: "Choose your interface language. Changes apply immediately."
 settings.appearance_description: "A comfortable view of your workspace."
 settings.color_mode: "Color mode"
-settings.theme_hint: "Follow macOS or choose a light or dark appearance."
+settings.theme_hint: "Follow the system or choose a light or dark appearance."
 settings.preview_hint: "Current appearance preview"
-settings.security_description: "Decide which devices can access this Mac."
+settings.security_description: "Decide which devices can access this computer."
 settings.admission_hint: "Applies to connections using the Removent protocol."
-settings.admission.ask_hint: "Approve each connection on this Mac. Recommended for most setups."
+settings.admission.ask_hint: "Approve each connection on this computer. Recommended for most setups."
 settings.admission.trusted_hint: "Paired devices connect automatically. New devices still need approval."
 settings.admission.deny_hint: "Reject all new Removent connection requests."
-settings.sharing_description: "Share this Mac with compatible clients."
-settings.sharing_scope_hint: "This switch controls the VNC server on this Mac. To connect to another Mac, choose VNC in Add Connection. Restart sharing after changing these settings."
+settings.sharing_description: "Share this computer with compatible clients."
+settings.sharing_scope_hint: "This switch controls the VNC server on this computer. To connect to another computer, choose VNC in Add Connection. Restart sharing after changing these settings."
 settings.system_description: "Local data, diagnostics, and application updates."
-settings.data_hint: "Settings, device identity, and diagnostic logs stay on this Mac."
+settings.data_hint: "Settings, device identity, and diagnostic logs stay on this computer."
 connection.subtitle: "Choose the connection available on your remote device."
-connection.removent_hint: "Fast Mac-to-Mac connections · Secure pairing"
+connection.removent_hint: "Fast desktop connections with secure pairing"
 connection.vnc_hint: "macOS Screen Sharing · Standard VNC servers"
 connection.rdp_hint: "Windows Remote Desktop · RDP servers"
 connection.credentials_hint: "For macOS Screen Sharing, enter the remote Mac’s short account name and login password. Leave the username empty only when using a dedicated VNC password."
@@ -325,7 +325,7 @@ connection.vnc_auth_failed: "VNC authentication failed. Check the remote Mac acc
 connection.vnc_refused: "The remote device refused the VNC connection. Check that Screen Sharing is enabled and the port is correct."
 
 settings.logs: "Local diagnostics"
-settings.logs_hint: "Connection stages, errors, and crash reports are saved on this Mac. Logs rotate automatically; passwords, pairing PINs, and clipboard contents are excluded."
+settings.logs_hint: "Connection stages, errors, and crash reports are saved on this computer. Logs rotate automatically; passwords, pairing PINs, and clipboard contents are excluded."
 settings.open_logs: "Open Logs Folder"
 settings.open_logs_failed: "Could not open the logs folder: %{err}"
 
@@ -347,7 +347,7 @@ connection.relay_quic: "VPS / QUIC"
 
 settings.discovery: LAN discovery
 settings.discovery_description: Choose which protocols appear in Nearby. Changes apply immediately.
-settings.discovery_hint: Uses Bonjour/mDNS service broadcasts without scanning ports. Unadvertised devices can be added manually. Sharing this Mac is controlled separately.
+settings.discovery_hint: Uses Bonjour/mDNS service broadcasts without scanning ports. Unadvertised devices can be added manually. Sharing this computer is controlled separately.
 device.protocol: Protocol
 
 device.discovery_off: LAN discovery is off
@@ -404,9 +404,9 @@ auth.connect: "Connect"
 auth.saved_credentials_failed: "The saved credentials were rejected. Open this connection's edit form, update the username or password, and try again."
 auth.credentials_destination_changed: "The destination changed. Reopen the edit form before updating credentials."
 auth.saved_credentials_invalid: "Enter valid credentials, or turn off credential storage before saving."
-auth.keychain_edit_failed: "Cannot read saved credentials. Check Keychain permissions and reopen the edit form."
+auth.keychain_edit_failed: "Cannot read saved credentials. Check the system credential store permissions and reopen the edit form."
 auth.keychain_loading: "Loading saved credentials…"
-auth.saved_credentials_hint: "Credentials are stored in Keychain and used automatically. Save to apply changes, or turn off the switch and save to remove them."
+auth.saved_credentials_hint: "Credentials are stored in the system credential store and used automatically. Save to apply changes, or turn off the switch and save to remove them."
 auth.otp_setup: "Authenticator setup"
 auth.otp_setup_hint: "Six-digit codes refresh every 30 seconds and can be used only once."
 auth.copy_secret: "Copy setup secret"
@@ -469,8 +469,8 @@ auth.otp_manual_label: "Enter a setup key"
 auth.otp_manual_hint: "If you cannot scan, copy the key into your authenticator."
 
 auth.system: "System account"
-auth.system_desc: "Enter the username and login password of the account running Removent on the remote Mac."
-auth.system_hint: "Verifies the account running the sharing service with macOS. Its login password is never stored in Removent."
+auth.system_desc: "Enter the username and login password of the account running Removent on the remote computer."
+auth.system_hint: "Use the username and login password of the account running the sharing service. The remote operating system verifies it; the sharing service does not store the login password."
 auth.system_username: "System username"
 auth.system_password: "Login password"
 
@@ -480,9 +480,9 @@ connection.quality_standard: "Standard"
 connection.quality_high: "High (2K)"
 connection.quality_ultra: "Ultra (4K)"
 
-auth.remember_credentials: "Remember credentials in Keychain"
-auth.keychain_read_failed: "Cannot read Keychain. Enter your credentials again."
-auth.keychain_save_failed: "Connected, but could not update Keychain credentials. Check Keychain access."
+auth.remember_credentials: "Remember credentials in the system credential store"
+auth.keychain_read_failed: "Cannot read the system credential store. Enter your credentials again."
+auth.keychain_save_failed: "Connected, but could not update saved credentials. Check access to the system credential store."
 connection.native_unreachable: "Cannot reach Removent at %{address}. Enable Removent sharing on the host and check UDP port %{port}."
 
 update.err.installing: An update is being installed. Try connecting again shortly.
@@ -491,3 +491,7 @@ update.auto_install: Install updates automatically
 update.auto_install_hint: When automatic checks are enabled, updates install after you close the main window and connections end. Updates requiring administrator approval or new permissions wait for you.
 
 update.background_attention: "Background update needs attention. Open Software Update or resolve the issue below:"
+permissions.portable_capture: Screen capture
+permissions.portable_input: Remote input
+permissions.unavailable: Unavailable
+permissions.desktop_session_hint: Run the background service in your signed-in desktop session. Linux hosting requires X11.

@@ -1,0 +1,189 @@
+name: Desktop platforms
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: desktop-platforms-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x86_64
+          - os: windows-2025
+            platform: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop-${{ matrix.platform }}
+          cache-on-failure: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Desktop observation dependency
+        run: python -m pip install Pillow
+      - name: Windows desktop observation dependencies
+        if: runner.os == 'Windows'
+        run: python -m pip install pywinauto psutil
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo bash scripts/build/linux-deps.sh
+      - name: Windows assembler
+        if: runner.os == 'Windows'
+        run: |
+          choco install nasm --no-progress -y
+          "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Windows concurrent storage regression
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        run: |
+          cargo test --locked -p removent-core --lib settings::tests -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          for ($attempt = 0; $attempt -lt 5; $attempt++) {
+            cargo test --locked -p removent-core --lib settings::tests::concurrent_writers_publish_complete_private_files -- --exact
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Build desktop, host, tray and native probe
+        id: native_build
+        run: cargo build --locked --release -p removent-app -p removent-daemon -p removent-tray -p removent-host -p removent-client --bins --example desktop_smoke --example ipc_smoke --example desktop_session_smoke --example credential_smoke --example tray_probe --example tray_session
+      - name: Daemon IPC and lifecycle
+        shell: bash
+        run: target/release/examples/ipc_smoke
+      - name: Daemon IPC admission regression
+        run: cargo test --locked -p removent-daemon --test ipc -- --test-threads=1
+      - name: Build desktop credential tests
+        run: cargo test --locked -p removent-app --bin removent --no-run
+      - name: Linux native desktop acceptance
+        timeout-minutes: 25
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
+        run: |
+          xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash -e -c '
+            openbox > /tmp/openbox.log 2>&1 &
+            python3 scripts/qa/portable_desktop.py
+            python3 scripts/qa/portable_desktop.py --probe desktop_session_smoke
+            target/release/removent-tray --smoke
+            python3 scripts/qa/portable_app.py
+            python3 scripts/qa/portable_credentials.py --app-tests
+          '
+      - name: Linux native tray interaction
+        timeout-minutes: 25
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
+        env:
+          GTK_MODULES: gail:atk-bridge
+          NO_AT_BRIDGE: '0'
+        run: |
+          xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash -e -c '
+            openbox > /tmp/openbox-tray.log 2>&1 &
+            /usr/bin/python3 scripts/qa/linux_tray.py --soak-seconds 600 --evidence-dir target/qa-evidence/tray-en
+          '
+      - name: Linux dark native tray presentation
+        timeout-minutes: 5
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
+        env:
+          GTK_MODULES: gail:atk-bridge
+          NO_AT_BRIDGE: '0'
+        run: |
+          xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash -e -c '
+            openbox > /tmp/openbox-tray-dark.log 2>&1 &
+            /usr/bin/python3 scripts/qa/linux_tray.py --presentation-only --locale ZhCn --theme dark --evidence-dir target/qa-evidence/tray-zh-dark
+          '
+      - name: Linux scaled native tray presentation
+        timeout-minutes: 5
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
+        env:
+          GTK_MODULES: gail:atk-bridge
+          NO_AT_BRIDGE: '0'
+        run: |
+          xvfb-run -a -s '-screen 0 2560x1600x24 -dpi 192' dbus-run-session -- bash -e -c '
+            openbox > /tmp/openbox-scaled.log 2>&1 &
+            /usr/bin/python3 scripts/qa/linux_tray.py --presentation-only --locale ZhCn --theme light --scale 2 --evidence-dir target/qa-evidence/tray-zh-scale2
+          '
+      - name: Linux logical monitor reactivation
+        timeout-minutes: 5
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
+        env:
+          GTK_MODULES: gail:atk-bridge
+          NO_AT_BRIDGE: '0'
+        run: |
+          xvfb-run -a -s '-screen 0 2560x900x24 -noreset' dbus-run-session -- bash -e -c '
+            xrandr --setmonitor LEFT 1280/338x900/238+0+0 screen
+            xrandr --setmonitor RIGHT 1280/338x900/238+1280+0 none
+            openbox > /tmp/openbox-monitors.log 2>&1 &
+            /usr/bin/python3 scripts/qa/linux_tray.py --presentation-only --second-monitor --evidence-dir target/qa-evidence/tray-monitors
+          '
+      - name: Windows native capture and input
+        timeout-minutes: 5
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
+        run: python scripts/qa/portable_desktop.py
+      - name: Windows native QUIC desktop session
+        timeout-minutes: 5
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
+        run: python scripts/qa/portable_desktop.py --probe desktop_session_smoke
+      - name: Windows native tray interaction
+        timeout-minutes: 25
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
+        run: |
+          python scripts/qa/windows_tray.py --soak-seconds 600 --evidence-dir target/qa-evidence/tray-en
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/qa/windows_tray.py --presentation-only --locale ZhCn --theme dark --evidence-dir target/qa-evidence/tray-zh-dark
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Windows visible desktop application
+        timeout-minutes: 5
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
+        run: python scripts/qa/portable_app.py
+      - name: Windows credential storage
+        timeout-minutes: 5
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
+        run: python scripts/qa/portable_credentials.py --app-tests
+      - name: Protocol, codec and session regression tests
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' }}
+        timeout-minutes: 30
+        run: cargo test --locked --no-fail-fast -p removent-proto -p removent-core -p removent-input -p removent-client -p removent-host -p removent-media-codec --lib -- --test-threads=1
+      - name: Windows native account authentication
+        timeout-minutes: 10
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Windows' }}
+        run: ./scripts/qa/windows_account.ps1
+      - name: Linux native account authentication
+        timeout-minutes: 10
+        if: ${{ !cancelled() && steps.native_build.conclusion == 'success' && runner.os == 'Linux' }}
+        run: python3 scripts/qa/linux_account.py
+      - name: Package desktop artifacts
+        run: python scripts/build/package_portable.py --target ${{ matrix.platform }}
+      - name: Windows extracted package acceptance
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        run: |
+          Expand-Archive -Path dist/Removent-windows-x86_64.zip -DestinationPath target/package-check
+          python scripts/qa/portable_app.py --bin-dir target/package-check/Removent-windows-x86_64 --evidence-dir target/qa-evidence/package --require-local-runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/qa/windows_tray.py --presentation-only --bin-dir target/package-check/Removent-windows-x86_64 --evidence-dir target/qa-evidence/package/tray
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-evidence-${{ matrix.platform }}
+          path: target/qa-evidence
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Removent-${{ matrix.platform }}
+          path: |
+            dist/Removent-${{ matrix.platform }}.zip
+            dist/Removent-${{ matrix.platform }}.tar.gz
+            dist/Removent-${{ matrix.platform }}.*.sha256
+          if-no-files-found: error
+          retention-days: 14

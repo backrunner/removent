@@ -1,6 +1,8 @@
 //! Accelerate resampling of tightly packed BGRA frames.
+#[cfg(target_vendor = "apple")]
 use std::ffi::c_void;
 
+#[cfg(target_vendor = "apple")]
 #[repr(C)]
 struct Buffer {
     data: *mut c_void,
@@ -9,6 +11,7 @@ struct Buffer {
     row_bytes: usize,
 }
 
+#[cfg(target_vendor = "apple")]
 #[link(name = "Accelerate", kind = "framework")]
 unsafe extern "C" {
     fn vImageScale_ARGB8888(
@@ -34,28 +37,43 @@ pub fn scale_bgra(
     {
         return Err("invalid BGRA dimensions".into());
     }
-    let len = size(target).ok_or("BGRA target size overflow")?;
-    let mut output = vec![0; len];
-    let src = Buffer {
-        data: input.as_ptr().cast_mut().cast(),
-        height: source.1,
-        width: source.0,
-        row_bytes: source.0 * 4,
-    };
-    let dst = Buffer {
-        data: output.as_mut_ptr().cast(),
-        height: target.1,
-        width: target.0,
-        row_bytes: target.0 * 4,
-    };
-    // SAFETY: dimensions/lengths were checked; input remains immutable and output
-    // exclusively borrowed until this synchronous operation returns. flags=0 is
-    // the low-latency resampling path; vImage allocates its own temporary storage.
-    let result = unsafe { vImageScale_ARGB8888(&src, &dst, std::ptr::null_mut(), 0) };
-    if result != 0 {
-        return Err(format!("vImage scaling failed: {result}"));
+    #[cfg(target_vendor = "apple")]
+    {
+        let len = size(target).ok_or("BGRA target size overflow")?;
+        let mut output = vec![0; len];
+        let src = Buffer {
+            data: input.as_ptr().cast_mut().cast(),
+            height: source.1,
+            width: source.0,
+            row_bytes: source.0 * 4,
+        };
+        let dst = Buffer {
+            data: output.as_mut_ptr().cast(),
+            height: target.1,
+            width: target.0,
+            row_bytes: target.0 * 4,
+        };
+        // SAFETY: dimensions/lengths were checked; input remains immutable and output
+        // exclusively borrowed until this synchronous operation returns. flags=0 is
+        // the low-latency resampling path; vImage allocates its own temporary storage.
+        let result = unsafe { vImageScale_ARGB8888(&src, &dst, std::ptr::null_mut(), 0) };
+        if result != 0 {
+            return Err(format!("vImage scaling failed: {result}"));
+        }
+        Ok(output)
     }
-    Ok(output)
+    #[cfg(not(target_vendor = "apple"))]
+    {
+        let image = image::RgbaImage::from_raw(source.0 as u32, source.1 as u32, input.to_vec())
+            .ok_or("Invalid image")?;
+        Ok(image::imageops::resize(
+            &image,
+            target.0 as u32,
+            target.1 as u32,
+            image::imageops::FilterType::Triangle,
+        )
+        .into_raw())
+    }
 }
 
 #[cfg(test)]

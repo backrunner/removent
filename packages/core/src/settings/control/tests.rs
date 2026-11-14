@@ -120,7 +120,9 @@ fn cli_edits_share_the_desktop_and_daemon_lock() {
     let settings = Settings::load_strict(&paths).unwrap();
     assert!(!settings.host_enabled);
     assert_eq!(settings.device_name, "Office Mac");
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)]
     assert_eq!(
         std::fs::metadata(paths.settings_file())
             .unwrap()

@@ -20,6 +20,7 @@ removent-client = { workspace = true }
 gpui = { package = "gpui-pre", version = "0.3" }
 gpui-platform = { package = "gpui-pre-platform", version = "0.3", features = ["font-kit", "wayland", "x11"] }
 gpui-component = "0.7"
+gpui-kit-assets = "0.7"
 image = "0.25"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 qrcode = { version = "0.14.1", default-features = false }
@@ -36,12 +37,14 @@ tokio = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
-core-foundation = { workspace = true }
 cpal = { workspace = true }
-core-video = { version = "0.5.2", features = ["metal"] }
 
 [dev-dependencies]
 tempfile = "3"
 gpui = { package = "gpui-pre", version = "0.3", features = ["test-support"] }
 gpui-platform = { package = "gpui-pre-platform", version = "0.3", features = ["test-support"] }
 removent-media-codec = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = { workspace = true }
+core-video = { version = "0.5.2", features = ["metal"] }

@@ -157,7 +157,7 @@ pub(super) fn publish(staged: &Path, root: &Path, plist: &Path, enabled: bool) -
     }
     let result = (|| -> Result<()> {
         if enabled {
-            crate::settings::atomic_write(&plist.to_path_buf(), definition(root).as_bytes())?;
+            crate::settings::atomic_write(plist, definition(root).as_bytes())?;
             fs::set_permissions(plist, fs::Permissions::from_mode(0o644))?;
             crate::service_intent::set_stopped(
                 &DataPaths {
@@ -177,7 +177,7 @@ pub(super) fn publish(staged: &Path, root: &Path, plist: &Path, enabled: bool) -
         }
         match previous_plist {
             Some(bytes) => {
-                crate::settings::atomic_write(&plist.to_path_buf(), &bytes)?;
+                crate::settings::atomic_write(plist, &bytes)?;
                 fs::set_permissions(plist, fs::Permissions::from_mode(0o644))?;
             }
             None if plist.is_file() => fs::remove_file(plist)?,

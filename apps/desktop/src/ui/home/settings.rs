@@ -28,6 +28,9 @@ impl HomeView {
             (6, "cloud", "sync.title"),
             (4, "info", "settings.system"),
         ] {
+            if index == 6 && !cfg!(target_os = "macos") {
+                continue;
+            }
             let item = Button::new(("settings-tab", index))
                 .icon(icon_16(name))
                 .label(t!(key).to_string())

@@ -4,7 +4,11 @@ use super::*;
 /// the remote application. Suppress both key-down and key-up forwarding.
 pub(super) fn is_viewer_shortcut(key: &Keystroke) -> bool {
     key.modifiers.control
-        && key.modifiers.platform
+        && if cfg!(target_os = "macos") {
+            key.modifiers.platform
+        } else {
+            key.modifiers.alt
+        }
         && matches!(key.key.as_str(), "escape" | "f" | "i")
 }
 

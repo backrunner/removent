@@ -1,10 +1,25 @@
-//! removent-input: keyboard/mouse injection, clipboard, and display geometry (macOS).
+//! Native keyboard/mouse injection, clipboard, and display geometry.
 
+#[cfg(target_vendor = "apple")]
+pub mod clipboard;
+#[cfg(not(target_vendor = "apple"))]
+#[path = "portable/clipboard.rs"]
 pub mod clipboard;
 pub mod display;
+#[cfg(target_vendor = "apple")]
 pub mod keyboard;
+#[cfg(not(target_vendor = "apple"))]
+#[path = "portable/keyboard.rs"]
+pub mod keyboard;
+#[cfg(target_vendor = "apple")]
 pub mod mouse;
+#[cfg(not(target_vendor = "apple"))]
+#[path = "portable/mouse.rs"]
+pub mod mouse;
+#[cfg(target_vendor = "apple")]
 pub mod origin;
+#[cfg(not(target_vendor = "apple"))]
+mod portable;
 
 pub use clipboard::{ClipboardError, change_count, read, read_text, write_text};
 pub use display::DisplayGeometry;
@@ -26,10 +41,17 @@ unsafe extern "C" {
     fn AXIsProcessTrustedWithOptions(options: *const std::ffi::c_void) -> bool;
 }
 
-// The crate is macOS-only in practice; the stub keeps it compiling elsewhere.
 #[cfg(not(target_os = "macos"))]
 pub fn accessibility_trusted() -> bool {
-    true
+    portable::available()
+}
+
+/// Call at host process startup, before display APIs or windows are created.
+/// Capture geometry must use physical pixels even on scaled Windows desktops.
+#[cfg(windows)]
+pub fn initialize_host_dpi() {
+    // An existing manifest/toolkit DPI policy cannot be changed and is retained.
+    let _ = enigo::set_dpi_awareness();
 }
 
 use removent_proto::DisplayInfo as ProtoDisplay;

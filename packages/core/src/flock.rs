@@ -3,6 +3,7 @@
 use crate::error::{CoreError, Result};
 use crate::paths::DataPaths;
 use std::fs::File;
+#[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 
 pub struct DataDirLock {
@@ -25,6 +26,7 @@ impl DataDirLock {
         Self::lock_at(lock_file, true)
     }
 
+    #[cfg(unix)]
     fn lock_at(lock_file: &std::path::Path, blocking: bool) -> Result<Self> {
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
         if let Some(parent) = lock_file.parent() {
@@ -66,6 +68,30 @@ impl DataDirLock {
         }
         Ok(Self { _file: file })
     }
+    #[cfg(windows)]
+    fn lock_at(path: &std::path::Path, blocking: bool) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path)?;
+        if !file.metadata()?.is_file() {
+            return Err(std::io::Error::other("Invalid lock file").into());
+        }
+        if blocking {
+            file.lock()?;
+        } else {
+            file.try_lock().map_err(|e| match e {
+                std::fs::TryLockError::WouldBlock => CoreError::AlreadyRunning,
+                std::fs::TryLockError::Error(e) => e.into(),
+            })?;
+        }
+        Ok(Self { _file: file })
+    }
 }
 
 #[cfg(test)]
@@ -88,6 +114,7 @@ mod tests {
         let _g2 = DataDirLock::acquire(&p).unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_fifo_cannot_hang_service_or_recovery_startup() {
         let dir = tempdir().unwrap();

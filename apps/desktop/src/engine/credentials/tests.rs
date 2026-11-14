@@ -1,8 +1,15 @@
 use super::*;
-#[cfg(target_os = "macos")]
 use std::time::Duration;
 
-#[cfg(target_os = "macos")]
+struct Cleanup(Vec<String>);
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        for key in &self.0 {
+            let _ = keychain::delete(key);
+        }
+    }
+}
+
 fn test_attempt() -> (ClientAttempt, std::sync::mpsc::Receiver<UiEvent>) {
     let (events, rx) = std::sync::mpsc::channel();
     (
@@ -18,7 +25,6 @@ fn test_attempt() -> (ClientAttempt, std::sync::mpsc::Receiver<UiEvent>) {
     )
 }
 
-#[cfg(target_os = "macos")]
 #[tokio::test]
 async fn saved_credentials_connect_without_a_dialog_and_are_not_rewritten() {
     for mode in [
@@ -83,14 +89,13 @@ async fn saved_credentials_connect_without_a_dialog_and_are_not_rewritten() {
             .commit_with(
                 "local",
                 [1; 32],
-                |_, _| panic!("reuse must not overwrite Keychain"),
-                |_| panic!("reuse must not delete Keychain"),
+                |_, _| panic!("reuse must not overwrite credential store"),
+                |_| panic!("reuse must not delete credential store"),
             )
             .unwrap();
     }
 }
 
-#[cfg(target_os = "macos")]
 #[tokio::test]
 async fn missing_invalid_untrusted_and_temporary_credentials_still_require_input() {
     for (mode, host, stored, should_load) in [
@@ -150,44 +155,93 @@ async fn missing_invalid_untrusted_and_temporary_credentials_still_require_input
     }
 }
 
-#[cfg(target_os = "macos")]
 #[tokio::test]
-async fn cancelling_a_keychain_read_never_opens_a_dialog_or_submits_a_credential() {
+async fn cancelling_a_credential_read_never_opens_a_dialog_or_submits_a_credential() {
+    for fail in [false, true] {
+        let (attempt, events) = test_attempt();
+        let pending: Pending = Default::default();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (reading, started) = tokio::sync::oneshot::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        prompt_with_loader(
+            attempt,
+            "local".into(),
+            Some([1; 32]),
+            pending.clone(),
+            move |_| {
+                reading.send(()).unwrap();
+                blocked.recv().unwrap();
+                if fail {
+                    Err(removent_core::CoreError::SecureStore("denied".into()))
+                } else {
+                    Ok(Some("test-password".into()))
+                }
+            },
+        )(AuthenticationMode::Password, tx);
+        started.await.unwrap();
+        drop(rx);
+        release.send(()).unwrap();
+        // The prompt task drops its event sender on completion.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                match events.try_recv() {
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
+                    Ok(_) => panic!("cancelled read must not publish UI events"),
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(pending.lock().unwrap().is_none());
+    }
+}
+
+#[tokio::test]
+async fn unavailable_store_prompts_without_leaking_backend_details() {
     let (attempt, events) = test_attempt();
     let pending: Pending = Default::default();
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let (reading, started) = tokio::sync::oneshot::channel();
-    let (release, blocked) = std::sync::mpsc::channel();
+    let (tx, mut rx) = tokio::sync::oneshot::channel();
     prompt_with_loader(
         attempt,
         "local".into(),
         Some([1; 32]),
         pending.clone(),
-        move |_| {
-            reading.send(()).unwrap();
-            blocked.recv().unwrap();
-            Ok(Some("test-password".into()))
+        |_| {
+            Err(removent_core::CoreError::SecureStore(
+                "private-backend-detail".into(),
+            ))
         },
-    )(AuthenticationMode::Password, tx);
-    started.await.unwrap();
-    drop(rx);
-    release.send(()).unwrap();
-    // The prompt task drops its event sender on completion.
-    tokio::time::timeout(Duration::from_secs(2), async {
+    )(AuthenticationMode::SystemAccount, tx);
+    let mut notice = false;
+    let answer = tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             match events.try_recv() {
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
-                Err(std::sync::mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
-                Ok(_) => panic!("cancelled read must not publish UI events"),
+                Ok(UiEvent::Notice(message)) => {
+                    assert_eq!(message, t!("auth.keychain_read_failed"));
+                    assert!(!message.contains("private-backend-detail"));
+                    notice = true;
+                }
+                Ok(UiEvent::ClientNeedsPin { mode, tx, .. }) => {
+                    assert_eq!(mode, AuthenticationMode::SystemAccount);
+                    break tx;
+                }
+                _ => tokio::task::yield_now().await,
             }
         }
     })
     .await
     .unwrap();
+    assert!(notice);
     assert!(pending.lock().unwrap().is_none());
+    assert_eq!(
+        rx.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    );
+    drop(answer);
+    assert!(rx.await.is_err());
 }
 
-#[cfg(target_os = "macos")]
 #[tokio::test]
 async fn prompting_keeps_credentials_in_memory_until_success_and_cancellation_discards_them() {
     for cancel in [false, true] {
@@ -248,17 +302,22 @@ async fn prompting_keeps_credentials_in_memory_until_success_and_cancellation_di
     }
 }
 
-#[cfg(target_os = "macos")]
 #[tokio::test]
-#[ignore = "uses an isolated synthetic item in the real login Keychain"]
-async fn native_credentials_round_trip_in_keychain() {
-    let local = format!("qa-{}", std::process::id());
+#[ignore = "uses an isolated synthetic item in the real OS credential store"]
+async fn native_credentials_round_trip_in_system_store() {
+    let directory = tempfile::tempdir().unwrap();
+    let local = format!(
+        "qa-{}",
+        directory.path().file_name().unwrap().to_string_lossy()
+    );
+    let mut cleanup = Cleanup(Vec::new());
     let host = [71; 32];
     for mode in [
         AuthenticationMode::Password,
         AuthenticationMode::SystemAccount,
     ] {
         let key = account(&local, host, mode).unwrap();
+        cleanup.0.push(key.clone());
         let value = if mode == AuthenticationMode::SystemAccount {
             removent_proto::SystemCredentials {
                 username: "qa-owner".into(),
@@ -298,6 +357,8 @@ async fn native_credentials_round_trip_in_keychain() {
 
 #[test]
 fn credentials_are_isolated_by_local_host_and_method_and_debug_is_redacted() {
+    assert!(can_remember(AuthenticationMode::SystemAccount));
+    assert!(can_remember(AuthenticationMode::Password));
     let key = account("local", [1; 32], AuthenticationMode::Password).unwrap();
     assert_ne!(
         Some(key.clone()),
@@ -368,18 +429,9 @@ fn successful_authentication_stores_or_forgets_only_the_selected_method() {
     }
 }
 
-#[cfg(target_os = "macos")]
 #[test]
-#[ignore = "uses isolated synthetic items in the real login Keychain"]
+#[ignore = "uses isolated synthetic items in the real OS credential store"]
 fn edited_credentials_are_used_on_the_next_connection_and_can_be_removed() {
-    struct Cleanup(Vec<String>);
-    impl Drop for Cleanup {
-        fn drop(&mut self) {
-            for key in &self.0 {
-                let _ = keychain::delete(key);
-            }
-        }
-    }
     let dir = tempfile::tempdir().unwrap();
     let paths = DataPaths {
         root: dir.path().into(),

@@ -3,7 +3,7 @@
 use crate::DataPaths;
 use std::fs::{File, OpenOptions};
 use std::io;
-use std::os::fd::AsRawFd;
+#[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
@@ -25,13 +25,16 @@ pub fn bundle_lock_file(bundle: &Path) -> io::Result<PathBuf> {
     let home = std::env::var_os("HOME").ok_or_else(|| io::Error::other("HOME unavailable"))?;
     let root = PathBuf::from(home).join("Library/Application Support/removent/update-locks");
     std::fs::create_dir_all(&root)?;
+    #[cfg(unix)]
     let meta = std::fs::symlink_metadata(&root)?;
+    #[cfg(unix)]
     if !meta.is_dir() || meta.uid() != unsafe { libc::geteuid() } || meta.mode() & 0o022 != 0 {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "Unsafe installation lock directory",
         ));
     }
+    #[cfg(unix)]
     std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700))?;
     let parent = bundle
         .parent()
@@ -74,15 +77,16 @@ fn acquire(paths: &DataPaths, exclusive: bool) -> io::Result<File> {
 }
 
 fn acquire_file(path: &Path, exclusive: bool) -> io::Result<File> {
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
+    let mut options = OpenOptions::new();
+    options.create(true).truncate(false).read(true).write(true);
+    #[cfg(unix)]
+    options
         .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
-        .open(path)?;
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK);
+    let file = options.open(path)?;
+    #[cfg(unix)]
     let meta = file.metadata()?;
+    #[cfg(unix)]
     if !meta.is_file()
         || meta.uid() != unsafe { libc::geteuid() }
         || meta.nlink() != 1
@@ -93,20 +97,16 @@ fn acquire_file(path: &Path, exclusive: bool) -> io::Result<File> {
             "unsafe update admission lock",
         ));
     }
-    loop {
-        let flags = if exclusive {
-            libc::LOCK_EX
-        } else {
-            libc::LOCK_SH
-        } | libc::LOCK_NB;
-        if unsafe { libc::flock(file.as_raw_fd(), flags) } == 0 {
-            return Ok(file);
-        }
-        let error = io::Error::last_os_error();
-        if error.kind() != io::ErrorKind::Interrupted {
-            return Err(error);
-        }
+    if exclusive {
+        file.try_lock()
+    } else {
+        file.try_lock_shared()
     }
+    .map_err(|e| match e {
+        std::fs::TryLockError::WouldBlock => io::Error::from(io::ErrorKind::WouldBlock),
+        std::fs::TryLockError::Error(e) => e,
+    })?;
+    Ok(file)
 }
 
 impl ActivityLease {
@@ -170,6 +170,7 @@ mod tests {
         drop(maintenance);
         assert!(ActivityLease::acquire(&paths).is_ok());
     }
+    #[cfg(unix)]
     #[test]
     fn a_symlink_cannot_redirect_the_gate() {
         let temp = tempfile::tempdir().unwrap();

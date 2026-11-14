@@ -1,9 +1,11 @@
 //! Display information and coordinate conversion.
 
+#[cfg(target_vendor = "apple")]
 use core_graphics::display::{CGDisplay, CGMainDisplayID};
 
 /// Zero refresh rate denotes a variable/unknown mode. Leave room for ProMotion
 /// instead of imposing a 60 Hz ceiling; capture still emits only real updates.
+#[cfg(target_vendor = "apple")]
 pub fn capture_frame_rate(display_id: u32) -> u8 {
     let rate = CGDisplay::new(display_id)
         .display_mode()
@@ -33,6 +35,7 @@ pub struct DisplayGeometry {
 }
 
 impl DisplayGeometry {
+    #[cfg(target_vendor = "apple")]
     pub fn from_cg(id: u32) -> Self {
         let d = CGDisplay::new(id);
         let b = d.bounds();
@@ -59,6 +62,7 @@ impl DisplayGeometry {
         }
     }
 
+    #[cfg(target_vendor = "apple")]
     pub fn all() -> Vec<Self> {
         CGDisplay::active_displays()
             .unwrap_or_default()
@@ -67,6 +71,7 @@ impl DisplayGeometry {
             .collect()
     }
 
+    #[cfg(target_vendor = "apple")]
     pub fn main() -> Option<Self> {
         let id = unsafe { CGMainDisplayID() };
         (id != 0).then(|| Self::from_cg(id))
@@ -111,6 +116,7 @@ impl DisplayGeometry {
     }
 }
 
+#[cfg(any(target_vendor = "apple", test))]
 fn pixel_geometry(
     mode_pixels: Option<(u64, u64)>,
     fallback: (u64, u64),
@@ -230,5 +236,46 @@ mod tests {
             g.capture_px_to_global_pt(200.0, 100.0, 2880.0, 1800.0),
             (1540.0, 0.0)
         );
+    }
+}
+
+#[cfg(not(target_vendor = "apple"))]
+pub fn capture_frame_rate(_id: u32) -> u8 {
+    30
+}
+#[cfg(not(target_vendor = "apple"))]
+impl DisplayGeometry {
+    pub fn all() -> Vec<Self> {
+        #[cfg(target_os = "linux")]
+        if std::env::var_os("DISPLAY").is_none() || std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            return vec![];
+        }
+
+        xcap::Monitor::all()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|m| {
+                let width = m.width().ok()?;
+                let height = m.height().ok()?;
+                Some(Self {
+                    id: m.id().ok()?,
+                    width_pt: width as f64,
+                    height_pt: height as f64,
+                    width_px: width as u64,
+                    height_px: height as u64,
+                    scale: 1.,
+                    origin_x: m.x().ok()? as f64,
+                    origin_y: m.y().ok()? as f64,
+                    is_main: m.is_primary().ok()?,
+                })
+            })
+            .collect()
+    }
+    pub fn main() -> Option<Self> {
+        let all = Self::all();
+        all.iter()
+            .find(|g| g.is_main)
+            .copied()
+            .or_else(|| all.first().copied())
     }
 }

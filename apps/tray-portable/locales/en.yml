@@ -1,0 +1,14 @@
+_version: 1
+tray.connecting: Connecting to background service
+tray.offline: Background service offline
+tray.open: Open Removent
+tray.share: Share this desktop
+tray.start: Start background service
+tray.pair: Show pairing code
+tray.stop: Stop background service
+tray.quit: Quit tray
+tray.sharing: Sharing
+tray.stopped: Sharing stopped
+tray.status: "%{state} (%{count})"
+dialog.pairing: Pairing code
+dialog.admission: Remote access request

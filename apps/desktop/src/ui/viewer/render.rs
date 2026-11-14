@@ -200,6 +200,7 @@ impl Render for ViewerView {
                     .min_w_0()
                     .overflow_hidden()
                     .child(match (self.surface.clone(), self.current.clone()) {
+                        #[cfg(target_os = "macos")]
                         (Some(surface), _) => {
                             let telemetry = self.presentation.clone();
                             let pts = self.surface_pts;
@@ -227,7 +228,7 @@ impl Render for ViewerView {
                             .size_full()
                             .into_any_element()
                         }
-                        (None, Some(image)) => gpui::canvas(
+                        (_, Some(image)) => gpui::canvas(
                             move |bounds, _, _| canvas_bounds.set(Some(bounds)),
                             move |bounds, _, window, _| {
                                 // Img's intrinsic aspect ratio can expand its percentage
@@ -249,7 +250,7 @@ impl Render for ViewerView {
                         .absolute()
                         .size_full()
                         .into_any_element(),
-                        (None, None) => div()
+                        (_, None) => div()
                             .size_full()
                             .flex()
                             .items_center()

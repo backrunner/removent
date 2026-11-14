@@ -1,4 +1,5 @@
 //! removentd entry point: data-dir lock + tokio runtime + IPC server + host manager + signal shutdown.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use anyhow::Context;
 use removent_core::{DataDirLock, DataPaths, Settings, identity, logging};
@@ -9,8 +10,13 @@ use std::sync::Arc;
 rust_i18n::i18n!("locales");
 
 fn main() -> anyhow::Result<()> {
+    #[cfg(windows)]
+    removent_input::initialize_host_dpi();
     let login_window = std::env::args().any(|arg| arg == "--login-window");
     let paths = if login_window {
+        #[cfg(not(target_os = "macos"))]
+        anyhow::bail!("Pre-login hosting is only available on macOS");
+        #[cfg(target_os = "macos")]
         removent_daemon::login_window::paths()?
     } else {
         DataPaths::resolve()
@@ -26,9 +32,9 @@ fn main() -> anyhow::Result<()> {
 
 fn start(paths: DataPaths) -> anyhow::Result<()> {
     paths.ensure_layout().context(t!("error.init_data_dir"))?;
-    if std::env::args().any(|arg| matches!(arg.as_str(), "--background" | "--login-window"))
-        && removent_core::service_intent::is_stopped(&paths)?
-    {
+    let background =
+        std::env::args().any(|arg| matches!(arg.as_str(), "--background" | "--login-window"));
+    if background && removent_core::service_intent::is_stopped(&paths)? {
         return Ok(());
     }
     let settings = Settings::load_strict(&paths)?;
@@ -48,6 +54,11 @@ fn start(paths: DataPaths) -> anyhow::Result<()> {
             std::process::exit(1);
         }
     };
+    // A previous host may have recorded an explicit stop and released its lock
+    // after our first check. A delayed watchdog child must not undo that stop.
+    if background && removent_core::service_intent::is_stopped(&paths)? {
+        return Ok(());
+    }
     // Lifetime receipt that this daemon participates in update admission. The
     // updater can distinguish an unresponsive new host from a legacy process
     // whose live sessions do not yet hold the shared maintenance gate.
@@ -61,10 +72,15 @@ fn start(paths: DataPaths) -> anyhow::Result<()> {
 }
 
 async fn run(paths: DataPaths) -> anyhow::Result<()> {
-    let mut settings = Settings::load_strict(&paths)?;
-    if std::env::args().any(|arg| arg == "--login-window") {
-        removent_daemon::login_window::restrict(&mut settings);
-    }
+    let settings = Settings::load_strict(&paths)?;
+    #[cfg(target_os = "macos")]
+    let settings = {
+        let mut settings = settings;
+        if std::env::args().any(|arg| arg == "--login-window") {
+            removent_daemon::login_window::restrict(&mut settings);
+        }
+        settings
+    };
     let identity = identity::load_or_create(&paths, &settings.device_name)
         .context(t!("error.load_identity"))?;
     let mut state = DaemonState::new(paths, settings, identity.short_fingerprint_hex());
@@ -80,17 +96,29 @@ async fn run(paths: DataPaths) -> anyhow::Result<()> {
     removent_daemon::tcc::request_initial_permissions(&state);
 
     // SIGTERM / SIGINT / IPC Shutdown all trigger graceful shutdown.
-    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        .context(t!("error.register_sigterm"))?;
+    let terminate = async {
+        #[cfg(unix)]
+        {
+            if let Ok(mut signal) =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            {
+                signal.recv().await;
+            }
+        }
+        #[cfg(windows)]
+        std::future::pending::<()>().await;
+    };
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {},
-        _ = sigterm.recv() => {},
+        _ = terminate => {},
         _ = state.shutdown.cancelled() => {},
         result = &mut ipc => {
+            let expected = state.shutdown.is_cancelled();
             state.power.lock().unwrap().set_enabled(false);
             state.shutdown.cancel();
             let _ = mgr.await;
             result.context("IPC task failed")??;
+            if expected { return Ok(()); }
             anyhow::bail!("IPC server stopped unexpectedly");
         },
     }

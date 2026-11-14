@@ -60,6 +60,8 @@ impl CodecId {
 }
 
 pub mod feature_bits {
+    /// Decoder accepts H264/AV1 but not HEVC; hosts must choose H264 by default.
+    pub const H264_ONLY: u64 = 1 << 12;
     /// Authenticated, separately authorized Computer Use RPC streams.
     pub const AUTOMATION: u64 = 1 << 10;
     pub const AUTOMATION_HANDOVER: u64 = 1 << 11;

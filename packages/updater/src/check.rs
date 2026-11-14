@@ -8,6 +8,12 @@ pub fn run_check(
     shared: Arc<Mutex<UpdateShared>>,
     events: std::sync::mpsc::Sender<UiEvent>,
 ) {
+    if cfg!(not(target_os = "macos")) {
+        if manual {
+            set_status(&shared,&events,UpdateStatus::Failed("Automatic updates are not available for this platform; use the Windows or Linux package".into()));
+        }
+        return;
+    }
     run_check_with_fetch(manual, shared, events, fetch_and_validate);
 }
 

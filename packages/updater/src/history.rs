@@ -12,7 +12,7 @@ pub(super) fn load(path: &PathBuf) -> Option<u64> {
         .then_some(history.last_checked_at)
 }
 
-pub(super) fn save(path: &PathBuf, last_checked_at: u64) -> removent_core::Result<()> {
+pub(super) fn save(path: &std::path::Path, last_checked_at: u64) -> removent_core::Result<()> {
     removent_core::settings::atomic_write(
         path,
         &serde_json::to_vec(&CheckHistory { last_checked_at })?,

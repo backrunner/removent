@@ -6,6 +6,7 @@ members = [
     "apps/mcp",
     "apps/daemon",
     "apps/desktop",
+    "apps/tray-portable",
     "apps/relay",
     "packages/client",
     "packages/automation",
@@ -84,6 +85,12 @@ opt-level = 1
 [profile.dev.package."*"]
 opt-level = 3
 
+# NASM 3.02 crashes on OpenH264's win64 assembly with CodeView debug output
+# (`nasm -fwin64 -g .../intra_pred.asm`). Keep optimized assembly enabled while
+# omitting only this native dependency's debug information, including in tests.
+[profile.dev.package.openh264-sys2]
+debug = 0
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
@@ -106,3 +113,6 @@ mdns-sd = { path = "vendor/mdns-sd" }
 # Chinese punctuation must stay attached when GPUI wraps text.
 gpui-pre = { path = "vendor/gpui" }
 gpui-pre-apple = { path = "vendor/gpui-apple" }
+
+# CPU-only Linux desktops need the validated OpenGL software presentation path.
+gpui-pre-wgpu = { path = "vendor/gpui-wgpu" }

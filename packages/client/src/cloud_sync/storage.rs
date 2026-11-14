@@ -33,19 +33,21 @@ pub(crate) fn recover(path: &Path) -> Result<()> {
     if journal.version != 1 || journal.sync.version != 1 {
         return Err(failure("Unsupported connection journal"));
     }
-    atomic_write(
-        &path.to_path_buf(),
-        &serde_json::to_vec_pretty(&journal.entries)?,
-    )?;
+    atomic_write(path, &serde_json::to_vec_pretty(&journal.entries)?)?;
     atomic_write(&state_path(path), &serde_json::to_vec(&journal.sync)?)?;
     sync_directory(path)?;
     std::fs::remove_file(journal_path(path))?;
     sync_directory(path)
 }
-pub(super) fn sync_directory(path: &Path) -> Result<()> {
+pub(super) fn sync_directory(_path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    let path = _path;
+    #[cfg(unix)]
     if let Some(parent) = path.parent() {
         std::fs::File::open(parent)?.sync_all()?;
     }
+    // Windows atomic_write flushes each file and uses a write-through rename.
+    // Opening a directory with File::open is denied on that platform.
     Ok(())
 }
 pub(crate) fn commit(path: &Path, entries: &[SavedConnection], sync: &SyncState) -> Result<()> {

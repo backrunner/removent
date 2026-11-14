@@ -232,7 +232,10 @@ async fn video_packet(
 
 #[tokio::test]
 async fn static_recovery_probe_uses_temporal_compression_and_explicit_refresh_is_keyframe() {
-    for codec in [CodecId::H264, CodecId::Hevc] {
+    for codec in [CodecId::H264, CodecId::Hevc]
+        .into_iter()
+        .filter(|codec| cfg!(target_os = "macos") || *codec != CodecId::Hevc)
+    {
         let (_endpoints, client, host) = quic_pair().await;
         let max = QualityState {
             bitrate_kbps: 3000,
@@ -321,7 +324,10 @@ async fn static_recovery_probe_uses_temporal_compression_and_explicit_refresh_is
 
 #[tokio::test]
 async fn dynamic_quality_refreshes_static_frame_and_decodes_each_size() {
-    for codec in [CodecId::H264, CodecId::Hevc, CodecId::Av1] {
+    for codec in [CodecId::H264, CodecId::Hevc, CodecId::Av1]
+        .into_iter()
+        .filter(|codec| cfg!(target_os = "macos") || *codec != CodecId::Hevc)
+    {
         let (_endpoints, client, host) = quic_pair().await;
         let max = QualityState {
             bitrate_kbps: 3000,

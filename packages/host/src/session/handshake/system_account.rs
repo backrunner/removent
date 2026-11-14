@@ -1,5 +1,5 @@
 //! Verify the account owning this desktop service, never another user's desktop.
-//! Passwords go directly to Open Directory, without shell arguments or persistence.
+//! Passwords go directly to the OS authentication API, without shell arguments or persistence.
 use removent_proto::SystemCredentials;
 
 use super::*;
@@ -61,9 +61,131 @@ pub(super) async fn exchange(
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-pub(super) fn verify(_: &SystemCredentials) -> bool {
-    false
+#[cfg(target_os = "linux")]
+pub(super) fn verify(credentials: &SystemCredentials) -> bool {
+    if !credentials.valid() {
+        return false;
+    }
+    // Require the UID of the running desktop, not an arbitrary valid account.
+    let Ok(name) = std::ffi::CString::new(credentials.username.as_str()) else {
+        return false;
+    };
+    let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut result = std::ptr::null_mut();
+    let mut storage = vec![0; 65536];
+    if unsafe {
+        libc::getpwnam_r(
+            name.as_ptr(),
+            &mut entry,
+            storage.as_mut_ptr(),
+            storage.len(),
+            &mut result,
+        )
+    } != 0
+        || result.is_null()
+        || entry.pw_uid != unsafe { libc::geteuid() }
+        || entry.pw_uid == 0
+    {
+        return false;
+    }
+    let conversation = pam_client::conv_mock::Conversation::with_credentials(
+        &credentials.username,
+        &credentials.password,
+    );
+    let Ok(mut client) =
+        pam_client::Context::new("login", Some(&credentials.username), conversation)
+    else {
+        return false;
+    };
+    client
+        .authenticate(pam_client::Flag::DISALLOW_NULL_AUTHTOK)
+        .is_ok()
+        && client.acct_mgmt(pam_client::Flag::NONE).is_ok()
+        && client.user().is_ok_and(|name| name == credentials.username)
+}
+#[cfg(any(windows, test))]
+fn windows_logon_identity(username: &str) -> (Option<&str>, &str) {
+    if let Some((domain, name)) = username.split_once('\\') {
+        (Some(domain), name)
+    } else if username.contains('@') {
+        (None, username)
+    } else {
+        (Some("."), username)
+    }
+}
+
+#[cfg(windows)]
+pub(super) fn verify(credentials: &SystemCredentials) -> bool {
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, HANDLE},
+        Security::*,
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+    use zeroize::Zeroize;
+    if !credentials.valid() {
+        return false;
+    }
+    struct Token(HANDLE);
+    impl Drop for Token {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+    fn user(token: HANDLE) -> Option<Vec<usize>> {
+        let mut needed = 0;
+        unsafe {
+            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+        }
+        let mut buffer = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
+        (unsafe {
+            GetTokenInformation(
+                token,
+                TokenUser,
+                buffer.as_mut_ptr().cast(),
+                needed,
+                &mut needed,
+            )
+        } != 0)
+            .then_some(buffer)
+    }
+    let (domain, name) = windows_logon_identity(&credentials.username);
+    let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
+    let name = wide(name);
+    let domain = domain.map(wide);
+    let mut password = wide(&credentials.password);
+    let mut authenticated = std::ptr::null_mut();
+    let ok = unsafe {
+        LogonUserW(
+            name.as_ptr(),
+            domain.as_ref().map_or(std::ptr::null(), |d| d.as_ptr()),
+            password.as_ptr(),
+            LOGON32_LOGON_NETWORK,
+            LOGON32_PROVIDER_DEFAULT,
+            &mut authenticated,
+        )
+    };
+    // Volatile writes prevent the optimizer from removing the password wipe.
+    password.zeroize();
+    if ok == 0 {
+        return false;
+    }
+    let authenticated = Token(authenticated);
+    let mut current = std::ptr::null_mut();
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut current) } == 0 {
+        return false;
+    }
+    let current = Token(current);
+    let (Some(a), Some(b)) = (user(authenticated.0), user(current.0)) else {
+        return false;
+    };
+    unsafe {
+        EqualSid(
+            (*(a.as_ptr().cast::<TOKEN_USER>())).User.Sid,
+            (*(b.as_ptr().cast::<TOKEN_USER>())).User.Sid,
+        ) != 0
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -154,6 +276,93 @@ pub(super) fn verify(credentials: &SystemCredentials) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn windows_account_names_preserve_explicit_domains() {
+        for (input, domain, name) in [
+            ("alice", Some("."), "alice"),
+            ("WORKGROUP\\alice", Some("WORKGROUP"), "alice"),
+            ("alice@example.com", None, "alice@example.com"),
+            (
+                "MicrosoftAccount\\alice@example.com",
+                Some("MicrosoftAccount"),
+                "alice@example.com",
+            ),
+        ] {
+            assert_eq!(windows_logon_identity(input), (domain, name));
+        }
+    }
+    #[tokio::test]
+    #[ignore = "requires an isolated OS account with REMOVENT_AUTH_TEST_USERNAME/PASSWORD"]
+    async fn native_desktop_account_authentication() {
+        let username = std::env::var("REMOVENT_AUTH_TEST_USERNAME").unwrap();
+        let password = std::env::var("REMOVENT_AUTH_TEST_PASSWORD").unwrap();
+        if std::env::var("REMOVENT_AUTH_EXPECT_REJECT").as_deref() == Ok("1") {
+            assert!(!authenticate_over_quic(SystemCredentials { username, password }).await);
+            return;
+        }
+        assert!(
+            authenticate_over_quic(SystemCredentials {
+                username: username.clone(),
+                password,
+            })
+            .await
+        );
+        assert!(
+            !authenticate_over_quic(SystemCredentials {
+                username,
+                password: "intentionally-wrong-native-test-password".into(),
+            })
+            .await
+        );
+        assert!(
+            !authenticate_over_quic(SystemCredentials {
+                username: "removent-nonexistent-test-account".into(),
+                password: "irrelevant".into(),
+            })
+            .await
+        );
+    }
+    async fn authenticate_over_quic(credentials: SystemCredentials) -> bool {
+        let (_endpoints, client, host) = crate::session::tests::quic_pair().await;
+        let peer = hex::encode(host.peer_fingerprint().unwrap());
+        let client_fp = peer.clone();
+        let server = host.clone();
+        let task = tokio::spawn(async move {
+            let (mut sink, mut source) = server.accept_pairing().await.unwrap();
+            let begin = source.next().await.unwrap().unwrap();
+            exchange(begin, &peer, &mut sink, &mut source, verify).await
+        });
+        let (mut sink, mut source) = client.open_pairing().await.unwrap();
+        let nonce_c = [9; 16];
+        sink.send(PairingMsg::Begin {
+            nonce_c,
+            fp_c: client_fp,
+        })
+        .await
+        .unwrap();
+        let PairingMsg::SystemChallenge { nonce_h } = source.next().await.unwrap().unwrap() else {
+            panic!("system challenge");
+        };
+        sink.send(PairingMsg::SystemVerify {
+            nonce_c,
+            nonce_h,
+            credentials,
+        })
+        .await
+        .unwrap();
+        let PairingMsg::SystemConfirm {
+            nonce_c: confirmed_c,
+            nonce_h: confirmed_h,
+            ok,
+        } = source.next().await.unwrap().unwrap()
+        else {
+            panic!("system confirmation");
+        };
+        assert_eq!(confirmed_c, nonce_c);
+        assert_eq!(confirmed_h, nonce_h);
+        assert_eq!(task.await.unwrap().is_ok(), ok);
+        ok
+    }
     #[tokio::test]
     async fn exchange_requires_matching_nonces_and_successful_verification() {
         for (password, replay, expected) in [

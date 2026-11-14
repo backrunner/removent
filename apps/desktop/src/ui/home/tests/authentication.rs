@@ -1,6 +1,5 @@
 use super::*;
 
-#[cfg(target_os = "macos")]
 #[gpui::test]
 fn manual_credentials_can_be_remembered_without_leaking_between_modes(cx: &mut TestAppContext) {
     cx.update(gpui_component::init);

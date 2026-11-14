@@ -131,7 +131,11 @@ impl Dialog {
         };
         unsafe extern "system" fn dismiss(window: HWND, button: LPARAM) -> windows_sys::core::BOOL {
             unsafe {
-                PostMessageW(window, WM_COMMAND, button as usize, 0);
+                let mut process = 0;
+                GetWindowThreadProcessId(window, &mut process);
+                if process == windows_sys::Win32::System::Threading::GetCurrentProcessId() {
+                    PostMessageW(window, WM_COMMAND, button as usize, 0);
+                }
             }
             1
         }

@@ -32,9 +32,9 @@ fn main() -> anyhow::Result<()> {
 
 fn start(paths: DataPaths) -> anyhow::Result<()> {
     paths.ensure_layout().context(t!("error.init_data_dir"))?;
-    if std::env::args().any(|arg| matches!(arg.as_str(), "--background" | "--login-window"))
-        && removent_core::service_intent::is_stopped(&paths)?
-    {
+    let background =
+        std::env::args().any(|arg| matches!(arg.as_str(), "--background" | "--login-window"));
+    if background && removent_core::service_intent::is_stopped(&paths)? {
         return Ok(());
     }
     let settings = Settings::load_strict(&paths)?;
@@ -54,6 +54,11 @@ fn start(paths: DataPaths) -> anyhow::Result<()> {
             std::process::exit(1);
         }
     };
+    // A previous host may have recorded an explicit stop and released its lock
+    // after our first check. A delayed watchdog child must not undo that stop.
+    if background && removent_core::service_intent::is_stopped(&paths)? {
+        return Ok(());
+    }
     // Lifetime receipt that this daemon participates in update admission. The
     // updater can distinguish an unresponsive new host from a legacy process
     // whose live sessions do not yet hold the shared maintenance gate.

@@ -109,6 +109,15 @@ pub fn run() -> anyhow::Result<()> {
         if !matches!(event, Event::UserEvent(())) {
             return;
         }
+        // Native check items toggle before queuing MenuEvent. Capture that
+        // click intent before a queued daemon status can repaint the checkmark.
+        let actions: Vec<_> = MenuEvent::receiver()
+            .try_iter()
+            .map(|event| {
+                let sharing_on = (event.id == sharing.id()).then(|| sharing.is_checked());
+                (event, sharing_on)
+            })
+            .collect();
         while let Ok(value) = updates.try_recv() {
             if value.is_null() {
                 prompts.disconnected();
@@ -150,6 +159,9 @@ pub fn run() -> anyhow::Result<()> {
                 prompts.pairing(pin, &t!("dialog.pairing"));
             } else if let Ok(IpcEvent::PairingCleared) = serde_json::from_value(value.clone()) {
                 prompts.reset_pairing();
+            } else if let Ok(IpcEvent::StateChanged { .. }) = serde_json::from_value(value.clone())
+            {
+                let _ = requests.send(IpcRequest::Status);
             } else if let Ok(IpcEvent::AdmissionResolved { request_id, .. }) =
                 serde_json::from_value(value.clone())
             {
@@ -169,16 +181,15 @@ pub fn run() -> anyhow::Result<()> {
                 );
             }
         }
-        while let Ok(event) = MenuEvent::receiver().try_recv() {
+        for (event, sharing_on) in actions {
             let result = if event.id == open.id() {
                 launch("removent", &paths)
             } else if event.id == start.id() {
                 removent_core::service_intent::set_stopped(&paths, false)
                     .and_then(|_| launch("removentd", &paths))
-            } else if event.id == sharing.id() {
-                let _ = requests.send(IpcRequest::SetEnabled {
-                    on: sharing.is_checked(),
-                });
+            } else if let Some(on) = sharing_on {
+                let _ = requests.send(IpcRequest::SetEnabled { on });
+                sharing.set_checked(on);
                 Ok(())
             } else if event.id == pair.id() {
                 prompts.reset_pairing();

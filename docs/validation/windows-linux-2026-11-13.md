@@ -51,6 +51,8 @@ reopening pairing dialogs, desktop-first approval, competing answers, default de
 explicit denial/approval, controller cancellation, and the real 30-second timeout.
 Opening, moving and restoring the main window also require visibly rendered content;
 window bounds and focus alone are not sufficient, and screenshots wait for paint.
+Repeated sharing changes must reach the real host while daemon status polls refresh
+the menu, including immediately after closing the main window.
 An accepted pinned QUIC session must keep delivering decoded desktop frames after
 the tray quits and after Explorer/Xfce restarts. A ten-minute CI soak records tray
 RSS, handles/file descriptors and threads. Killing the daemon must dismiss pending

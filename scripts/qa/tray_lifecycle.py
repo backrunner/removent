@@ -142,6 +142,9 @@ def run(desktop_type):
             def health():
                 value = ipc({"type": "update_health"})
                 return value if value and value.get("type") == "update_health" else None
+            def sharing_state(on):
+                state = (health() or {}).get("status", {})
+                return state.get("running") == on and state.get("host_ready") == on
             def start_tray(ui):
                 process = subprocess.Popen([str(binary)], env=env, stdout=log, stderr=log)
                 ui.attach(process.pid)
@@ -185,7 +188,7 @@ def run(desktop_type):
                     ui.click(labels["start"])
                     state = wait_for(health, "Daemon did not start")
                     daemon_pid = state["pid"]
-                    ui.click(labels["share"])
+                    ui.click(labels["share"], checked=False)
                     wait_for(lambda: (health() or {}).get("status", {}).get("host_ready"), "Sharing listener did not become ready")
                     for index in range(2):
                         ui.click(labels["pair"])
@@ -317,7 +320,14 @@ def run(desktop_type):
                         wait_for(lambda: health()["status"]["host_ready"], "Recovered host not ready")
                         passed("daemon crash clears stale prompts and restarts sharing")
                         pending.stop()
-                    ui.click(labels["share"])
+                    # Cross several 2-second daemon status polls. Each click
+                    # must change the real host, including after closing the app.
+                    for on in (False, True) * 4:
+                        ui.click(labels["share"], checked=not on)
+                        wait_for(lambda: sharing_state(on),
+                                 f"Native sharing click did not set running={on}")
+                    passed("repeated sharing changes survive concurrent status refresh")
+                    ui.click(labels["share"], checked=True)
                     wait_for(lambda: not health()["status"]["running"], "Sharing did not stop")
                     ui.click(labels["stop"])
                     wait_for(lambda: not health(), "Daemon did not stop")

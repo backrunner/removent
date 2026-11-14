@@ -117,7 +117,7 @@ class WindowsDesktop:
     def popup(self):
         return next(iter(windows(self.pid, "#32768", visible=True)), None)
 
-    def click(self, label):
+    def click(self, label, checked=None):
         # Start from the actual Explorer icon, including its overflow UI. No
         # synthetic tray callback or menu command is used.
         observed = []
@@ -163,7 +163,10 @@ class WindowsDesktop:
             for index in range(user.GetMenuItemCount(menu)):
                 text = c.create_unicode_buffer(256)
                 user.GetMenuStringW(menu, index, text, 256, 0x400)
-                if text.value.replace("&", "") == label and not user.GetMenuState(menu, index, 0x400) & 3:
+                state = user.GetMenuState(menu, index, 0x400)
+                if (text.value.replace("&", "") == label and not state & 3
+                        and (checked is None or bool(state & 8) == checked)):
+                    self.log.write(f"Native menu click: {label!r}, checked={bool(state & 8)}\n")
                     rect = w.RECT()
                     assert user.GetMenuItemRect(None, menu, index, c.byref(rect))
                     return rect

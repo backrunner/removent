@@ -106,7 +106,7 @@ class LinuxDesktop:
             context.iteration(False)
         return descendants(pyatspi.Registry.getDesktop(0))
 
-    def click(self, label):
+    def click(self, label, checked=None):
         # The fixture panel contains only this tray item. Query its actual AT-SPI
         # bounds rather than invoking the exported D-Bus menu callbacks.
         def icon():
@@ -146,11 +146,15 @@ class LinuxDesktop:
             item = self.bus.get_object(service, "/" + path)
             menu_path = item.Get("org.kde.StatusNotifierItem", "Menu", dbus_interface="org.freedesktop.DBus.Properties")
             menu = dbus.Interface(self.bus.get_object(service, menu_path), "com.canonical.dbusmenu")
+            children = menu.GetLayout(0, -1, [])[1][2]
             labels = [str(child[1].get("label", "")).replace("_", "")
-                      for child in menu.GetLayout(0, -1, [])[1][2]
+                      for child in children
                       if child[1].get("enabled", True) and child[1].get("visible", True)
                       and child[1].get("type") != "separator"]
-            return labels if label in labels else None
+            target = next((child[1] for child in children
+                           if str(child[1].get("label", "")).replace("_", "") == label), {})
+            matches = checked is None or int(target.get("toggle-state", -1)) == int(checked)
+            return labels if label in labels and matches else None
         labels = wait_for(entries, f"Enabled native menu item missing: {label}")
         time.sleep(0.2)
         self.snapshot("menu")

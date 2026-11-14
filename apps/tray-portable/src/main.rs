@@ -2,6 +2,8 @@
 #[cfg(any(windows, target_os = "linux"))]
 mod dialogs;
 #[cfg(any(windows, target_os = "linux"))]
+mod prompts;
+#[cfg(any(windows, target_os = "linux"))]
 mod tray;
 #[cfg(any(windows, target_os = "linux"))]
 fn main() -> anyhow::Result<()> {

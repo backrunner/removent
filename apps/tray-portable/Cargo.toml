@@ -18,6 +18,6 @@ tao = "0.34"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 [target.'cfg(windows)'.dependencies]
-rfd = { version = "0.15", default-features = false }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"

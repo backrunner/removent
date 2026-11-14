@@ -4,6 +4,7 @@ pub mod authentication;
 pub use authentication::{AuthenticationMode, AuthenticationSettings};
 pub mod adapt;
 pub mod clip;
+pub mod desktop_instance;
 pub mod error;
 pub mod flock;
 pub mod i18n;

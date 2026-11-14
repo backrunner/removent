@@ -355,9 +355,12 @@ where
             let short = peer_fp.chars().take(16).collect::<String>();
             // protocol.md §4.4: an admission prompt with no response within 30s is treated as a rejection.
             let prompt = (interactions.admission_prompt)(hello.hello.device_name.clone(), short);
-            let allowed = tokio::time::timeout(Duration::from_secs(30), prompt)
-                .await
-                .unwrap_or(false);
+            let allowed = tokio::select! {
+                // Drop the daemon's pending admission immediately, broadcasting
+                // resolution to every UI when the controller cancels.
+                _ = conn.inner().closed() => return Err(HostError::Rejected("controller disconnected during admission".into())),
+                result = tokio::time::timeout(Duration::from_secs(30), prompt) => result.unwrap_or(false),
+            };
             if !allowed {
                 sink.send(ControlMsg::SessionReject {
                     reason: removent_proto::RejectReason::Denied,

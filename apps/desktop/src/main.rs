@@ -36,6 +36,15 @@ fn run(paths: DataPaths) -> Result<()> {
     let started = std::time::Instant::now();
     let visible_smoke = std::env::args().any(|arg| arg == "--desktop-smoke");
     let smoke = visible_smoke || std::env::args().any(|arg| arg == "--update-smoke");
+    #[cfg(any(windows, target_os = "linux"))]
+    let instance = if smoke {
+        None
+    } else {
+        match removent_core::desktop_instance::DesktopInstance::claim(&paths)? {
+            Some(instance) => Some(instance),
+            None => return Ok(()),
+        }
+    };
     // Main-window lifetime is an idle-update boundary. Closing it leaves the
     // host running and releases this lease for the independent installer.
     let _activity = removent_core::update_gate::ActivityLease::acquire(&paths)?;
@@ -221,6 +230,27 @@ fn run(paths: DataPaths) -> Result<()> {
                     },
                 )
                 .expect("open home window");
+            #[cfg(any(windows, target_os = "linux"))]
+            if let Some(instance) = instance {
+                cx.spawn(async move |cx| {
+                    loop {
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_millis(150))
+                            .await;
+                        if instance.take_activation()
+                            && home_window
+                                .update(cx, |_, window, cx| {
+                                    window.activate_window();
+                                    cx.activate(true);
+                                })
+                                .is_err()
+                        {
+                            break;
+                        }
+                    }
+                })
+                .detach();
+            }
             // The menu bar app and hosting daemon are independent processes.
             // Leaving this process alive without its home window makes Dock/tray
             // activation a no-op, because the event receiver belongs to that view.

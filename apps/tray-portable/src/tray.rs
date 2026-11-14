@@ -23,7 +23,11 @@ fn sibling(name: &str) -> anyhow::Result<std::path::PathBuf> {
         .join(format!("{name}{}", std::env::consts::EXE_SUFFIX)))
 }
 fn launch(name: &str, paths: &DataPaths) -> anyhow::Result<()> {
-    let mut child = std::process::Command::new(sibling(name)?)
+    let mut command = std::process::Command::new(sibling(name)?);
+    if name == "removentd" {
+        command.arg("--background");
+    }
+    let mut child = command
         .env("REMOVENT_DATA_DIR", &paths.root)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -34,7 +38,6 @@ fn launch(name: &str, paths: &DataPaths) -> anyhow::Result<()> {
     });
     Ok(())
 }
-use crate::dialogs::alert;
 
 pub fn run() -> anyhow::Result<()> {
     if std::env::args().any(|a| a == "--version") {
@@ -108,7 +111,7 @@ pub fn run() -> anyhow::Result<()> {
     rt.spawn(link(paths.clone(), rx, events));
     let smoke = std::env::args().any(|a| a == "--smoke");
     let started = Instant::now();
-    let mut displayed_pairing: Option<String> = None;
+    let mut prompts = crate::prompts::Prompts::default();
     event_loop.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
         if smoke && started.elapsed() > Duration::from_secs(2) {
@@ -120,6 +123,7 @@ pub fn run() -> anyhow::Result<()> {
         }
         while let Ok(value) = updates.try_recv() {
             if value.is_null() {
+                prompts.disconnected();
                 status.set_text(label("Background service offline", "后台服务未连接"));
                 sharing.set_enabled(false);
                 pair.set_enabled(false);
@@ -149,31 +153,31 @@ pub fn run() -> anyhow::Result<()> {
             } else if let Ok(IpcResponse::PairingCode { code, .. }) =
                 serde_json::from_value(value.clone())
             {
-                if displayed_pairing.as_deref() != Some(&code) {
-                    displayed_pairing = Some(code.clone());
-                    alert(label("Pairing code", "配对码"), &code);
-                }
+                prompts.pairing(code, label("Pairing code", "配对码"));
             } else if let Ok(IpcResponse::Error { message }) = serde_json::from_value(value.clone())
             {
-                alert("Removent", &message);
+                prompts.alert(message);
             } else if let Ok(IpcEvent::PairingPin { pin }) = serde_json::from_value(value.clone()) {
-                if displayed_pairing.as_deref() != Some(&pin) {
-                    displayed_pairing = Some(pin.clone());
-                    alert(label("Pairing code", "配对码"), &pin);
-                }
+                prompts.pairing(pin, label("Pairing code", "配对码"));
             } else if let Ok(IpcEvent::PairingCleared) = serde_json::from_value(value.clone()) {
-                displayed_pairing = None;
+                prompts.reset_pairing();
+            } else if let Ok(IpcEvent::AdmissionResolved { request_id, .. }) =
+                serde_json::from_value(value.clone())
+            {
+                prompts.resolved(request_id);
             } else if let Ok(IpcEvent::AdmissionRequest {
                 request_id,
                 peer_name,
                 peer_fp16,
             }) = serde_json::from_value(value)
             {
-                let allow = crate::dialogs::confirm(
+                prompts.admission(
+                    request_id,
+                    &peer_name,
+                    &peer_fp16,
                     label("Remote access request", "远程访问请求"),
-                    &format!("{peer_name}\n{peer_fp16}"),
+                    removent_core::desktop_instance::DesktopInstance::is_running(&paths),
                 );
-                let _ = requests.send(IpcRequest::AdmissionReply { request_id, allow });
             }
         }
         while let Ok(event) = MenuEvent::receiver().try_recv() {
@@ -181,7 +185,6 @@ pub fn run() -> anyhow::Result<()> {
                 launch("removent", &paths)
             } else if event.id == start.id() {
                 removent_core::service_intent::set_stopped(&paths, false)
-                    .map_err(anyhow::Error::from)
                     .and_then(|_| launch("removentd", &paths))
             } else if event.id == sharing.id() {
                 let _ = requests.send(IpcRequest::SetEnabled {
@@ -189,6 +192,7 @@ pub fn run() -> anyhow::Result<()> {
                 });
                 Ok(())
             } else if event.id == pair.id() {
+                prompts.reset_pairing();
                 let _ = requests.send(IpcRequest::PairingGenerate);
                 Ok(())
             } else if event.id == stop.id() {
@@ -201,9 +205,10 @@ pub fn run() -> anyhow::Result<()> {
                 Ok(())
             };
             if let Err(e) = result {
-                alert("Removent", &e.to_string());
+                prompts.alert(e.to_string());
             }
         }
+        prompts.poll(&requests);
         // Keep runtime alive for the IPC worker throughout the event loop.
         let _ = &rt;
     });
@@ -213,8 +218,11 @@ async fn link(
     mut commands: tokio::sync::mpsc::UnboundedReceiver<IpcRequest>,
     events: mpsc::Sender<serde_json::Value>,
 ) {
+    let mut connected_once = false;
+    let mut restart_after = Instant::now();
     loop {
         if let Ok((mut r, mut w)) = removent_core::ipc::connect(&paths).await {
+            connected_once = true;
             let mut timer = tokio::time::interval(Duration::from_secs(2));
             let mut reader = removent_core::ipc::MessageReader::default();
             loop {
@@ -227,6 +235,15 @@ async fn link(
         }
         let _ = events.send(serde_json::Value::Null);
         while commands.try_recv().is_ok() {}
+        // Recover an unexpectedly lost service, while preserving an explicit
+        // stop. The child checks the intent again before acquiring its singleton.
+        if connected_once
+            && Instant::now() >= restart_after
+            && removent_core::service_intent::is_stopped(&paths).is_ok_and(|stopped| !stopped)
+        {
+            let _ = launch("removentd", &paths);
+            restart_after = Instant::now() + Duration::from_secs(5);
+        }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

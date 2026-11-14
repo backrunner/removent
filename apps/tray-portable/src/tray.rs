@@ -2,6 +2,7 @@ use removent_core::{
     DataDirLock, DataPaths,
     ipc::{IpcEvent, IpcRequest, IpcResponse, write_msg},
 };
+use rust_i18n::t;
 use std::{
     sync::mpsc,
     time::{Duration, Instant},
@@ -52,8 +53,7 @@ pub fn run() -> anyhow::Result<()> {
         Err(e) => return Err(e.into()),
     };
     let settings = removent_core::Settings::load_strict(&paths)?;
-    let zh = removent_core::resolve_locale(settings.language).starts_with("zh");
-    let label = move |en, cn| if zh { cn } else { en };
+    rust_i18n::set_locale(removent_core::resolve_locale(settings.language));
     let event_loop = EventLoopBuilder::<()>::with_user_event().build();
     let wake = event_loop.create_proxy();
     // Tray-only processes have no windows; drive IPC/menu updates explicitly.
@@ -66,25 +66,13 @@ pub fn run() -> anyhow::Result<()> {
         }
     });
     let menu = Menu::new();
-    let status = MenuItem::new(
-        label("Connecting to background service", "正在连接后台服务"),
-        false,
-        None,
-    );
-    let open = MenuItem::new(label("Open Removent", "打开 Removent"), true, None);
-    let sharing = CheckMenuItem::new(label("Share this desktop", "共享本机"), false, false, None);
-    let start = MenuItem::new(
-        label("Start background service", "启动后台服务"),
-        true,
-        None,
-    );
-    let pair = MenuItem::new(label("Show pairing code", "显示配对码"), false, None);
-    let stop = MenuItem::new(
-        label("Stop background service", "停止后台服务"),
-        false,
-        None,
-    );
-    let quit = MenuItem::new(label("Quit tray", "退出托盘"), true, None);
+    let status = MenuItem::new(t!("tray.connecting"), false, None);
+    let open = MenuItem::new(t!("tray.open"), true, None);
+    let sharing = CheckMenuItem::new(t!("tray.share"), false, false, None);
+    let start = MenuItem::new(t!("tray.start"), true, None);
+    let pair = MenuItem::new(t!("tray.pair"), false, None);
+    let stop = MenuItem::new(t!("tray.stop"), false, None);
+    let quit = MenuItem::new(t!("tray.quit"), true, None);
     menu.append_items(&[
         &status,
         &open,
@@ -124,7 +112,7 @@ pub fn run() -> anyhow::Result<()> {
         while let Ok(value) = updates.try_recv() {
             if value.is_null() {
                 prompts.disconnected();
-                status.set_text(label("Background service offline", "后台服务未连接"));
+                status.set_text(t!("tray.offline"));
                 sharing.set_enabled(false);
                 pair.set_enabled(false);
                 stop.set_enabled(false);
@@ -135,15 +123,16 @@ pub fn run() -> anyhow::Result<()> {
                 status.set_text(if let Some(error) = report.host_error {
                     error
                 } else {
-                    format!(
-                        "{} ({})",
-                        if report.host_ready {
-                            label("Sharing", "正在共享")
+                    t!(
+                        "tray.status",
+                        state = if report.host_ready {
+                            t!("tray.sharing")
                         } else {
-                            label("Sharing stopped", "共享已停止")
+                            t!("tray.stopped")
                         },
-                        report.sessions.len()
+                        count = report.sessions.len()
                     )
+                    .into_owned()
                 });
                 sharing.set_enabled(true);
                 sharing.set_checked(report.running);
@@ -153,12 +142,12 @@ pub fn run() -> anyhow::Result<()> {
             } else if let Ok(IpcResponse::PairingCode { code, .. }) =
                 serde_json::from_value(value.clone())
             {
-                prompts.pairing(code, label("Pairing code", "配对码"));
+                prompts.pairing(code, &t!("dialog.pairing"));
             } else if let Ok(IpcResponse::Error { message }) = serde_json::from_value(value.clone())
             {
                 prompts.alert(message);
             } else if let Ok(IpcEvent::PairingPin { pin }) = serde_json::from_value(value.clone()) {
-                prompts.pairing(pin, label("Pairing code", "配对码"));
+                prompts.pairing(pin, &t!("dialog.pairing"));
             } else if let Ok(IpcEvent::PairingCleared) = serde_json::from_value(value.clone()) {
                 prompts.reset_pairing();
             } else if let Ok(IpcEvent::AdmissionResolved { request_id, .. }) =
@@ -175,7 +164,7 @@ pub fn run() -> anyhow::Result<()> {
                     request_id,
                     &peer_name,
                     &peer_fp16,
-                    label("Remote access request", "远程访问请求"),
+                    &t!("dialog.admission"),
                     removent_core::desktop_instance::DesktopInstance::is_running(&paths),
                 );
             }

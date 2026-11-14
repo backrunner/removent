@@ -9025,6 +9025,7 @@ dependencies = [
  "gtk",
  "image",
  "removent-core",
+ "rust-i18n",
  "serde_json",
  "tao",
  "tokio",

@@ -1,0 +1,14 @@
+_version: 1
+tray.connecting: 正在连接后台服务
+tray.offline: 后台服务未连接
+tray.open: 打开 Removent
+tray.share: 共享本机
+tray.start: 启动后台服务
+tray.pair: 显示配对码
+tray.stop: 停止后台服务
+tray.quit: 退出托盘
+tray.sharing: 正在共享
+tray.stopped: 共享已停止
+tray.status: "%{state} (%{count})"
+dialog.pairing: 配对码
+dialog.admission: 远程访问请求

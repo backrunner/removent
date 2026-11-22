@@ -5,6 +5,8 @@
 //! to the host send loop.
 //! Requires Screen Recording TCC permission (requirements.md §6).
 
+mod regions;
+
 use crate::sck_ffi as ffi;
 use core_foundation::error::CFError;
 use screencapturekit::cm::CMTime;
@@ -147,6 +149,7 @@ struct SckOutput {
     video_tx: removent_core::latest::Sender<crate::CapturedVideoFrame>,
     generation: u64,
     health: Arc<Mutex<crate::health::CaptureHealth>>,
+    regions: Option<Mutex<regions::RegionDiagnostics>>,
     /// None for the screen-only output (audio capture disabled or this handler
     /// is the video one); audio callbacks are ignored then.
     audio_tx: Option<mpsc::Sender<AudioFrame>>,
@@ -279,19 +282,39 @@ unsafe fn copy_audio_samples_ref(sb: ffi::CMSampleBufferRef) -> Option<Vec<f32>>
 impl SckOutput {
     fn on_video(&self, sb: &CMSampleBuffer) {
         match sb.frame_status() {
-            Some(SCFrameStatus::Idle) => return,
+            Some(SCFrameStatus::Idle) => {
+                if let Some(regions) = &self.regions {
+                    regions.lock().unwrap().idle();
+                }
+                return;
+            }
             Some(SCFrameStatus::Blank | SCFrameStatus::Suspended | SCFrameStatus::Stopped) => {
                 self.health.lock().unwrap().unavailable(Instant::now());
                 return;
             }
             _ => {}
         }
-        let Some(mut frame) = retain_screen_frame(sb) else {
+        let Some(frame) = retain_screen_frame(sb) else {
             self.health.lock().unwrap().unavailable(Instant::now());
             return;
         };
+        self.publish_frame(frame, || sb.dirty_rects());
+    }
+
+    fn publish_frame(
+        &self,
+        mut frame: crate::CapturedVideoFrame,
+        dirty_rects: impl FnOnce() -> Option<Vec<screencapturekit::cg::CGRect>>,
+    ) {
         self.health.lock().unwrap().frame();
         frame.generation = self.generation;
+        // Observe every delivered capture before the latest-frame channel coalesces them.
+        if let Some(regions) = &self.regions {
+            regions
+                .lock()
+                .unwrap()
+                .frame(frame.width, frame.height, dirty_rects);
+        }
         let _ = self.video_tx.send(frame);
     }
 
@@ -458,6 +481,7 @@ fn start_capture(
     let screen_output = SckOutput {
         generation,
         health: health.clone(),
+        regions: regions::RegionDiagnostics::from_env(generation).map(Mutex::new),
         video_tx: video_tx.clone(),
         audio_tx: None,
         audio: Mutex::new(AudioState {
@@ -475,6 +499,7 @@ fn start_capture(
             generation,
             health: health.clone(),
             video_tx,
+            regions: None,
             audio_tx: Some(audio_tx),
             audio: Mutex::new(AudioState {
                 chunker: AudioChunker::new(),

@@ -1,0 +1,1209 @@
+{
+  "recognizer": "Apple Vision accurate zh-Hans/en-US; no language correction",
+  "source": "docs/benchmarks/2026-09-20-readability/source.png",
+  "metric": "Character edits after NFKC and whitespace removal. Counts include repeated lines across timestamps.",
+  "frame_format": "1280x720 BGRA; exact presentation PTS in microseconds",
+  "summary": {
+    "source": {
+      "samples": 15,
+      "exact": 8,
+      "edits": 7,
+      "reference_chars": 427,
+      "cer": 0.01639,
+      "exact_vs_source_ocr": 15
+    },
+    "baseline": {
+      "samples": 15,
+      "exact": 8,
+      "edits": 7,
+      "reference_chars": 427,
+      "cer": 0.01639,
+      "exact_vs_source_ocr": 15
+    },
+    "hybrid": {
+      "samples": 15,
+      "exact": 8,
+      "edits": 7,
+      "reference_chars": 427,
+      "cer": 0.01639,
+      "exact_vs_source_ocr": 15
+    },
+    "paced": {
+      "samples": 15,
+      "exact": 8,
+      "edits": 7,
+      "reference_chars": 427,
+      "cer": 0.01639,
+      "exact_vs_source_ocr": 15
+    }
+  },
+  "samples": [
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "source",
+      "line": "edited",
+      "expected": "连接设置：中继地址、端口、凭据与受信任的设备",
+      "crop": [
+        0,
+        30,
+        520,
+        30
+      ],
+      "recognized": [
+        "连接设置：中继地址、端口、凭据与受信任设备"
+      ],
+      "edits": 1,
+      "reference_chars": 22,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "source",
+      "line": "stable",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        60,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "source",
+      "line": "code",
+      "expected": "let status = connection.is_ready() && daemon.running;",
+      "crop": [
+        0,
+        120,
+        520,
+        30
+      ],
+      "recognized": [
+        "let status = connection.is_ready() && daemon.running;"
+      ],
+      "edits": 0,
+      "reference_chars": 48,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "source",
+      "line": "small10",
+      "expected": "字号 10 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        210,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 10 px - 状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "source",
+      "line": "small12",
+      "expected": "字号 12 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        240,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 12 px-状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "source",
+      "line": "edited",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        30,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "source",
+      "line": "stable",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        60,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "source",
+      "line": "code",
+      "expected": "let status = connection.is_ready() && daemon.running;",
+      "crop": [
+        0,
+        120,
+        520,
+        30
+      ],
+      "recognized": [
+        "let status = connection.is_ready() && daemon.running;"
+      ],
+      "edits": 0,
+      "reference_chars": 48,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "source",
+      "line": "small10",
+      "expected": "字号 10 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        210,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 10 px - 状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "source",
+      "line": "small12",
+      "expected": "字号 12 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        240,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 12 px-状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "source",
+      "line": "edited",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        30,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "source",
+      "line": "stable",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        60,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "source",
+      "line": "code",
+      "expected": "let status = connection.is_ready() && daemon.running;",
+      "crop": [
+        0,
+        120,
+        520,
+        30
+      ],
+      "recognized": [
+        "let status = connection.is_ready() && daemon.running;"
+      ],
+      "edits": 0,
+      "reference_chars": 48,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "source",
+      "line": "small10",
+      "expected": "字号 10 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        210,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 10 px - 状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "source",
+      "line": "small12",
+      "expected": "字号 12 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        240,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 12 px-状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "baseline",
+      "line": "edited",
+      "expected": "连接设置：中继地址、端口、凭据与受信任的设备",
+      "crop": [
+        0,
+        30,
+        520,
+        30
+      ],
+      "recognized": [
+        "连接设置：中继地址、端口、凭据与受信任设备"
+      ],
+      "edits": 1,
+      "reference_chars": 22,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "baseline",
+      "line": "stable",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        60,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "baseline",
+      "line": "code",
+      "expected": "let status = connection.is_ready() && daemon.running;",
+      "crop": [
+        0,
+        120,
+        520,
+        30
+      ],
+      "recognized": [
+        "let status = connection.is_ready() && daemon.running;"
+      ],
+      "edits": 0,
+      "reference_chars": 48,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "baseline",
+      "line": "small10",
+      "expected": "字号 10 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        210,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 10 px- 状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "baseline",
+      "line": "small12",
+      "expected": "字号 12 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        240,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 12 px-状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "baseline",
+      "line": "edited",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        30,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "baseline",
+      "line": "stable",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        60,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "baseline",
+      "line": "code",
+      "expected": "let status = connection.is_ready() && daemon.running;",
+      "crop": [
+        0,
+        120,
+        520,
+        30
+      ],
+      "recognized": [
+        "let status = connection.is_ready() && daemon.running;"
+      ],
+      "edits": 0,
+      "reference_chars": 48,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "baseline",
+      "line": "small10",
+      "expected": "字号 10 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        210,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 10 px- 状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "baseline",
+      "line": "small12",
+      "expected": "字号 12 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        240,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 12 px-状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "baseline",
+      "line": "edited",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        30,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "baseline",
+      "line": "stable",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        60,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "baseline",
+      "line": "code",
+      "expected": "let status = connection.is_ready() && daemon.running;",
+      "crop": [
+        0,
+        120,
+        520,
+        30
+      ],
+      "recognized": [
+        "let status = connection.is_ready() && daemon.running;"
+      ],
+      "edits": 0,
+      "reference_chars": 48,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "baseline",
+      "line": "small10",
+      "expected": "字号 10 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        210,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 10 px - 状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "baseline",
+      "line": "small12",
+      "expected": "字号 12 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        240,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 12 px-状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "hybrid",
+      "line": "edited",
+      "expected": "连接设置：中继地址、端口、凭据与受信任的设备",
+      "crop": [
+        0,
+        30,
+        520,
+        30
+      ],
+      "recognized": [
+        "连接设置：中继地址、端口、凭据与受信任设备"
+      ],
+      "edits": 1,
+      "reference_chars": 22,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "hybrid",
+      "line": "stable",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        60,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "hybrid",
+      "line": "code",
+      "expected": "let status = connection.is_ready() && daemon.running;",
+      "crop": [
+        0,
+        120,
+        520,
+        30
+      ],
+      "recognized": [
+        "let status = connection.is_ready() && daemon.running;"
+      ],
+      "edits": 0,
+      "reference_chars": 48,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "hybrid",
+      "line": "small10",
+      "expected": "字号 10 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        210,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 10 px - 状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "hybrid",
+      "line": "small12",
+      "expected": "字号 12 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        240,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 12 px-状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "hybrid",
+      "line": "edited",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        30,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "hybrid",
+      "line": "stable",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        60,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "hybrid",
+      "line": "code",
+      "expected": "let status = connection.is_ready() && daemon.running;",
+      "crop": [
+        0,
+        120,
+        520,
+        30
+      ],
+      "recognized": [
+        "let status = connection.is_ready() && daemon.running;"
+      ],
+      "edits": 0,
+      "reference_chars": 48,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "hybrid",
+      "line": "small10",
+      "expected": "字号 10 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        210,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 10 px - 状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "hybrid",
+      "line": "small12",
+      "expected": "字号 12 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        240,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 12 px-状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "hybrid",
+      "line": "edited",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        30,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "hybrid",
+      "line": "stable",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        60,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "hybrid",
+      "line": "code",
+      "expected": "let status = connection.is_ready() && daemon.running;",
+      "crop": [
+        0,
+        120,
+        520,
+        30
+      ],
+      "recognized": [
+        "let status = connection.is_ready() && daemon.running;"
+      ],
+      "edits": 0,
+      "reference_chars": 48,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "hybrid",
+      "line": "small10",
+      "expected": "字号 10 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        210,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 10 px - 状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "hybrid",
+      "line": "small12",
+      "expected": "字号 12 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        240,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 12 px-状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "paced",
+      "line": "edited",
+      "expected": "连接设置：中继地址、端口、凭据与受信任的设备",
+      "crop": [
+        0,
+        30,
+        520,
+        30
+      ],
+      "recognized": [
+        "连接设置：中继地址、端口、凭据与受信任设备"
+      ],
+      "edits": 1,
+      "reference_chars": 22,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "paced",
+      "line": "stable",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        60,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "paced",
+      "line": "code",
+      "expected": "let status = connection.is_ready() && daemon.running;",
+      "crop": [
+        0,
+        120,
+        520,
+        30
+      ],
+      "recognized": [
+        "let status = connection.is_ready() && daemon.running;"
+      ],
+      "edits": 0,
+      "reference_chars": 48,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "paced",
+      "line": "small10",
+      "expected": "字号 10 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        210,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 10 px- 状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 23,
+      "pts_us": 766666,
+      "variant": "paced",
+      "line": "small12",
+      "expected": "字号 12 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        240,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 12 px-状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "paced",
+      "line": "edited",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        30,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "paced",
+      "line": "stable",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        60,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "paced",
+      "line": "code",
+      "expected": "let status = connection.is_ready() && daemon.running;",
+      "crop": [
+        0,
+        120,
+        520,
+        30
+      ],
+      "recognized": [
+        "let status = connection.is_ready() && daemon.running;"
+      ],
+      "edits": 0,
+      "reference_chars": 48,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "paced",
+      "line": "small10",
+      "expected": "字号 10 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        210,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 10 px- 状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 24,
+      "pts_us": 800000,
+      "variant": "paced",
+      "line": "small12",
+      "expected": "字号 12 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        240,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 12 px-状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "paced",
+      "line": "edited",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        30,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "paced",
+      "line": "stable",
+      "expected": "网络较慢时保留文字细节，降低画面刷新频率。",
+      "crop": [
+        0,
+        60,
+        520,
+        30
+      ],
+      "recognized": [
+        "网络较慢时保留文字细节，降低画面刷新频率。"
+      ],
+      "edits": 0,
+      "reference_chars": 21,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "paced",
+      "line": "code",
+      "expected": "let status = connection.is_ready() && daemon.running;",
+      "crop": [
+        0,
+        120,
+        520,
+        30
+      ],
+      "recognized": [
+        "let status = connection.is_ready() && daemon.running;"
+      ],
+      "edits": 0,
+      "reference_chars": 48,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "paced",
+      "line": "small10",
+      "expected": "字号 10 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        210,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 10 px - 状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    },
+    {
+      "tick": 119,
+      "pts_us": 3966666,
+      "variant": "paced",
+      "line": "small12",
+      "expected": "字号 12 px — 状态正常 / Ready 1920 x 1080",
+      "crop": [
+        0,
+        240,
+        520,
+        30
+      ],
+      "recognized": [
+        "字号 12 px-状态正常/Ready 1920 x 1080"
+      ],
+      "edits": 1,
+      "reference_chars": 26,
+      "edits_vs_source_ocr": 0
+    }
+  ],
+  "edit_tick": 24,
+  "pixel_repair": {
+    "baseline": {
+      "first_exact_changed_pixels_before_edit_tick": null,
+      "first_exact_changed_pixels_after_edit_tick": null,
+      "first_exact_full_line_after_edit_tick": null,
+      "source_time_to_exact_changed_ms": null,
+      "final_exact_changed_pixels": 304,
+      "changed_pixels": 3262
+    },
+    "hybrid": {
+      "first_exact_changed_pixels_before_edit_tick": 3,
+      "first_exact_changed_pixels_after_edit_tick": 27,
+      "first_exact_full_line_after_edit_tick": 27,
+      "source_time_to_exact_changed_ms": 100.0,
+      "final_exact_changed_pixels": 3262,
+      "changed_pixels": 3262
+    },
+    "paced": {
+      "first_exact_changed_pixels_before_edit_tick": null,
+      "first_exact_changed_pixels_after_edit_tick": 49,
+      "first_exact_full_line_after_edit_tick": 51,
+      "source_time_to_exact_changed_ms": 833.333,
+      "final_exact_changed_pixels": 3262,
+      "changed_pixels": 3262
+    }
+  }
+}

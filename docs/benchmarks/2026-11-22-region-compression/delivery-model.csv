@@ -1,0 +1,13 @@
+clip,link_kbps,updates,delay_p95_ms,delay_p99_ms,delay_max_ms
+game-baseline,2000,120,687.99,789.86,815.7
+game-hybrid,2000,120,687.99,789.86,815.7
+game-matched,2000,120,687.99,789.86,815.7
+mixed-baseline,2000,120,776.57,874.05,898.05
+mixed-hybrid,2000,120,1403.58,1501.05,1525.06
+mixed-matched,2000,120,1111.02,1227.04,1250.7
+scroll-baseline,2000,120,745.52,826.08,848.0
+scroll-hybrid,2000,120,745.52,826.08,848.0
+scroll-matched,2000,120,745.52,826.08,848.0
+static-baseline,2000,1,540.24,540.24,540.24
+static-hybrid,2000,27,932.09,951.38,951.38
+static-matched,2000,1,1478.55,1478.55,1478.55

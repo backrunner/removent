@@ -21,3 +21,7 @@ objc = "0.2"
 [target.'cfg(not(target_vendor = "apple"))'.dependencies]
 openh264 = "0.9"
 image = { version = "0.25", default-features = false }
+
+[dev-dependencies]
+flate2 = "1"
+png = "0.18"

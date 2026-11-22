@@ -1,0 +1,114 @@
+{
+  "width": 1280,
+  "height": 720,
+  "fps": 30,
+  "edit_tick": 300,
+  "comparison": "All four BGRA channels; each display holds the last emitted picture at or before source PTS.",
+  "observations": {
+    "baseline": {
+      "299": {
+        "pts_us": 9966666,
+        "video_bytes": 0,
+        "patch_bytes": 0,
+        "patch_budget_bytes": null,
+        "invalidations": 0,
+        "video_header_flags": null,
+        "reset_in_video_header": false,
+        "displayed_pts_us": 0,
+        "pixels_different_from_baseline": 0
+      },
+      "300": {
+        "pts_us": 10000000,
+        "video_bytes": 133994,
+        "patch_bytes": 0,
+        "patch_budget_bytes": null,
+        "invalidations": 0,
+        "video_header_flags": 0,
+        "reset_in_video_header": false,
+        "displayed_pts_us": 10000000,
+        "pixels_different_from_baseline": 0
+      },
+      "301": {
+        "pts_us": 10033333,
+        "video_bytes": 23734,
+        "patch_bytes": 0,
+        "patch_budget_bytes": null,
+        "invalidations": 0,
+        "video_header_flags": 0,
+        "reset_in_video_header": false,
+        "displayed_pts_us": 10033333,
+        "pixels_different_from_baseline": 0
+      }
+    },
+    "hybrid": {
+      "299": {
+        "pts_us": 9966666,
+        "video_bytes": 0,
+        "patch_bytes": 0,
+        "patch_budget_bytes": null,
+        "invalidations": 0,
+        "video_header_flags": null,
+        "reset_in_video_header": false,
+        "displayed_pts_us": 933333,
+        "pixels_different_from_baseline": 742336
+      },
+      "300": {
+        "pts_us": 10000000,
+        "video_bytes": 133994,
+        "patch_bytes": 379,
+        "patch_budget_bytes": null,
+        "invalidations": 207,
+        "video_header_flags": 0,
+        "reset_in_video_header": false,
+        "displayed_pts_us": 10000000,
+        "pixels_different_from_baseline": 0
+      },
+      "301": {
+        "pts_us": 10033333,
+        "video_bytes": 23734,
+        "patch_bytes": 0,
+        "patch_budget_bytes": null,
+        "invalidations": 0,
+        "video_header_flags": 0,
+        "reset_in_video_header": false,
+        "displayed_pts_us": 10033333,
+        "pixels_different_from_baseline": 0
+      }
+    },
+    "paced": {
+      "299": {
+        "pts_us": 9966666,
+        "video_bytes": 0,
+        "patch_bytes": 0,
+        "patch_budget_bytes": 2000,
+        "invalidations": 0,
+        "video_header_flags": null,
+        "reset_in_video_header": false,
+        "displayed_pts_us": 7166666,
+        "pixels_different_from_baseline": 742336
+      },
+      "300": {
+        "pts_us": 10000000,
+        "video_bytes": 133994,
+        "patch_bytes": 0,
+        "patch_budget_bytes": 0,
+        "invalidations": 207,
+        "video_header_flags": 128,
+        "reset_in_video_header": true,
+        "displayed_pts_us": 10000000,
+        "pixels_different_from_baseline": 0
+      },
+      "301": {
+        "pts_us": 10033333,
+        "video_bytes": 23734,
+        "patch_bytes": 0,
+        "patch_budget_bytes": 0,
+        "invalidations": 0,
+        "video_header_flags": 0,
+        "reset_in_video_header": false,
+        "displayed_pts_us": 10033333,
+        "pixels_different_from_baseline": 0
+      }
+    }
+  }
+}

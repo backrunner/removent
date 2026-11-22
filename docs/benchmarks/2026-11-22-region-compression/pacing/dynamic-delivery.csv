@@ -1,0 +1,4 @@
+clip,link_kbps,updates,delay_p95_ms,delay_p99_ms,delay_max_ms,videos,video_p95_ms,video_p99_ms,video_max_ms,videos_delayed_by_patch,video_extra_p95_ms,video_extra_max_ms,total_patch_bytes,peak_patch_bytes,peak_patch_service_ms
+mixed-baseline,2000,120,933.528,1065.599,1094.268,120,933.528,1065.599,1094.268,0,0.0,0.0,0,0,0.0
+mixed-hybrid,2000,120,2081.001,2149.278,2151.773,120,2050.216,2121.736,2145.209,113,1761.01,1802.348,267670,15865,471.304
+mixed-paced,2000,120,933.528,1065.599,1094.268,120,933.528,1065.599,1094.268,0,0.0,0.0,90000,4000,8.0

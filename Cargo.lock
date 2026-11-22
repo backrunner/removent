@@ -8868,11 +8868,13 @@ name = "removent-media-codec"
 version = "0.2.0"
 dependencies = [
  "apple-cf",
+ "flate2",
  "image",
  "metal",
  "objc",
  "openh264",
  "opus",
+ "png 0.18.1",
  "rav1e",
  "removent-proto",
  "rusty_av1d",

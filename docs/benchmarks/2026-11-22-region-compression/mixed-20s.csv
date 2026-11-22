@@ -1,0 +1,4 @@
+scene,variant,width,height,fps,ticks,target_video_kbps,decoded,unchanged_ticks,display_updates,patch_installs,patch_invalidations,video_bytes,patch_bytes,peak_patch_bytes,total_bytes,total_kbps,delta_vs_hybrid_pct,text_psnr_db,text_edge_mae,motion_psnr_db,encode_p95_ms,patch_send_p95_ms,patch_receive_compose_p95_ms,pipeline_p50_ms,pipeline_p95_ms,pipeline_p99_ms
+mixed,baseline,1280,720,30,600,2000,600,0,600,0,0,4294792,0,0,4294792,1717.917,-5.867,38.595,3.187,31.773,3.054,0.000,0.000,4.290,5.409,6.390
+mixed,hybrid,1280,720,30,600,2000,600,0,600,168,6,4294792,267670,15865,4562462,1824.985,0.000,47.197,0.145,31.773,3.003,0.375,0.230,4.631,5.419,6.428
+mixed,matched,1280,720,30,600,2187,600,0,600,0,0,4574587,0,0,4574587,1829.835,0.266,38.844,2.982,31.808,2.853,0.000,0.000,3.895,4.621,5.781

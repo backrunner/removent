@@ -34,6 +34,8 @@ impl Sample {
 const MIN_CHANGE_INTERVAL_MS: u64 = 2000;
 const HEALTHY_UPGRADE_MS: u64 = 5000;
 const PRESSURE_DOWNGRADE_MS: u64 = 1000;
+const WRITE_BACKPRESSURE_MS: u64 = 500;
+const FAST_DOWNGRADE_INTERVAL_MS: u64 = 750;
 pub const MIN_REFRESH_FPS: u8 = 2;
 
 /// 0.08 bits/pixel/frame, rounded up. An engineering guardrail for screen
@@ -52,7 +54,9 @@ pub struct AdaptationController {
     preferred_frame_bits: u64,
     healthy_since_ms: Option<u64>,
     pressure_since_ms: Option<u64>,
-    last_change_ms: u64,
+    write_backpressure_since_ms: Option<u64>,
+    fast_cut_used: bool,
+    change_cooldown_from_ms: u64,
     now_ms: u64,
     dynamic: Option<(removent_proto::VideoQuality, u32, u32)>,
 }
@@ -98,7 +102,9 @@ impl AdaptationController {
                 .max(frame_bits),
             healthy_since_ms: None,
             pressure_since_ms: None,
-            last_change_ms: 0,
+            write_backpressure_since_ms: None,
+            fast_cut_used: false,
+            change_cooldown_from_ms: 0,
             now_ms: 0,
             dynamic: None,
         }
@@ -191,9 +197,21 @@ impl AdaptationController {
     pub fn pause_recovery(&mut self) {
         self.healthy_since_ms = None;
         self.pressure_since_ms = None;
+        self.write_backpressure_since_ms = None;
     }
 
     pub fn on_sample(&mut self, sample: &Sample, window_ms: u64) -> Option<QualityState> {
+        self.on_sample_with_write_backpressure(sample, window_ms, false)
+    }
+
+    /// Respond sooner to sustained media writes that cannot keep up with the
+    /// connection. Loss, jitter and decoder pressure keep the normal timing.
+    pub fn on_sample_with_write_backpressure(
+        &mut self,
+        sample: &Sample,
+        window_ms: u64,
+        write_backpressure: bool,
+    ) -> Option<QualityState> {
         self.now_ms = self.now_ms.saturating_add(window_ms);
         if !sample.is_valid() {
             self.pause_recovery();
@@ -210,8 +228,10 @@ impl AdaptationController {
         } else {
             (1000.0 / f32::from(self.state.fps)).max(40.0)
         };
-        let bad =
-            sample.loss_pct > 2.0 || sample.jitter_ms > 20.0 || sample.decode_ms > decode_budget_ms;
+        let bad = write_backpressure
+            || sample.loss_pct > 2.0
+            || sample.jitter_ms > 20.0
+            || sample.decode_ms > decode_budget_ms;
         if !bad && sample.loss_pct < 0.5 && sample.jitter_ms < 10. {
             self.healthy_since_ms.get_or_insert(self.now_ms);
         } else {
@@ -222,14 +242,37 @@ impl AdaptationController {
         } else {
             self.pressure_since_ms = None;
         }
-        if self.now_ms.saturating_sub(self.last_change_ms) < MIN_CHANGE_INTERVAL_MS {
+        if write_backpressure {
+            self.write_backpressure_since_ms.get_or_insert(self.now_ms);
+        } else {
+            self.write_backpressure_since_ms = None;
+        }
+        if self
+            .healthy_since_ms
+            .is_some_and(|t| self.now_ms.saturating_sub(t) >= HEALTHY_UPGRADE_MS)
+        {
+            self.fast_cut_used = false;
+        }
+        // One early cut starts draining the backlog. Later cuts need time to
+        // observe its effect and avoid pushing quality far below capacity.
+        let fast_down = !self.fast_cut_used
+            && self
+                .write_backpressure_since_ms
+                .is_some_and(|t| self.now_ms.saturating_sub(t) >= WRITE_BACKPRESSURE_MS);
+        let cooldown = if fast_down {
+            FAST_DOWNGRADE_INTERVAL_MS
+        } else {
+            MIN_CHANGE_INTERVAL_MS
+        };
+        if self.now_ms.saturating_sub(self.change_cooldown_from_ms) < cooldown {
             return None;
         }
         let before = self.state;
-        if bad
-            && self
-                .pressure_since_ms
-                .is_some_and(|t| self.now_ms.saturating_sub(t) >= PRESSURE_DOWNGRADE_MS)
+        if fast_down
+            || (bad
+                && self
+                    .pressure_since_ms
+                    .is_some_and(|t| self.now_ms.saturating_sub(t) >= PRESSURE_DOWNGRADE_MS))
         {
             let mut bitrate = (u64::from(self.state.bitrate_kbps) * 7 / 10) as u32;
             let mut fps = self.state.fps;
@@ -274,7 +317,22 @@ impl AdaptationController {
             self.healthy_since_ms = Some(self.now_ms);
         }
         if self.state != before {
-            self.last_change_ms = self.now_ms;
+            self.fast_cut_used |= fast_down;
+            self.change_cooldown_from_ms = if fast_down {
+                // Start clearing the queue sooner without pulling every later
+                // cut forward. Wait through the normal first-cut deadline
+                // before starting the regular cooldown.
+                self.change_cooldown_from_ms
+                    .saturating_add(MIN_CHANGE_INTERVAL_MS)
+                    .max(
+                        self.pressure_since_ms
+                            .unwrap_or(self.now_ms)
+                            .saturating_add(PRESSURE_DOWNGRADE_MS),
+                    )
+                    .max(self.now_ms)
+            } else {
+                self.now_ms
+            };
             Some(self.state)
         } else {
             None
@@ -294,6 +352,9 @@ mod tests {
             decode_ms: 1.,
         }
     }
+
+    mod backpressure;
+
     fn bad() -> Sample {
         Sample {
             loss_pct: 5.,

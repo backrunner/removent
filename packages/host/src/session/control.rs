@@ -330,7 +330,8 @@ pub fn spawn_control_pump(
                     }
                     _ = sample_tick.tick() => {
                         let elapsed = sample_elapsed_ms(&mut last_sample_at);
-                        let local = deps.delivery.as_ref().and_then(|health| health.sample());
+                        let (local, write_backpressure) = deps.delivery.as_ref()
+                            .map_or((None, false), |health| health.sample_with_write_backpressure());
                         let remote = remote_sample.as_ref().filter(|(at, _)| at.elapsed() <= Duration::from_millis(750)).map(|(_, sample)| *sample);
                         let sample = match (local, remote) {
                             (Some(healthy), remote) => {
@@ -347,7 +348,9 @@ pub fn spawn_control_pump(
                                 controller.set_dimensions(width, height);
                             }
                             if elapsed > 1000 || sample.is_none() { controller.pause_recovery(); }
-                            if let Some(sample) = sample { controller.on_sample(&sample, elapsed.min(1000)); }
+                            if let Some(sample) = sample {
+                                controller.on_sample_with_write_backpressure(&sample, elapsed.min(1000), write_backpressure);
+                            }
                             if let Some(delivery) = &deps.delivery {
                                 delivery.update_send_budget(controller.state().bitrate_kbps);
                             }
@@ -357,6 +360,7 @@ pub fn spawn_control_pump(
                             tracing::info!(
                                 bitrate_kbps = st.bitrate_kbps, fps = st.fps,
                                 local_healthy = ?local, sample = ?sample,
+                                write_backpressure,
                                 frame_work_load = ?deps.delivery.as_ref().map(|d| d.frame_work_load()),
                                 "video quality adapted"
                             );

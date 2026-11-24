@@ -14,6 +14,7 @@ struct Window {
     started: Option<Instant>,
     last_completed: Option<(Instant, bool)>,
     slow: bool,
+    slow_write: bool,
     sent_packets: u64,
     lost_packets: u64,
     capture_dims: Option<(u32, u32)>,
@@ -45,7 +46,7 @@ impl DeliveryHealth {
         if let Some(started) = window.started.take() {
             let healthy = started.elapsed() < Duration::from_millis(100);
             window.last_completed = Some((Instant::now(), healthy));
-            window.slow |= !healthy;
+            window.slow_write |= !healthy;
         }
     }
 
@@ -99,6 +100,12 @@ impl DeliveryHealth {
     /// None means no fresh evidence, not a healthy network. A degraded static
     /// screen sends a cached refresh once per second to obtain fresh evidence.
     pub fn sample(&self) -> Option<bool> {
+        self.sample_with_write_backpressure().0
+    }
+
+    /// Distinguish blocked media writes from loss or encoder pressure. Only
+    /// active stalls and newly completed slow writes count toward fast relief.
+    pub(crate) fn sample_with_write_backpressure(&self) -> (Option<bool>, bool) {
         let mut window = self.window.lock().unwrap();
         let loss = self.conn.as_ref().is_some_and(|conn| {
             let path = conn.inner().stats().path;
@@ -111,7 +118,8 @@ impl DeliveryHealth {
         let stalled = window
             .started
             .is_some_and(|t| t.elapsed() >= Duration::from_millis(100));
-        let sample = if stalled || window.slow || loss {
+        let write_backpressure = std::mem::take(&mut window.slow_write) || stalled;
+        let sample = if write_backpressure || window.slow || loss {
             Some(false)
         } else {
             window
@@ -120,7 +128,7 @@ impl DeliveryHealth {
                 .map(|(_, healthy)| healthy)
         };
         window.slow = false;
-        sample
+        (sample, write_backpressure)
     }
 }
 
@@ -211,5 +219,26 @@ mod tests {
         health.begin_write();
         health.end_write();
         assert_eq!(health.sample(), Some(true));
+    }
+
+    #[test]
+    fn completed_slow_write_counts_once_and_encoder_pressure_is_distinct() {
+        let health = DeliveryHealth::default();
+        health.begin_write();
+        *health.window.lock().unwrap().started.as_mut().unwrap() -= Duration::from_millis(200);
+        assert_eq!(health.sample_with_write_backpressure(), (Some(false), true));
+        health.end_write();
+        assert_eq!(health.sample_with_write_backpressure(), (Some(false), true));
+        assert_eq!(
+            health.sample_with_write_backpressure(),
+            (Some(false), false)
+        );
+        health.begin_write();
+        health.end_write();
+        health.encoder_limited();
+        assert_eq!(
+            health.sample_with_write_backpressure(),
+            (Some(false), false)
+        );
     }
 }

@@ -1,0 +1,913 @@
+{
+  "machine": "Apple M5 Max",
+  "build": "release",
+  "link_kbps": [
+    20000,
+    2000,
+    20000
+  ],
+  "nominal_rtt_ms": 80,
+  "duration_s": 30,
+  "trials": [
+    {
+      "variant": "baseline",
+      "phase_metrics": {
+        "age_before": {
+          "frames": 114,
+          "p95_ms": 66.33491699999999
+        },
+        "age_low": {
+          "frames": 98,
+          "p95_ms": 1037.824334
+        },
+        "age_recovery": {
+          "frames": 326,
+          "p95_ms": 50.415542
+        },
+        "before_drop_kbps": 12000,
+        "carrier": "quic",
+        "drop_at_ms": 4001.7988339999997,
+        "first_cut_ms": 1498.0740830000002,
+        "first_recovery_ms": 5748.359916,
+        "fits_low_link_ms": null,
+        "quality": [
+          [
+            5499,
+            8400
+          ],
+          [
+            7750,
+            5880
+          ],
+          [
+            10000,
+            4116
+          ],
+          [
+            12250,
+            2881
+          ],
+          [
+            14500,
+            2016
+          ],
+          [
+            21750,
+            2520
+          ],
+          [
+            27000,
+            3150
+          ]
+        ],
+        "restore_at_ms": 16001.786208999998
+      },
+      "session_metrics": {
+        "carrier": "quic",
+        "scenario": "bandwidth-step",
+        "nominal_rtt_ms": "80",
+        "link_kbps": "20000",
+        "udp_loss_pct_per_leg": "0",
+        "tcp_stall_ms": "0",
+        "sent": "301",
+        "down_received": "301",
+        "up_received": "301",
+        "timeouts": "0",
+        "input_p50_ms": "43.17",
+        "input_p95_ms": "44.76",
+        "control_rtt_p95_ms": "394.06",
+        "control_rtt_p99_ms": "571.43",
+        "media_mbps": "3.170",
+        "final_video_kbps": "3150",
+        "proxy_dropped_packets": "2484",
+        "sample_seconds": "30.002",
+        "scheduler_lag_max_ms": "3.82"
+      }
+    },
+    {
+      "variant": "baseline",
+      "phase_metrics": {
+        "age_before": {
+          "frames": 115,
+          "p95_ms": 62.302375
+        },
+        "age_low": {
+          "frames": 130,
+          "p95_ms": 789.214875
+        },
+        "age_recovery": {
+          "frames": 323,
+          "p95_ms": 47.438666999999995
+        },
+        "before_drop_kbps": 12000,
+        "carrier": "direct",
+        "drop_at_ms": 4001.187375,
+        "first_cut_ms": 1498.959167,
+        "first_recovery_ms": 5749.003375,
+        "fits_low_link_ms": null,
+        "quality": [
+          [
+            5500,
+            8400
+          ],
+          [
+            7750,
+            5880
+          ],
+          [
+            10000,
+            4116
+          ],
+          [
+            12250,
+            2881
+          ],
+          [
+            14500,
+            2016
+          ],
+          [
+            21749,
+            2520
+          ],
+          [
+            27001,
+            3150
+          ]
+        ],
+        "restore_at_ms": 16000.963459
+      },
+      "session_metrics": {
+        "carrier": "direct",
+        "scenario": "bandwidth-step",
+        "nominal_rtt_ms": "80",
+        "link_kbps": "20000",
+        "udp_loss_pct_per_leg": "0",
+        "tcp_stall_ms": "0",
+        "sent": "301",
+        "down_received": "301",
+        "up_received": "301",
+        "timeouts": "0",
+        "input_p50_ms": "41.56",
+        "input_p95_ms": "42.42",
+        "control_rtt_p95_ms": "405.03",
+        "control_rtt_p99_ms": "762.84",
+        "media_mbps": "3.334",
+        "final_video_kbps": "3150",
+        "proxy_dropped_packets": "1669",
+        "sample_seconds": "30.002",
+        "scheduler_lag_max_ms": "4.09"
+      }
+    },
+    {
+      "variant": "baseline",
+      "phase_metrics": {
+        "age_before": {
+          "frames": 101,
+          "p95_ms": 88.78016699999999
+        },
+        "age_low": {
+          "frames": 96,
+          "p95_ms": 787.5869170000001
+        },
+        "age_recovery": {
+          "frames": 384,
+          "p95_ms": 84.266792
+        },
+        "before_drop_kbps": 12000,
+        "carrier": "websocket",
+        "drop_at_ms": 4001.9175410000003,
+        "first_cut_ms": 1747.6311249999999,
+        "first_recovery_ms": 5498.774417,
+        "fits_low_link_ms": null,
+        "quality": [
+          [
+            5749,
+            8400
+          ],
+          [
+            7999,
+            5880
+          ],
+          [
+            13749,
+            7350
+          ],
+          [
+            21500,
+            9188
+          ],
+          [
+            26750,
+            11485
+          ]
+        ],
+        "restore_at_ms": 16001.656540999998
+      },
+      "session_metrics": {
+        "carrier": "websocket",
+        "scenario": "bandwidth-step",
+        "nominal_rtt_ms": "80",
+        "link_kbps": "20000",
+        "udp_loss_pct_per_leg": "0",
+        "tcp_stall_ms": "0",
+        "sent": "301",
+        "down_received": "301",
+        "up_received": "301",
+        "timeouts": "0",
+        "input_p50_ms": "43.20",
+        "input_p95_ms": "44.68",
+        "control_rtt_p95_ms": "624.88",
+        "control_rtt_p99_ms": "677.62",
+        "media_mbps": "5.928",
+        "final_video_kbps": "12000",
+        "proxy_dropped_packets": "0",
+        "sample_seconds": "30.001",
+        "scheduler_lag_max_ms": "14.29"
+      }
+    },
+    {
+      "variant": "continuous-fast",
+      "phase_metrics": {
+        "age_before": {
+          "frames": 113,
+          "p95_ms": 68.23325
+        },
+        "age_low": {
+          "frames": 125,
+          "p95_ms": 779.1107499999999
+        },
+        "age_recovery": {
+          "frames": 121,
+          "p95_ms": 53.161083
+        },
+        "before_drop_kbps": 12000,
+        "carrier": "quic",
+        "drop_at_ms": 4001.566084,
+        "first_cut_ms": 998.3998750000001,
+        "first_recovery_ms": 5747.499709,
+        "fits_low_link_ms": 7497.273666,
+        "quality": [
+          [
+            4999,
+            8400
+          ],
+          [
+            5999,
+            5880
+          ],
+          [
+            6999,
+            4116
+          ],
+          [
+            7999,
+            2881
+          ],
+          [
+            9249,
+            2016
+          ],
+          [
+            11498,
+            1411
+          ],
+          [
+            13748,
+            987
+          ],
+          [
+            15999,
+            690
+          ],
+          [
+            21749,
+            863
+          ],
+          [
+            26999,
+            1079
+          ]
+        ],
+        "restore_at_ms": 16001.914374999998
+      },
+      "session_metrics": {
+        "carrier": "quic",
+        "scenario": "bandwidth-step",
+        "nominal_rtt_ms": "80",
+        "link_kbps": "20000",
+        "udp_loss_pct_per_leg": "0",
+        "tcp_stall_ms": "0",
+        "sent": "301",
+        "down_received": "301",
+        "up_received": "301",
+        "timeouts": "0",
+        "input_p50_ms": "43.62",
+        "input_p95_ms": "45.28",
+        "control_rtt_p95_ms": "272.14",
+        "control_rtt_p99_ms": "372.51",
+        "media_mbps": "2.439",
+        "final_video_kbps": "1079",
+        "proxy_dropped_packets": "1393",
+        "sample_seconds": "30.002",
+        "scheduler_lag_max_ms": "7.50"
+      }
+    },
+    {
+      "variant": "continuous-fast",
+      "phase_metrics": {
+        "age_before": {
+          "frames": 114,
+          "p95_ms": 62.605667000000004
+        },
+        "age_low": {
+          "frames": 155,
+          "p95_ms": 605.2731249999999
+        },
+        "age_recovery": {
+          "frames": 162,
+          "p95_ms": 47.4585
+        },
+        "before_drop_kbps": 12000,
+        "carrier": "direct",
+        "drop_at_ms": 4001.0920829999995,
+        "first_cut_ms": 999.4807500000001,
+        "first_recovery_ms": 5749.059499999999,
+        "fits_low_link_ms": 9004.723125,
+        "quality": [
+          [
+            5000,
+            8400
+          ],
+          [
+            5999,
+            5880
+          ],
+          [
+            6999,
+            4116
+          ],
+          [
+            8499,
+            2881
+          ],
+          [
+            10749,
+            2016
+          ],
+          [
+            13005,
+            1411
+          ],
+          [
+            15250,
+            987
+          ],
+          [
+            21750,
+            1234
+          ],
+          [
+            27001,
+            1543
+          ]
+        ],
+        "restore_at_ms": 16001.275333
+      },
+      "session_metrics": {
+        "carrier": "direct",
+        "scenario": "bandwidth-step",
+        "nominal_rtt_ms": "80",
+        "link_kbps": "20000",
+        "udp_loss_pct_per_leg": "0",
+        "tcp_stall_ms": "0",
+        "sent": "301",
+        "down_received": "301",
+        "up_received": "301",
+        "timeouts": "0",
+        "input_p50_ms": "41.63",
+        "input_p95_ms": "42.59",
+        "control_rtt_p95_ms": "250.33",
+        "control_rtt_p99_ms": "371.63",
+        "media_mbps": "2.727",
+        "final_video_kbps": "1543",
+        "proxy_dropped_packets": "1052",
+        "sample_seconds": "30.001",
+        "scheduler_lag_max_ms": "10.18"
+      }
+    },
+    {
+      "variant": "continuous-fast",
+      "phase_metrics": {
+        "age_before": {
+          "frames": 103,
+          "p95_ms": 87.782416
+        },
+        "age_low": {
+          "frames": 99,
+          "p95_ms": 599.8965830000001
+        },
+        "age_recovery": {
+          "frames": 379,
+          "p95_ms": 89.298666
+        },
+        "before_drop_kbps": 12000,
+        "carrier": "websocket",
+        "drop_at_ms": 4001.509291,
+        "first_cut_ms": 999.3712919999999,
+        "first_recovery_ms": 4749.9082499999995,
+        "fits_low_link_ms": null,
+        "quality": [
+          [
+            5000,
+            8400
+          ],
+          [
+            6500,
+            5880
+          ],
+          [
+            12252,
+            7350
+          ],
+          [
+            20750,
+            9188
+          ],
+          [
+            26000,
+            11485
+          ]
+        ],
+        "restore_at_ms": 16000.858291
+      },
+      "session_metrics": {
+        "carrier": "websocket",
+        "scenario": "bandwidth-step",
+        "nominal_rtt_ms": "80",
+        "link_kbps": "20000",
+        "udp_loss_pct_per_leg": "0",
+        "tcp_stall_ms": "0",
+        "sent": "301",
+        "down_received": "301",
+        "up_received": "301",
+        "timeouts": "0",
+        "input_p50_ms": "43.10",
+        "input_p95_ms": "45.02",
+        "control_rtt_p95_ms": "524.87",
+        "control_rtt_p99_ms": "679.72",
+        "media_mbps": "5.995",
+        "final_video_kbps": "12000",
+        "proxy_dropped_packets": "0",
+        "sample_seconds": "30.001",
+        "scheduler_lag_max_ms": "15.15"
+      }
+    },
+    {
+      "variant": "first-cut-unanchored",
+      "phase_metrics": {
+        "age_before": {
+          "frames": 114,
+          "p95_ms": 66.422209
+        },
+        "age_low": {
+          "frames": 114,
+          "p95_ms": 906.3452090000001
+        },
+        "age_recovery": {
+          "frames": 237,
+          "p95_ms": 50.582708999999994
+        },
+        "before_drop_kbps": 12000,
+        "carrier": "quic",
+        "drop_at_ms": 4001.8326249999996,
+        "first_cut_ms": 996.987125,
+        "first_recovery_ms": 5748.241167,
+        "fits_low_link_ms": null,
+        "quality": [
+          [
+            4998,
+            8400
+          ],
+          [
+            7249,
+            5880
+          ],
+          [
+            9499,
+            4116
+          ],
+          [
+            11749,
+            2881
+          ],
+          [
+            13999,
+            2016
+          ],
+          [
+            16249,
+            1411
+          ],
+          [
+            21749,
+            1764
+          ],
+          [
+            26999,
+            2205
+          ]
+        ],
+        "restore_at_ms": 16001.398583
+      },
+      "session_metrics": {
+        "carrier": "quic",
+        "scenario": "bandwidth-step",
+        "nominal_rtt_ms": "80",
+        "link_kbps": "20000",
+        "udp_loss_pct_per_leg": "0",
+        "tcp_stall_ms": "0",
+        "sent": "301",
+        "down_received": "301",
+        "up_received": "301",
+        "timeouts": "0",
+        "input_p50_ms": "43.34",
+        "input_p95_ms": "44.74",
+        "control_rtt_p95_ms": "369.37",
+        "control_rtt_p99_ms": "539.00",
+        "media_mbps": "2.897",
+        "final_video_kbps": "2205",
+        "proxy_dropped_packets": "2332",
+        "sample_seconds": "30.001",
+        "scheduler_lag_max_ms": "3.96"
+      }
+    },
+    {
+      "variant": "first-cut-unanchored",
+      "phase_metrics": {
+        "age_before": {
+          "frames": 114,
+          "p95_ms": 62.508416999999994
+        },
+        "age_low": {
+          "frames": 137,
+          "p95_ms": 745.428584
+        },
+        "age_recovery": {
+          "frames": 238,
+          "p95_ms": 47.26975
+        },
+        "before_drop_kbps": 12000,
+        "carrier": "direct",
+        "drop_at_ms": 4000.923459,
+        "first_cut_ms": 999.494833,
+        "first_recovery_ms": 5750.364875,
+        "fits_low_link_ms": null,
+        "quality": [
+          [
+            5000,
+            8400
+          ],
+          [
+            7249,
+            5880
+          ],
+          [
+            9501,
+            4116
+          ],
+          [
+            11749,
+            2881
+          ],
+          [
+            14000,
+            2016
+          ],
+          [
+            16251,
+            1411
+          ],
+          [
+            21751,
+            1764
+          ],
+          [
+            27001,
+            2205
+          ]
+        ],
+        "restore_at_ms": 16001.021625
+      },
+      "session_metrics": {
+        "carrier": "direct",
+        "scenario": "bandwidth-step",
+        "nominal_rtt_ms": "80",
+        "link_kbps": "20000",
+        "udp_loss_pct_per_leg": "0",
+        "tcp_stall_ms": "0",
+        "sent": "301",
+        "down_received": "301",
+        "up_received": "301",
+        "timeouts": "0",
+        "input_p50_ms": "41.53",
+        "input_p95_ms": "42.37",
+        "control_rtt_p95_ms": "277.75",
+        "control_rtt_p99_ms": "460.66",
+        "media_mbps": "3.012",
+        "final_video_kbps": "2205",
+        "proxy_dropped_packets": "1456",
+        "sample_seconds": "30.001",
+        "scheduler_lag_max_ms": "4.35"
+      }
+    },
+    {
+      "variant": "first-cut-unanchored",
+      "phase_metrics": {
+        "age_before": {
+          "frames": 103,
+          "p95_ms": 90.153708
+        },
+        "age_low": {
+          "frames": 99,
+          "p95_ms": 577.965417
+        },
+        "age_recovery": {
+          "frames": 375,
+          "p95_ms": 91.25170800000001
+        },
+        "before_drop_kbps": 12000,
+        "carrier": "websocket",
+        "drop_at_ms": 4000.224166,
+        "first_cut_ms": 750.750417,
+        "first_recovery_ms": 3499.590917,
+        "fits_low_link_ms": null,
+        "quality": [
+          [
+            4750,
+            8400
+          ],
+          [
+            7000,
+            5880
+          ],
+          [
+            12750,
+            7350
+          ],
+          [
+            19499,
+            9188
+          ],
+          [
+            24749,
+            11485
+          ],
+          [
+            29999,
+            12000
+          ]
+        ],
+        "restore_at_ms": 16000.315458
+      },
+      "session_metrics": {
+        "carrier": "websocket",
+        "scenario": "bandwidth-step",
+        "nominal_rtt_ms": "80",
+        "link_kbps": "20000",
+        "udp_loss_pct_per_leg": "0",
+        "tcp_stall_ms": "0",
+        "sent": "301",
+        "down_received": "301",
+        "up_received": "301",
+        "timeouts": "0",
+        "input_p50_ms": "43.29",
+        "input_p95_ms": "44.57",
+        "control_rtt_p95_ms": "529.17",
+        "control_rtt_p99_ms": "658.01",
+        "media_mbps": "6.103",
+        "final_video_kbps": "12000",
+        "proxy_dropped_packets": "0",
+        "sample_seconds": "30.000",
+        "scheduler_lag_max_ms": "3.11"
+      }
+    },
+    {
+      "variant": "first-cut",
+      "phase_metrics": {
+        "age_before": {
+          "frames": 113,
+          "p95_ms": 66.599209
+        },
+        "age_low": {
+          "frames": 112,
+          "p95_ms": 928.8045000000001
+        },
+        "age_recovery": {
+          "frames": 327,
+          "p95_ms": 50.659209
+        },
+        "before_drop_kbps": 12000,
+        "carrier": "quic",
+        "drop_at_ms": 4000.9132090000003,
+        "first_cut_ms": 999.2520000000001,
+        "first_recovery_ms": 5748.619584,
+        "fits_low_link_ms": null,
+        "quality": [
+          [
+            5000,
+            8400
+          ],
+          [
+            7500,
+            5880
+          ],
+          [
+            9750,
+            4116
+          ],
+          [
+            12000,
+            2881
+          ],
+          [
+            14250,
+            2016
+          ],
+          [
+            21749,
+            2520
+          ],
+          [
+            26999,
+            3150
+          ]
+        ],
+        "restore_at_ms": 16001.102750000002
+      },
+      "session_metrics": {
+        "carrier": "quic",
+        "scenario": "bandwidth-step",
+        "nominal_rtt_ms": "80",
+        "link_kbps": "20000",
+        "udp_loss_pct_per_leg": "0",
+        "tcp_stall_ms": "0",
+        "sent": "301",
+        "down_received": "301",
+        "up_received": "301",
+        "timeouts": "0",
+        "input_p50_ms": "43.23",
+        "input_p95_ms": "44.48",
+        "control_rtt_p95_ms": "389.95",
+        "control_rtt_p99_ms": "494.18",
+        "media_mbps": "3.209",
+        "final_video_kbps": "3150",
+        "proxy_dropped_packets": "2276",
+        "sample_seconds": "30.001",
+        "scheduler_lag_max_ms": "4.29"
+      }
+    },
+    {
+      "variant": "first-cut",
+      "phase_metrics": {
+        "age_before": {
+          "frames": 114,
+          "p95_ms": 62.501209
+        },
+        "age_low": {
+          "frames": 133,
+          "p95_ms": 766.294
+        },
+        "age_recovery": {
+          "frames": 323,
+          "p95_ms": 47.290084
+        },
+        "before_drop_kbps": 12000,
+        "carrier": "direct",
+        "drop_at_ms": 4001.006083,
+        "first_cut_ms": 748.2524579999999,
+        "first_recovery_ms": 5748.522666999999,
+        "fits_low_link_ms": null,
+        "quality": [
+          [
+            4749,
+            8400
+          ],
+          [
+            7500,
+            5880
+          ],
+          [
+            9751,
+            4116
+          ],
+          [
+            12000,
+            2881
+          ],
+          [
+            14249,
+            2016
+          ],
+          [
+            21750,
+            2520
+          ],
+          [
+            27001,
+            3150
+          ]
+        ],
+        "restore_at_ms": 16002.208916000001
+      },
+      "session_metrics": {
+        "carrier": "direct",
+        "scenario": "bandwidth-step",
+        "nominal_rtt_ms": "80",
+        "link_kbps": "20000",
+        "udp_loss_pct_per_leg": "0",
+        "tcp_stall_ms": "0",
+        "sent": "301",
+        "down_received": "301",
+        "up_received": "301",
+        "timeouts": "0",
+        "input_p50_ms": "41.60",
+        "input_p95_ms": "42.32",
+        "control_rtt_p95_ms": "347.52",
+        "control_rtt_p99_ms": "473.83",
+        "media_mbps": "3.309",
+        "final_video_kbps": "3150",
+        "proxy_dropped_packets": "1481",
+        "sample_seconds": "30.002",
+        "scheduler_lag_max_ms": "3.96"
+      }
+    },
+    {
+      "variant": "first-cut",
+      "phase_metrics": {
+        "age_before": {
+          "frames": 104,
+          "p95_ms": 89.111583
+        },
+        "age_low": {
+          "frames": 97,
+          "p95_ms": 661.33475
+        },
+        "age_recovery": {
+          "frames": 379,
+          "p95_ms": 83.8715
+        },
+        "before_drop_kbps": 12000,
+        "carrier": "websocket",
+        "drop_at_ms": 4001.2220420000003,
+        "first_cut_ms": 998.719,
+        "first_recovery_ms": 3497.969291,
+        "fits_low_link_ms": null,
+        "quality": [
+          [
+            4999,
+            8400
+          ],
+          [
+            7749,
+            5880
+          ],
+          [
+            13498,
+            7350
+          ],
+          [
+            19499,
+            9188
+          ],
+          [
+            24749,
+            11485
+          ]
+        ],
+        "restore_at_ms": 16001.634333999998
+      },
+      "session_metrics": {
+        "carrier": "websocket",
+        "scenario": "bandwidth-step",
+        "nominal_rtt_ms": "80",
+        "link_kbps": "20000",
+        "udp_loss_pct_per_leg": "0",
+        "tcp_stall_ms": "0",
+        "sent": "301",
+        "down_received": "301",
+        "up_received": "301",
+        "timeouts": "0",
+        "input_p50_ms": "43.17",
+        "input_p95_ms": "44.60",
+        "control_rtt_p95_ms": "529.73",
+        "control_rtt_p99_ms": "707.63",
+        "media_mbps": "6.157",
+        "final_video_kbps": "12000",
+        "proxy_dropped_packets": "0",
+        "sample_seconds": "30.002",
+        "scheduler_lag_max_ms": "3.62"
+      }
+    }
+  ]
+}

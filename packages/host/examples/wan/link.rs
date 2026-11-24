@@ -64,7 +64,12 @@ impl Pacer {
 }
 
 impl Proxy {
-    pub async fn udp(target: SocketAddr, link: Link, seed: u32) -> Result<Self> {
+    pub async fn udp(
+        target: SocketAddr,
+        link: Link,
+        seed: u32,
+        rate: Arc<AtomicU64>,
+    ) -> Result<Self> {
         let front = UdpSocket::bind("127.0.0.1:0").await?;
         let back = UdpSocket::bind("127.0.0.1:0").await?;
         back.connect(target).await?;
@@ -113,7 +118,13 @@ impl Proxy {
                     {
                         dropped.fetch_add(1, Ordering::Relaxed);
                     } else {
-                        let due = clocks[i].due(bytes.len(), link);
+                        let due = clocks[i].due(
+                            bytes.len(),
+                            Link {
+                                kbps: rate.load(Ordering::Relaxed),
+                                ..link
+                            },
+                        );
                         // Random loss occurs after serialization and consumes
                         // bandwidth; queue-overflow drops above do not.
                         if clocks[i].lost(link.loss_percent) {
@@ -132,7 +143,7 @@ impl Proxy {
         })
     }
 
-    pub async fn tcp(target: SocketAddr, link: Link) -> Result<Self> {
+    pub async fn tcp(target: SocketAddr, link: Link, rate: Arc<AtomicU64>) -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
         let task = tokio::spawn(async move {
@@ -141,11 +152,12 @@ impl Proxy {
                 tokio::select! {
                     accepted = listener.accept() => {
                         let Ok((front,_)) = accepted else { break; };
+                        let rate = rate.clone();
                         tasks.spawn(async move {
                             let back = TcpStream::connect(target).await?;
                             front.set_nodelay(true)?; back.set_nodelay(true)?;
                             let (fr,fw) = front.into_split(); let (br,bw) = back.into_split();
-                            tokio::try_join!(tcp_direction(fr,bw,link),tcp_direction(br,fw,link))?;
+                            tokio::try_join!(tcp_direction(fr,bw,link,&rate),tcp_direction(br,fw,link,&rate))?;
                             Ok::<_, std::io::Error>(())
                         });
                     }
@@ -165,6 +177,7 @@ async fn tcp_direction(
     mut read: tokio::net::tcp::OwnedReadHalf,
     mut write: tokio::net::tcp::OwnedWriteHalf,
     link: Link,
+    rate: &AtomicU64,
 ) -> std::io::Result<()> {
     // Ordered byte-stream stalls model TCP recovery/HOL. They are deliberately
     // NOT described as actual packet loss: dropping bytes would corrupt TCP.
@@ -177,7 +190,13 @@ async fn tcp_direction(
             if n == 0 {
                 break;
             }
-            let due = pacer.due(n, link);
+            let due = pacer.due(
+                n,
+                Link {
+                    kbps: rate.load(Ordering::Relaxed),
+                    ..link
+                },
+            );
             if tx.send((due, bytes[..n].to_vec())).await.is_err() {
                 break;
             }

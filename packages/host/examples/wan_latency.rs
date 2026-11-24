@@ -3,6 +3,8 @@
 //! cargo run --release -p removent-host --example wan_latency -- quic 12
 #[path = "wan/link.rs"]
 mod link;
+#[path = "wan/step.rs"]
+mod step;
 use anyhow::{Context, Result, ensure};
 use futures::{SinkExt, StreamExt};
 use link::{Link, Proxy};
@@ -20,7 +22,7 @@ use removent_net::{
 };
 use removent_proto::{
     Caps, ControlMsg, HandshakeClient, HandshakeServer, Hello, KeyKind, KeyModifiers, MouseKind,
-    ScrollPhase,
+    ScrollPhase, VideoQuality,
 };
 use removent_relay::{
     client::{self, ClientBridge},
@@ -84,6 +86,8 @@ async fn run(
     seconds: u64,
     video: bool,
 ) -> Result<()> {
+    let bandwidth_step = label == "bandwidth-step";
+    let rate = Arc::new(AtomicU64::new(kbps));
     let directory = tempfile::tempdir()?;
     let id = |name: &str| {
         identity::load_or_create(
@@ -114,7 +118,7 @@ async fn run(
         stall_ms: stall,
     };
     let target = if carrier == "direct" {
-        proxies.push(Proxy::udp(host_ep.local_addr()?, link, 42).await?);
+        proxies.push(Proxy::udp(host_ep.local_addr()?, link, 42, rate.clone()).await?);
         proxies[0].address
     } else {
         let endpoint = removent_relay::server_endpoint("127.0.0.1:0".parse()?, &relay_id)?;
@@ -151,9 +155,9 @@ async fn run(
         });
         for seed in [42, 137] {
             proxies.push(if ws {
-                Proxy::tcp(address, link).await?
+                Proxy::tcp(address, link, rate.clone()).await?
             } else {
-                Proxy::udp(address, link, seed).await?
+                Proxy::udp(address, link, seed, rate.clone()).await?
             });
         }
         let cfg = TunnelConfig {
@@ -236,11 +240,17 @@ async fn run(
             automation: None,
             conn: host.clone(),
             kf_tx: None,
-            controller: Some(Arc::new(Mutex::new(AdaptationController::new(
-                12000,
-                30,
-                QualityPreset::Auto,
-            )))),
+            controller: Some(Arc::new(Mutex::new(if bandwidth_step {
+                AdaptationController::with_video_quality(
+                    12000,
+                    30,
+                    VideoQuality::Standard,
+                    1920,
+                    1080,
+                )
+            } else {
+                AdaptationController::new(12000, 30, QualityPreset::Auto)
+            }))),
             window_ms: 250,
             input: Some(inputs.clone()),
             local_clip: None,
@@ -259,15 +269,24 @@ async fn run(
         Ok(())
     });
     let total = Arc::new(AtomicU64::new(0));
+    let step = bandwidth_step.then(|| Arc::new(step::Step::new()));
     if video {
         let mut send = host.open_media_stream().await?;
         let quality = quality_rx.clone();
         let stop_video = stop.clone();
+        let source_step = step.clone();
         tasks.spawn(async move {
             let work = async {
                 loop {
                     let q = *quality.borrow();
-                    let bytes = vec![0x5a; q.bitrate_kbps as usize * 1000 / 8 / usize::from(q.fps)];
+                    let size = q.bitrate_kbps as usize * 1000 / 8 / usize::from(q.fps);
+                    let mut bytes = vec![0x5a; size];
+                    if let Some(step) = &source_step {
+                        bytes[..4].copy_from_slice(&(size as u32).to_be_bytes());
+                        bytes[4..12].copy_from_slice(
+                            &(step.epoch.elapsed().as_micros() as u64).to_be_bytes(),
+                        );
+                    }
                     health.begin_write();
                     removent_net::session::write_media(&mut send, &bytes).await?;
                     health.end_write();
@@ -280,17 +299,41 @@ async fn run(
         });
         let viewer = viewer.clone();
         let bytes = total.clone();
+        let receiver_step = step.clone();
         tasks.spawn(async move {
             let mut recv = viewer.accept_media_stream().await?;
             let mut buffer = [0; 16384];
-            while let Some(n) = recv.read(&mut buffer).await? {
-                bytes.fetch_add(n as u64, Ordering::Relaxed);
+            if let Some(step) = receiver_step {
+                loop {
+                    let mut header = [0; 12];
+                    recv.read_exact(&mut header).await?;
+                    let size = u32::from_be_bytes(header[..4].try_into()?) as usize;
+                    ensure!(
+                        (12..=1_500_000).contains(&size),
+                        "invalid synthetic frame size"
+                    );
+                    let mut remaining = size - header.len();
+                    while remaining != 0 {
+                        let n = remaining.min(buffer.len());
+                        recv.read_exact(&mut buffer[..n]).await?;
+                        remaining -= n;
+                    }
+                    bytes.fetch_add(size as u64, Ordering::Relaxed);
+                    step.frame(u64::from_be_bytes(header[4..].try_into()?));
+                }
+            } else {
+                while let Some(n) = recv.read(&mut buffer).await? {
+                    bytes.fetch_add(n as u64, Ordering::Relaxed);
+                }
             }
             Ok(())
         });
     }
     tokio::time::sleep(Duration::from_secs(1)).await;
     let started = Instant::now();
+    if let Some(step) = &step {
+        tasks.spawn(step.clone().sample(started, rate, quality_rx.clone()));
+    }
     let first = total.load(Ordering::Relaxed);
     let scheduler_lag = Arc::new(AtomicU64::new(0));
     let lag = scheduler_lag.clone();
@@ -356,6 +399,9 @@ async fn run(
         }
     }
     let (sent, _tx) = sender.await??;
+    if let Some(step) = &step {
+        step.report(carrier, started, started + Duration::from_secs(seconds))?;
+    }
     let timeouts = usize::from(sent) - rtts.len() + rtts.iter().filter(|&&t| t >= 2000.).count();
     let (delivered, elapsed) = delivered.unwrap_or_else(|| {
         (
@@ -407,6 +453,14 @@ async fn main() -> Result<()> {
     println!(
         "carrier,scenario,nominal_rtt_ms,link_kbps,udp_loss_pct_per_leg,tcp_stall_ms,sent,down_received,up_received,timeouts,input_p50_ms,input_p95_ms,control_rtt_p95_ms,control_rtt_p99_ms,media_mbps,final_video_kbps,proxy_dropped_packets,sample_seconds,scheduler_lag_max_ms"
     );
+    if args.get(3).is_some_and(|mode| mode == "step") {
+        ensure!(seconds >= 26, "bandwidth step requires at least 26 seconds");
+        return tokio::time::timeout(
+            Duration::from_secs(seconds + 60),
+            run(carrier, "bandwidth-step", 80, 20_000, 0, 0, seconds, true),
+        )
+        .await?;
+    }
     let ws = carrier == "websocket";
     for (label, rtt, kbps, loss, stall, video) in [
         ("idle", 80, 8000, 0, 0, false),

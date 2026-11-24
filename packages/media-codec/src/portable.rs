@@ -62,7 +62,7 @@ pub struct DecodedBgra {
     pub pts_us: i64,
 }
 pub struct VideoEncoder {
-    h264: Option<openh264::encoder::Encoder>,
+    h264: Option<H264Encoder>,
     av1: Option<Av1Encoder>,
     width: usize,
     height: usize,
@@ -70,6 +70,12 @@ pub struct VideoEncoder {
     bitrate: u32,
     params: Option<Vec<Vec<u8>>>,
 }
+
+struct H264Encoder {
+    encoder: openh264::encoder::Encoder,
+    yuv: Option<openh264::formats::YUVBuffer>,
+}
+
 impl VideoEncoder {
     pub fn new(
         codec: CodecId,
@@ -82,7 +88,13 @@ impl VideoEncoder {
             return Err(VideoError::Surface("invalid video geometry".into()));
         }
         let (h264, av1) = match codec {
-            CodecId::H264 => (Some(Self::h264(bitrate, fps)?), None),
+            CodecId::H264 => (
+                Some(H264Encoder {
+                    encoder: Self::new_h264(bitrate, fps)?,
+                    yuv: None,
+                }),
+                None,
+            ),
             CodecId::Av1 => (None, Some(Av1Encoder::new(width, height, bitrate, fps)?)),
             _ => return Err(VideoError::Unsupported),
         };
@@ -96,7 +108,7 @@ impl VideoEncoder {
             params: None,
         })
     }
-    fn h264(bitrate: u32, fps: u8) -> Result<openh264::encoder::Encoder, VideoError> {
+    fn new_h264(bitrate: u32, fps: u8) -> Result<openh264::encoder::Encoder, VideoError> {
         use openh264::encoder::*;
         let config = EncoderConfig::new()
             .bitrate(BitRate::from_bps(bitrate.saturating_mul(1000)))
@@ -123,7 +135,7 @@ impl VideoEncoder {
     }
     pub fn request_keyframe(&mut self) {
         if let Some(e) = &mut self.h264 {
-            e.force_intra_frame();
+            e.encoder.force_intra_frame();
         }
         if let Some(e) = &mut self.av1 {
             e.request_keyframe();
@@ -134,7 +146,7 @@ impl VideoEncoder {
             return e.set_bitrate_kbps(bitrate);
         }
         if bitrate != self.bitrate {
-            self.h264 = Some(Self::h264(bitrate, self.fps)?);
+            self.h264.as_mut().unwrap().encoder = Self::new_h264(bitrate, self.fps)?;
             self.bitrate = bitrate;
         }
         Ok(())
@@ -157,14 +169,13 @@ impl VideoEncoder {
         if let Some(e) = &mut self.av1 {
             return e.encode_bgra(bgra, pts_us);
         }
-        let rgb: Vec<u8> = bgra
-            .chunks_exact(4)
-            .flat_map(|p| [p[2], p[1], p[0]])
-            .collect();
-        let yuv = openh264::formats::YUVBuffer::from_rgb_source(
-            openh264::formats::RgbSliceU8::new(&rgb, (self.width, self.height)),
-        );
-        let data = self.h264.as_mut().unwrap().encode(&yuv)?.to_vec();
+        let h264 = self.h264.as_mut().unwrap();
+        let pixels = openh264::formats::BgraSliceU8::new(bgra, (self.width, self.height));
+        let yuv = h264
+            .yuv
+            .get_or_insert_with(|| openh264::formats::YUVBuffer::new(self.width, self.height));
+        yuv.read_bgra8(pixels);
+        let data = h264.encoder.encode(yuv)?.to_vec();
         if data.is_empty() {
             return Ok(vec![]);
         }

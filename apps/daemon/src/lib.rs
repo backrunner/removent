@@ -13,7 +13,10 @@ pub mod hostmgr;
 pub mod login_window;
 #[cfg(target_os = "macos")]
 pub mod power;
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+#[path = "power_windows.rs"]
+pub mod power;
+#[cfg(not(any(target_os = "macos", windows)))]
 #[path = "power_portable.rs"]
 pub mod power;
 pub mod server;

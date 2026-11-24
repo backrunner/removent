@@ -56,6 +56,7 @@ impl RecoveryBudget {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run(
     mut display: DisplayInfo,
+    display_awake: &mut super::display::DisplayAwake,
     legacy: bool,
     quality: removent_proto::VideoQuality,
     fps: u8,
@@ -65,7 +66,6 @@ pub(super) async fn run(
     cancel: CancellationToken,
 ) -> Result<(), CaptureError> {
     let mut budget = RecoveryBudget::default();
-    let mut _wake_guard = super::display::DisplayAwake::new();
     loop {
         if cancel.is_cancelled() {
             return Ok(());
@@ -149,7 +149,7 @@ pub(super) async fn run(
             return Err(error);
         }
         tracing::warn!(%error, attempt = budget.failures, "rebuilding capture stream");
-        _wake_guard = super::display::DisplayAwake::new();
+        *display_awake = super::display::DisplayAwake::new();
         tokio::select! {
             biased;
             _ = cancel.cancelled() => return Ok(()),

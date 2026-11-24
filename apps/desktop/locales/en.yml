@@ -21,7 +21,7 @@ settings.system_update_required: "The system service needs an update. Update app
 settings.system_approval_hint: "Pre-login access uses macOS account authentication. These devices have separate approval; update it here after changing trusted devices."
 settings.prevent_idle_sleep: "Prevent idle sleep while the background service runs"
 settings.prevent_idle_sleep_hint: "The display can still turn off. Stopping the service restores normal sleep behavior"
-settings.power_active: "Idle system sleep is prevented"
+settings.power_active: "Idle sleep prevention requested"
 settings.power_pending: "Waiting for the background service to apply this setting"
 settings.power_failed: "Could not prevent sleep. Toggle this option again and check the service logs"
 

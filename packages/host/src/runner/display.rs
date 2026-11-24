@@ -163,9 +163,35 @@ mod tests {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+mod windows {
+    use removent_core::windows_power::{PowerRequest, wake_display};
+
+    pub(in crate::runner) struct DisplayAwake {
+        _request: Option<PowerRequest>,
+    }
+
+    impl DisplayAwake {
+        pub(in crate::runner) fn new() -> Self {
+            let request = PowerRequest::keep_display_awake("Removent remote desktop capture")
+                .inspect_err(
+                    |error| tracing::warn!(%error, "could not retain awake capture display"),
+                )
+                .ok();
+            if let Err(error) = wake_display() {
+                tracing::warn!(%error, "could not wake capture display");
+            }
+            Self { _request: request }
+        }
+    }
+}
+
+#[cfg(windows)]
+pub(super) use windows::DisplayAwake;
+
+#[cfg(not(any(target_os = "macos", windows)))]
 pub(super) struct DisplayAwake;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 impl DisplayAwake {
     pub(super) fn new() -> Self {
         Self

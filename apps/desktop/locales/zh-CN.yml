@@ -21,7 +21,7 @@ settings.system_update_required: "系统服务需要更新，点击更新授权�
 settings.system_approval_hint: "登录前使用 macOS 账户认证。此处列出的设备具有独立授权，修改可信设备后需在此更新。"
 settings.prevent_idle_sleep: "后台服务运行时防止电脑自动休眠"
 settings.prevent_idle_sleep_hint: "显示器仍可关闭，停止后台服务后恢复系统设置"
-settings.power_active: "已阻止电脑自动休眠"
+settings.power_active: "已请求系统防止自动休眠"
 settings.power_pending: "等待后台服务应用设置"
 settings.power_failed: "未能阻止自动休眠，请重新开关此选项并查看后台服务日志"
 

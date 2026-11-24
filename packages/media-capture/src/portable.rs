@@ -1,13 +1,14 @@
 //! Bounded, cancellable CPU capture for Windows and Linux X11 desktops.
 use crate::{CapturedVideoFrame, health::CaptureHealth};
 use std::{
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, mpsc};
+
+// The host can serve one native and one VNC session. Reserve one additional
+// worker for recovery because an in-progress OS capture call cannot be cancelled.
+static CAPTURE_WORKERS: Semaphore = Semaphore::const_new(3);
 #[derive(Debug, thiserror::Error)]
 pub enum CaptureError {
     #[error("screen capture: {0}")]
@@ -22,13 +23,13 @@ pub struct AudioFrame {
     pub pts_micros: i64,
 }
 pub struct SckCapture {
-    stop: Arc<AtomicBool>,
+    stop: Arc<Mutex<bool>>,
     stopped: Option<mpsc::Receiver<CaptureError>>,
     health: Arc<Mutex<CaptureHealth>>,
 }
 impl Drop for SckCapture {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
+        *self.stop.lock().unwrap() = true;
     }
 }
 impl SckCapture {
@@ -70,8 +71,11 @@ pub fn start_remote_capture(
             "invalid capture dimensions or frame rate".into(),
         ));
     }
-    let stop = Arc::new(AtomicBool::new(false));
-    let health = Arc::new(Mutex::new(CaptureHealth::default()));
+    let stop = Arc::new(Mutex::new(false));
+    let worker_slot = CAPTURE_WORKERS
+        .try_acquire()
+        .map_err(|_| CaptureError::Sc("desktop capture workers are still busy".into()))?;
+    let health = Arc::new(Mutex::new(CaptureHealth::polling(Instant::now())));
     let (tx, rx) = mpsc::channel(1);
     let cancel = stop.clone();
     let worker_health = health.clone();
@@ -79,6 +83,7 @@ pub fn start_remote_capture(
     std::thread::Builder::new()
         .name("desktop-capture".into())
         .spawn(move || {
+            let _worker_slot = worker_slot;
             let monitor = match xcap::Monitor::all()
                 .map_err(|e| CaptureError::Sc(e.to_string()))
                 .and_then(|monitors| {
@@ -95,7 +100,10 @@ pub fn start_remote_capture(
             };
             let start = Instant::now();
             let interval = Duration::from_secs_f64(1. / f64::from(fps.min(30)));
-            while !cancel.load(Ordering::Relaxed) {
+            loop {
+                if *cancel.lock().unwrap() {
+                    break;
+                }
                 let tick = Instant::now();
                 let image = match monitor.capture_image() {
                     Ok(image) => image,
@@ -120,13 +128,15 @@ pub fn start_remote_capture(
                     start.elapsed().as_micros() as i64,
                 );
                 frame.generation = generation;
-                if cancel.load(Ordering::Relaxed) {
-                    break;
+                {
+                    // Publish under the same lock as Drop so a late frame
+                    // cannot overwrite the replacement capture's generation.
+                    let stopped = cancel.lock().unwrap();
+                    if *stopped || video.send(frame).is_err() {
+                        break;
+                    }
+                    worker_health.lock().unwrap().frame();
                 }
-                if video.send(frame).is_err() {
-                    break;
-                }
-                worker_health.lock().unwrap().frame();
                 std::thread::sleep(interval.saturating_sub(tick.elapsed()));
             }
         })

@@ -2,6 +2,7 @@ use super::*;
 use gpui::{AnyView, TestAppContext};
 
 mod authentication;
+#[cfg(any(target_os = "macos", windows))]
 mod power;
 mod sessions;
 #[cfg(target_os = "macos")]

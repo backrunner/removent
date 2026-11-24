@@ -5,6 +5,7 @@ pub struct CaptureHealth {
     started: Instant,
     has_frame: bool,
     unavailable_since: Option<Instant>,
+    last_poll_frame: Option<Instant>,
 }
 
 impl Default for CaptureHealth {
@@ -19,13 +20,26 @@ impl CaptureHealth {
             started: now,
             has_frame: false,
             unavailable_since: None,
+            last_poll_frame: None,
         }
     }
+
+    #[cfg(any(not(target_vendor = "apple"), test))]
+    pub(crate) fn polling(now: Instant) -> Self {
+        Self {
+            last_poll_frame: Some(now),
+            ..Self::new(now)
+        }
+    }
+
     /// Returns true for the first usable frame of this capture instance.
     pub fn frame(&mut self) -> bool {
         let first = !self.has_frame;
         self.has_frame = true;
         self.unavailable_since = None;
+        if let Some(last) = &mut self.last_poll_frame {
+            *last = Instant::now();
+        }
         first
     }
     pub fn unavailable(&mut self, now: Instant) {
@@ -39,6 +53,11 @@ impl CaptureHealth {
             .is_some_and(|t| now.duration_since(t) >= Duration::from_secs(2))
         {
             Some("capture remains blank or suspended")
+        } else if self
+            .last_poll_frame
+            .is_some_and(|t| now.duration_since(t) >= Duration::from_secs(5))
+        {
+            Some("desktop capture worker stopped producing frames")
         } else {
             None
         }
@@ -68,5 +87,17 @@ mod tests {
         assert!(health.failure(now + Duration::from_secs(2)).is_some());
         health.frame();
         assert!(health.failure(now + Duration::from_secs(10)).is_none());
+    }
+
+    #[test]
+    fn polling_capture_detects_a_stall_after_its_first_frame() {
+        let mut health = CaptureHealth::polling(Instant::now());
+        health.frame();
+        let last = health.last_poll_frame.unwrap();
+        assert!(health.failure(last + Duration::from_secs(4)).is_none());
+        assert_eq!(
+            health.failure(last + Duration::from_secs(5)),
+            Some("desktop capture worker stopped producing frames")
+        );
     }
 }

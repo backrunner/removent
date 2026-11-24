@@ -21,6 +21,8 @@ pub mod settings;
 #[cfg(target_os = "macos")]
 pub mod system_service;
 pub mod update_gate;
+#[cfg(windows)]
+pub mod windows_power;
 
 pub use adapt::{AdaptationController, QualityState, Sample};
 pub use clip::{

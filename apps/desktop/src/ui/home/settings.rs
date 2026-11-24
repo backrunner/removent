@@ -2,6 +2,7 @@ use super::*;
 
 mod appearance;
 mod otp;
+#[cfg(any(target_os = "macos", windows))]
 mod power;
 mod security;
 mod startup;
@@ -449,15 +450,16 @@ impl HomeView {
                 content = content.child(self.render_cloud_sync(cx));
             }
             _ => {
-                content = content
+                let system = content
                     .child(header(
                         "info",
                         "settings.system",
                         "settings.system_description",
                     ))
-                    .child(self.render_update_section(window, cx))
-                    .child(self.render_power_settings(cx))
-                    .child(
+                    .child(self.render_update_section(window, cx));
+                #[cfg(any(target_os = "macos", windows))]
+                let system = system.child(self.render_power_settings(cx));
+                content = system.child(
                         form_group(cx).child(
                             row()
                                 .child(setting_label(

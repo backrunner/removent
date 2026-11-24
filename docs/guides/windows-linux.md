@@ -31,6 +31,15 @@ firewall on networks where incoming native connections are needed.
 Usernames may be local names, `DOMAIN\name`, or a domain UPN. An explicit domain
 such as `MicrosoftAccount\email@example.com` is preserved during authentication.
 
+Once a Windows host admits a native session, it requests that the display turn
+on and that Windows keep the display and system awake during capture. The host
+releases the request when the session ends. For unattended access, you can also
+enable idle-sleep prevention in System settings. The background request lets
+the display turn off. This setting is off by default. Windows can override
+power requests when the user chooses Sleep or the device runs on battery under
+Modern Standby. Use [Wake-on-LAN](wake-on-lan.md) if the computer is already
+asleep and its hardware and power state support network wake.
+
 Linux hosting currently requires an X11 session. Wayland hosting fails with an
 explicit error because portal-authorized capture/input sessions are not yet
 implemented. The controller may run under X11 or Wayland. A desktop shell with
@@ -57,8 +66,9 @@ the OpenGL software renderer to avoid black Vulkan frames on older Mesa.
 H.264 and AV1 use CPU codecs. New macOS hosts select H.264 when a Windows/Linux
 controller advertises that HEVC is unavailable; older macOS releases that always
 select HEVC need updating. System audio capture, pre-login access, native
-Computer Use, idle-sleep prevention, and automatic package installation are not
-implemented on these platforms. Text clipboard sharing is supported. Do not infer feature support
+Computer Use and automatic package installation are not implemented on these
+platforms. The background idle-sleep setting is available on Windows. Text
+clipboard sharing is supported. Do not infer feature support
 from a successful build; see [the validation report](../validation/windows-linux-2026-11-13.md) for tested scenarios.
 
 Data lives under `%LOCALAPPDATA%/Removent/userdata` on Windows and

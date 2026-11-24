@@ -282,6 +282,9 @@ pub(super) async fn run_connection(
 
     if let Err(error) = super::capture::run(
         display,
+        display_awake
+            .as_mut()
+            .expect("admitted session has a display guard"),
         ctx.settings.window_server_capture,
         established.video_quality.unwrap_or_default(),
         established.ack.video.max_fps,

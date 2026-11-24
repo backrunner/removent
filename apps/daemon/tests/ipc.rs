@@ -270,7 +270,7 @@ async fn admission_reply_resolves() {
 }
 
 #[tokio::test]
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 async fn power_policy_applies_over_ipc_without_restarting_active_sharing() {
     let d = spawn_daemon_with(None).await;
     let mut host_changes = d.state.enabled_watch.subscribe();

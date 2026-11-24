@@ -43,12 +43,23 @@ pub(crate) struct Sender {
     tx: mpsc::Sender<Bytes>,
     pub stop: CancellationToken,
 }
+
 impl Sender {
-    pub async fn raw(&self, packet: Bytes) -> Result<()> {
+    fn acknowledge(&self, bytes: Bytes) -> Result<()> {
+        self.tx
+            .try_send(bytes)
+            .map_err(|_| anyhow::anyhow!("Could not enqueue relay registration acknowledgement"))
+    }
+
+    /// One blocked controller must not hold up forwarding from the host to
+    /// other routes. The inner QUIC connection recovers dropped datagrams.
+    fn try_forward(&self, bytes: Bytes) -> bool {
+        !self.stop.is_cancelled() && self.tx.try_send(bytes).is_ok()
+    }
+    async fn raw(&self, bytes: Bytes) -> Result<()> {
         ensure!(!self.stop.is_cancelled(), "WebSocket relay disconnected");
-        // Bound both memory and queuing delay; inner QUIC recovers dropped UDP.
         if let Ok(result) =
-            tokio::time::timeout(Duration::from_millis(50), self.tx.send(packet)).await
+            tokio::time::timeout(Duration::from_millis(50), self.tx.send(bytes)).await
         {
             result.map_err(|_| anyhow::anyhow!("WebSocket relay disconnected"))?;
         }
@@ -185,6 +196,60 @@ async fn pump<S: AsyncRead + AsyncWrite + Unpin>(
 mod tests {
     use super::*;
     use tokio_tungstenite::tungstenite::protocol::Role;
+
+    #[test]
+    fn full_destination_queue_never_blocks_other_routes() {
+        let (tx, mut slow) = mpsc::channel(QUEUE);
+        let sender = Sender {
+            tx,
+            stop: CancellationToken::new(),
+        };
+        let (tx, mut healthy) = mpsc::channel(QUEUE);
+        let other = Sender {
+            tx,
+            stop: CancellationToken::new(),
+        };
+        let ack = Bytes::from_static(&[0; 8]);
+        sender.acknowledge(ack.clone()).unwrap();
+        for _ in 1..QUEUE {
+            assert!(sender.try_forward(Bytes::from_static(b"pending")));
+        }
+        assert!(!sender.try_forward(Bytes::from_static(b"overflow")));
+        assert!(other.try_forward(Bytes::from_static(b"forwarded")));
+        assert_eq!(healthy.try_recv().unwrap(), b"forwarded"[..]);
+        assert_eq!(slow.try_recv().unwrap(), ack);
+    }
+
+    #[tokio::test]
+    async fn writer_sends_acknowledgement_before_routed_datagrams() {
+        let (a, b) = tokio::io::duplex(4096);
+        let a = WebSocketStream::from_raw_socket(a, Role::Server, Some(limits())).await;
+        let mut peer = WebSocketStream::from_raw_socket(b, Role::Client, Some(limits())).await;
+        let tunnel = Tunnel::start(a, 1);
+        tunnel
+            .sender
+            .acknowledge(Bytes::from_static(b"ack"))
+            .unwrap();
+        for packet in [b"first".as_slice(), b"second"] {
+            assert!(tunnel.sender.try_forward(Bytes::copy_from_slice(packet)));
+        }
+        tokio::time::timeout(Duration::from_secs(1), async {
+            for expected in [b"ack".as_slice(), b"first", b"second"] {
+                loop {
+                    match peer.next().await.unwrap().unwrap() {
+                        Message::Ping(_) => {}
+                        Message::Binary(bytes) => {
+                            assert_eq!(&bytes[..], expected);
+                            break;
+                        }
+                        frame => panic!("Unexpected WebSocket frame: {frame:?}"),
+                    }
+                }
+            }
+        })
+        .await
+        .unwrap();
+    }
 
     #[tokio::test]
     async fn blocked_downstream_write_does_not_block_upstream_input() {

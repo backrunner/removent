@@ -210,6 +210,7 @@ async fn forward(reg: &Registration, rate: u64) -> Result<()> {
     let host = reg.room.routes.lock().unwrap().host.clone();
     loop {
         let packet = reg.conn.read_datagram().await?;
+        tokio::task::consume_budget().await;
         if packet.len() > wire::MAX_PACKET + wire::HEADER || !budget.allow(packet.len()) {
             continue;
         }
@@ -226,9 +227,9 @@ async fn forward(reg: &Registration, rate: u64) -> Result<()> {
             Role::Host => reg.room.routes.lock().unwrap().clients.get(&id).cloned(),
         };
         if let Some(target) = target {
-            // Bytes is reference counted. No decoding, transcoding, per-packet
-            // task, or application payload copy on the relay's data path.
-            let _ = wire::forward(&target, packet).await;
+            // Quinn's per-peer queue evicts old unsent datagrams when full.
+            // Waiting for space here would stall the other routes of a host.
+            let _ = target.send_datagram(packet);
         }
     }
 }

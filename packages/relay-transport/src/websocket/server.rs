@@ -79,6 +79,7 @@ fn register(
         match role {
             Role::Host => {
                 ensure!(routes.host.is_none(), "Host already online");
+                sender.acknowledge(Bytes::from_static(&[0; 8]))?;
                 routes.host = Some(sender.clone());
                 routes.pairing = pairing;
                 0
@@ -98,6 +99,11 @@ fn register(
                 while id == 0 || routes.clients.contains_key(&id) {
                     id = rand::random();
                 }
+                let mut ack = id.to_be_bytes().to_vec();
+                if requested_room.starts_with("pair-") {
+                    ack.extend_from_slice(room.name.as_bytes());
+                }
+                sender.acknowledge(Bytes::from(ack))?;
                 routes.clients.insert(id, sender.clone());
                 id
             }
@@ -372,12 +378,6 @@ async fn connection(
         &requested_room,
     )?;
     drop(pending_guard);
-    tunnel.route = reg.id;
-    let mut ack = reg.id.to_be_bytes().to_vec();
-    if role == Role::Client && requested_room.starts_with("pair-") {
-        ack.extend_from_slice(reg.room.name.as_bytes());
-    }
-    tunnel.sender.raw(Bytes::from(ack)).await?;
     let mut budget = Budget::new(config.max_bytes_per_second);
     loop {
         let packet = tunnel.receive().await?;
@@ -387,18 +387,24 @@ async fn connection(
         let Some((id, _)) = parse_packet(&packet) else {
             continue;
         };
-        let target = {
+        let (target, multiplexed) = {
             let routes = reg.room.routes.lock().unwrap();
             match reg.role {
                 Role::Client => {
                     ensure!(id == reg.id, "Invalid route");
-                    routes.host.clone()
+                    (routes.host.clone(), false)
                 }
-                Role::Host => routes.clients.get(&id).cloned(),
+                Role::Host => (routes.clients.get(&id).cloned(), routes.clients.len() > 1),
             }
         };
         if let Some(target) = target {
-            let _ = target.raw(packet).await;
+            if multiplexed {
+                target.try_forward(packet);
+            } else {
+                // Brief backpressure avoids unnecessary loss when this
+                // forwarding loop is dedicated to just one destination.
+                let _ = target.raw(packet).await;
+            }
         }
     }
 }
